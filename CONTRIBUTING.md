@@ -1,6 +1,6 @@
-# Contributing to Lume
+# Contributing to TSX-LVGL
 
-Lume uses an issue-first workflow. A feature starts as a GitHub issue, the issue is the work item, and the pull request closes it only after its acceptance criteria are evidenced.
+TSX-LVGL uses an issue-first workflow. A feature starts as a GitHub issue, the issue is the work item, and the pull request closes it only after its acceptance criteria are evidenced.
 
 ## Feature workflow
 

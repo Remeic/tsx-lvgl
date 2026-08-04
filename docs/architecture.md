@@ -4,7 +4,7 @@ Status: accepted for the first implementation slice.
 
 ## Core decision
 
-Lume runs TypeScript/TSX on the development machine and emits native LVGL 9 C. The ESP32 receives no JavaScript runtime, React Fiber tree or dynamic module loader.
+TSX-LVGL runs TypeScript/TSX on the development machine and emits native LVGL 9 C. The ESP32 receives no JavaScript runtime, React Fiber tree or dynamic module loader.
 
 This preserves the useful part of the React idea—composition, declarative trees and typed props—without pretending that arbitrary browser React semantics can be compiled to a deterministic microcontroller firmware.
 

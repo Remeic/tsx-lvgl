@@ -1,5 +1,5 @@
 {
-  "name": "lume-tsx-lvgl",
+  "name": "tsx-lvgl",
   "version": "0.1.0",
   "private": true,
   "description": "Typed TSX interfaces compiled to native LVGL for small screens",

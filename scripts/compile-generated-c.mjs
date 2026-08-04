@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { compileProject } from "../packages/compiler/dist/index.js";
 import { Button, Screen, Text } from "../packages/core/dist/index.js";
 
-const directory = await mkdtemp(join(tmpdir(), "lume-generated-c-"));
+const directory = await mkdtemp(join(tmpdir(), "tsx-lvgl-generated-c-"));
 const sourcePath = join(directory, "ui.c");
 const headerPath = join(directory, "lvgl.h");
 

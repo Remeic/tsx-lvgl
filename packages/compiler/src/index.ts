@@ -1,15 +1,15 @@
-import { emitLvgl } from "@lume/lvgl-emitter";
-import type { LumeComponent, UiNode } from "@lume/core";
+import { emitLvgl } from "@tsx-lvgl/lvgl-emitter";
+import type { TsxLvglComponent, UiNode } from "@tsx-lvgl/core";
 
 export interface CompileConfig {
-  readonly root: LumeComponent;
+  readonly root: TsxLvglComponent;
   readonly projectName?: string;
 }
 
 export interface BuildArtifacts {
   readonly files: Readonly<Record<string, string>>;
   readonly manifest: {
-    readonly format: "lume-build-artifacts-v0";
+    readonly format: "tsx-lvgl-build-artifacts-v0";
     readonly projectName: string;
     readonly source: "tsx";
     readonly target: "lvgl9-c";
@@ -23,7 +23,7 @@ export interface BuildArtifacts {
  * roots pure and pin their tool/environment inputs for reproducible builds.
  */
 export function compileProject(config: CompileConfig): BuildArtifacts {
-  const projectName = config.projectName ?? "lume-project";
+  const projectName = config.projectName ?? "tsx-lvgl-project";
   const first = compileRoot(config.root({}), projectName);
   const second = compileRoot(config.root({}), projectName);
   if (first.files["generated/ui.c"] !== second.files["generated/ui.c"]) {
@@ -36,7 +36,7 @@ function compileRoot(root: UiNode, projectName: string): BuildArtifacts {
   const uiC = emitLvgl(root);
 
   const manifest = {
-    format: "lume-build-artifacts-v0" as const,
+    format: "tsx-lvgl-build-artifacts-v0" as const,
     projectName,
     source: "tsx" as const,
     target: "lvgl9-c" as const,

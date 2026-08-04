@@ -1,9 +1,9 @@
-/** @jsxImportSource @lume/core */
+/** @jsxImportSource @tsx-lvgl/core */
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { compileProject } from "@lume/compiler";
-import { Button, Screen, Text, View, normalizeChildren, type UiNode } from "@lume/core";
+import { compileProject } from "@tsx-lvgl/compiler";
+import { Button, Screen, Text, View, normalizeChildren, type UiNode } from "@tsx-lvgl/core";
 
 function Counter(): UiNode {
   return (
@@ -26,7 +26,7 @@ test("compiles a TSX tree into deterministic LVGL C", () => {
     first.files["generated/ui.c"],
     `#include "lvgl.h"
 
-void lume_ui_create(void)
+void tsx_lvgl_ui_create(void)
 {
     lv_obj_t *root = lv_screen_active();
     lv_obj_t *root_0 = lv_label_create(root);
@@ -35,14 +35,14 @@ void lume_ui_create(void)
     lv_obj_t *root_1_0 = lv_button_create(root_1);
     lv_obj_t *root_1_0_label = lv_label_create(root_1_0);
     lv_label_set_text(root_1_0_label, "+");
-    /* Lume action: increment */
+    /* TSX-LVGL action: increment */
 }
 `,
   );
   assert.equal(
     first.files["generated/manifest.json"],
     `{
-  "format": "lume-build-artifacts-v0",
+  "format": "tsx-lvgl-build-artifacts-v0",
   "projectName": "counter",
   "source": "tsx",
   "target": "lvgl9-c"
@@ -60,7 +60,7 @@ test("escapes C string literals", () => {
   assert.match(result.files["generated/ui.c"] ?? "", /quote \\" and slash \\\\/);
   assert.match(result.files["generated/ui.c"] ?? "", /and\\nnewline\\r\\t\\000\\001\\b\\f\\v\\177/);
   assert.ok((result.files["generated/ui.c"] ?? "").includes("trigraph \\?\\?/ \\?\\?="));
-  assert.match(result.files["generated/ui.c"] ?? "", /lume_ui_create/);
+  assert.match(result.files["generated/ui.c"] ?? "", /tsx_lvgl_ui_create/);
 });
 
 test("uses a stable default project name", () => {
@@ -69,8 +69,8 @@ test("uses a stable default project name", () => {
   }
 
   const result = compileProject({ root: DefaultProject });
-  assert.equal(result.manifest.projectName, "lume-project");
-  assert.match(result.files["generated/manifest.json"] ?? "", /"projectName": "lume-project"/);
+  assert.equal(result.manifest.projectName, "tsx-lvgl-project");
+  assert.match(result.files["generated/manifest.json"] ?? "", /"projectName": "tsx-lvgl-project"/);
 });
 
 test("rejects a root component that changes between evaluations", () => {

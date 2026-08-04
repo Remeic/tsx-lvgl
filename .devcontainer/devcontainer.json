@@ -1,5 +1,5 @@
 {
-  "name": "Lume ESP32 development",
+  "name": "TSX-LVGL ESP32 development",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."

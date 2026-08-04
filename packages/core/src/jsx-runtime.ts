@@ -4,7 +4,7 @@ import {
   type Child,
   type ElementType,
   type FragmentProps,
-  type LumeComponent,
+  type TsxLvglComponent,
   type UiNode,
 } from "./index.js";
 
@@ -28,7 +28,7 @@ export function Fragment(props: FragmentProps): UiNode {
 }
 
 export function jsx(
-  type: ElementType | LumeComponent,
+  type: ElementType | TsxLvglComponent,
   props: Readonly<Record<string, unknown>> | null,
 ): UiNode {
   const input = props ?? {};

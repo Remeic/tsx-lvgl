@@ -11,7 +11,7 @@ export interface UiElement {
 
 export type UiNode = UiElement;
 
-export type LumeComponent<Props extends object = Record<string, unknown>> = (
+export type TsxLvglComponent<Props extends object = Record<string, unknown>> = (
   props: Props,
 ) => UiNode;
 
