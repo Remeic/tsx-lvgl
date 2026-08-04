@@ -24,9 +24,9 @@ flowchart LR
 
 - [ ] Consumers cannot construct or depend on the internal IR shape through the public package entry point.
 - [x] `@lume/lvgl-emitter` owns LVGL-specific lowering and has an exhaustive unsupported-node diagnostic.
-- [ ] Compiler tests exercise the emitter through its public seam, not private object mutation.
+- [x] Compiler tests exercise the emitter through the compiler public seam, not private object mutation.
 - [ ] Adding a second target does not require changing TSX authoring types.
-- [ ] Mutation scope includes the deterministic IR and emitter modules.
+- [x] Mutation scope includes the deterministic compiler and emitter modules.
 
 ## Test plan
 

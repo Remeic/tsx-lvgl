@@ -28,7 +28,7 @@ flowchart TD
 - [x] The generic raw dump/write commands are explicitly limited to confirmed unencrypted/unrestricted boards.
 - [x] Restricted states have a hard stop and named evidence required before any write.
 - [ ] Recovery tests record identity, security state, dump hashes and post-restore cold boot.
-- [ ] No recovery command burns eFuses, erases first or uses `--force`.
+- [x] No recovery command burns eFuses, erases first or uses `--force`.
 
 ## Test plan
 

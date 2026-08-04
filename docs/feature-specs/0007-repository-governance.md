@@ -24,7 +24,7 @@ flowchart LR
 - [ ] `main` requires a pull request and the required CI checks before merge.
 - [x] CI actions are pinned to reviewed immutable commit SHAs.
 - [x] Mutation reports are uploaded with the commit SHA.
-- [ ] The contribution docs state the protected-branch and evidence contract.
+- [x] The contribution docs state the protected-branch and evidence contract.
 
 ## Test plan
 
