@@ -25,11 +25,11 @@ flowchart LR
 
 - [ ] `.devcontainer` or an equivalent pinned container image contains Node, ESP-IDF, QEMU, CMake/Ninja, Python tools and simulator dependencies.
 - [ ] `./tools/dev test`, `./tools/dev mutation`, `./tools/dev qemu` and `./tools/dev c-compile` work from a fresh clone after Docker Desktop installation.
-- [ ] Tool versions and image digest are recorded; no implicit `latest` tag is used.
+- [x] Tool versions and the built image ID are recorded; the base image uses an immutable digest and no implicit `latest` tag is used.
 - [ ] Host-only development remains possible as an optional fast path, not a second source of truth.
 - [ ] Physical flashing/serial access is documented as a separate, explicit host bridge with recovery safeguards.
-- [ ] CI uses the same container definition or proves an equivalent pinned environment.
+- [x] CI builds this exact container definition and runs the host/C checks inside it.
 
 ## Test plan
 
-Build the container from scratch on Apple Silicon and x86_64, run the full host/mutation/C/QEMU ladder, and record the exact image digest. Do not claim USB or panel parity from the container alone.
+The first CI slice builds the container on GitHub's x86_64 Linux runner, records the image ID and Node/npm/ESP-IDF versions, and runs `npm test` plus `npm run test:c` inside the image. Apple Silicon build evidence, the container mutation/QEMU ladder and the physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.
