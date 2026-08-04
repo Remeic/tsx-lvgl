@@ -24,7 +24,9 @@ const config = {
     break: 80,
   },
   timeoutMS: 5000,
-  concurrency: 2,
+  // A single mutation worker keeps TypeScript incremental diagnostics stable
+  // across clean runs; the extra wall time is preferable to drifting evidence.
+  concurrency: 1,
   cleanTempDir: true,
 };
 
