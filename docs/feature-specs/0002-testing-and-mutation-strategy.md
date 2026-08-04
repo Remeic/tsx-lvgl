@@ -29,7 +29,7 @@ flowchart TD
 | --- | --- | --- |
 | TypeScript public-interface tests | Core and compiler behavior through public seams | Every change |
 | Property/golden tests | IR and generated output invariants | Every compiler feature |
-| Stryker mutation tests | Tests detect realistic changes in core/compiler | Every milestone; PR on scoped changes when fast |
+| Stryker mutation tests | Tests detect realistic changes in core/compiler/emitter | Every milestone; PR on scoped changes when fast |
 | Generated C compile | Emitter output is syntactically and API compatible | Every emitter change |
 | LVGL SDL screenshots | Layout and visual behavior without hardware | Every visual change |
 | ESP-IDF build matrix | Board adapter and generated artifact integrate cleanly | Every board/runtime change |
@@ -39,16 +39,16 @@ flowchart TD
 
 ## Mutation policy
 
-Stryker mutates `packages/core` and `packages/compiler`, where behavior is deterministic and tests can kill mutants quickly. We do not mutate vendor drivers, generated C, hardware timing or the physical board: those require compile, simulator, serial and hardware evidence instead.
+Stryker mutates `packages/core`, `packages/compiler` and `packages/lvgl-emitter`, where behavior is deterministic and tests can kill mutants quickly. We do not mutate vendor drivers, generated C, hardware timing or the physical board: those require compile, simulator, serial and hardware evidence instead.
 
 The first configuration uses Stryker's command runner because the repository currently uses Node's built-in test runner. The `mutation` script prebuilds workspace declarations before Stryker initializes its TypeScript checker; its sandbox then runs a lockfile installation before building so workspace package links resolve inside the mutated copy. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner (for example Vitest) as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
-The current deterministic baseline is 100% with zero surviving mutants across 201 generated mutants and blocks below 80% (`break: 80`). The exact killed/CompileError classification is recorded in the SHA-bound JSON artifact rather than prose, because TypeScript diagnostic classification can vary by tool-process timing even when the score and survivor set are stable. The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
+The current deterministic baseline is 100% with zero surviving mutants across 315 generated mutants and blocks below 80% (`break: 80`). The exact killed/CompileError classification is recorded in the SHA-bound JSON artifact rather than prose, because TypeScript diagnostic classification can vary by tool-process timing even when the score and survivor set are stable. The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
 
 ## Acceptance criteria
 
 - [ ] Public interfaces and test seams are documented before each new test slice.
-- [ ] Stryker runs against only deterministic core/compiler source.
+- [x] Stryker runs against only deterministic core/compiler/emitter source.
 - [ ] TypeScript checker rejects mutants that cannot compile.
 - [ ] Mutation report is reproducible with the lockfile and Node 24.19.0.
 - [ ] The baseline mutation score is recorded with surviving mutants triaged.

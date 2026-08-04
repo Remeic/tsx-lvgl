@@ -14,6 +14,7 @@ try {
     root: () => Screen({
       children: [
         Text({ text: "host compile" }),
+        Text({ text: "trigraph ??/ ??= ??' ??( ??) ??! ??< ??> ??-" }),
         Button({ label: "ok", action: "confirm" }),
       ],
     }),

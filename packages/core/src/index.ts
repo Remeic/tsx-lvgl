@@ -66,17 +66,31 @@ export function element(
 }
 
 export function normalizeChildren(children: readonly Child[]): readonly UiNode[] {
+  return normalizeChildrenAt(children, "children");
+}
+
+function normalizeChildrenAt(children: readonly Child[], path: string): readonly UiNode[] {
   const normalized: UiNode[] = [];
-  for (const child of children) {
+  for (const [index, child] of children.entries()) {
     if (Array.isArray(child)) {
-      normalized.push(...normalizeChildren(child));
+      normalized.push(...normalizeChildrenAt(child, `${path}[${index}]`));
       continue;
     }
     if (isUiNode(child)) normalized.push(child);
+    else if (isRecord(child)) throw new Error(`Invalid child at ${path}[${index}]`);
   }
   return normalized;
 }
 
 function isUiNode(value: unknown): value is UiNode {
-  return typeof value === "object" && value !== null && "kind" in value;
+  if (!isRecord(value) || value.kind !== "element" || !isElementType(value.type)) return false;
+  return isRecord(value.props) && Array.isArray(value.children);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isElementType(value: unknown): value is ElementType {
+  return value === "Screen" || value === "View" || value === "Text" || value === "Button" || value === "Fragment";
 }
