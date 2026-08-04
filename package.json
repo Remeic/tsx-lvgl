@@ -16,7 +16,7 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
     "test": "npm run build && node --test test-dist/tests/compiler.test.js",
-    "mutation": "stryker run",
+    "mutation": "npm run build && stryker run",
     "clean": "tsc -b --clean && rm -rf test-dist",
     "setup-hooks": "node scripts/install-git-hooks.mjs",
     "prepare": "npm run setup-hooks"
