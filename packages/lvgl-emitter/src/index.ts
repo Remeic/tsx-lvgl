@@ -23,13 +23,63 @@ function validateNode(node: UiNode, path: string): asserts node is UiElement {
   if (!isRecord(node) || node.kind !== "element") {
     throw new Error(`Unsupported node at ${path}`);
   }
+  if (!isElementType(node.type)) {
+    throw new Error(`Unsupported node type at ${path}.type`);
+  }
   if (!isRecord(node.props)) {
     throw new Error(`Invalid props at ${path}.props`);
   }
   if (!Array.isArray(node.children)) {
     throw new Error(`Invalid children at ${path}.children`);
   }
+  validateWidgetShape(node, path);
   node.children.forEach((child, index) => validateNode(child, `${path}.children[${index}]`));
+}
+
+function validateWidgetShape(node: UiElement, path: string): void {
+  switch (node.type) {
+    case "Screen":
+    case "View":
+    case "Fragment":
+      rejectUnexpectedProps(node.props, path);
+      return;
+    case "Text":
+      requireProps(node.props, ["text"], path);
+      asString(node.props.text, `${path}.text`);
+      rejectChildren(node.children, path, node.type);
+      return;
+    case "Button":
+      requireProps(node.props, ["label", "action"], path);
+      asRequiredString(node.props.label, `${path}.label`);
+      asIdentifier(node.props.action, `${path}.action`);
+      rejectChildren(node.children, path, node.type);
+      return;
+  }
+}
+
+function requireProps(
+  props: Readonly<Record<string, unknown>>,
+  required: readonly string[],
+  path: string,
+): void {
+  const allowed = new Set(required);
+  const unexpected = Object.keys(props).find((key) => !allowed.has(key));
+  if (unexpected) {
+    throw new Error(`Invalid props at ${path}.props.${unexpected}`);
+  }
+}
+
+function rejectUnexpectedProps(props: Readonly<Record<string, unknown>>, path: string): void {
+  const unexpected = Object.keys(props)[0];
+  if (unexpected) {
+    throw new Error(`Invalid props at ${path}.props.${unexpected}`);
+  }
+}
+
+function rejectChildren(children: readonly UiNode[], path: string, type: string): void {
+  if (children.length > 0) {
+    throw new Error(`Invalid children at ${path}.children: ${type} does not accept children`);
+  }
 }
 
 function emitNode(node: UiElement, variable: string, parent: string, output: string[]): void {
@@ -43,14 +93,14 @@ function emitNode(node: UiElement, variable: string, parent: string, output: str
       node.children.forEach((child, index) => emitNode(child, `${variable}_${index}`, variable, output));
       return;
     case "Text": {
-      const text = asString(node.props.text, `${variable}.text`);
+      const text = String(node.props.text);
       output.push(`lv_obj_t *${variable} = lv_label_create(${parent});`);
       output.push(`lv_label_set_text(${variable}, ${quoteC(text)});`);
       return;
     }
     case "Button": {
-      const label = asString(node.props.label, `${variable}.label`);
-      const action = asIdentifier(node.props.action, `${variable}.action`);
+      const label = String(node.props.label);
+      const action = String(node.props.action);
       output.push(`lv_obj_t *${variable} = lv_button_create(${parent});`);
       output.push(`lv_obj_t *${variable}_label = lv_label_create(${variable});`);
       output.push(`lv_label_set_text(${variable}_label, ${quoteC(label)});`);
@@ -58,11 +108,14 @@ function emitNode(node: UiElement, variable: string, parent: string, output: str
       return;
     }
   }
-  throw new Error(`Unsupported node type at ${variable}.type`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isElementType(value: unknown): value is UiElement["type"] {
+  return value === "Screen" || value === "View" || value === "Text" || value === "Button" || value === "Fragment";
 }
 
 function asString(value: unknown, path: string): string {
@@ -70,8 +123,13 @@ function asString(value: unknown, path: string): string {
   throw new Error(`Expected string or number at ${path}`);
 }
 
+function asRequiredString(value: unknown, path: string): string {
+  if (typeof value === "string") return value;
+  throw new Error(`Expected string at ${path}`);
+}
+
 function asIdentifier(value: unknown, path: string): string {
-  const identifier = asString(value, path);
+  const identifier = asRequiredString(value, path);
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
     throw new Error(`Expected C identifier at ${path}`);
   }
@@ -87,6 +145,11 @@ function quoteC(value: string): string {
         break;
       case '"':
         quoted += '\\"';
+        break;
+      case "?":
+        // Escape question marks so C11 trigraph translation cannot rewrite
+        // an author-controlled literal before the string is parsed.
+        quoted += "\\?";
         break;
       case "\b":
         quoted += "\\b";

@@ -53,12 +53,13 @@ void lume_ui_create(void)
 
 test("escapes C string literals", () => {
   function Escaped(): UiNode {
-    return <Screen><Text text={'quote " and slash \\ and\nnewline\r\t\0\x01\b\f\v\x7f'} /></Screen>;
+    return <Screen><Text text={'quote " and slash \\ and\nnewline\r\t\0\x01\b\f\v\x7f and trigraph ??/ ??= ??\''} /></Screen>;
   }
 
   const result = compileProject({ root: Escaped });
   assert.match(result.files["generated/ui.c"] ?? "", /quote \\" and slash \\\\/);
   assert.match(result.files["generated/ui.c"] ?? "", /and\\nnewline\\r\\t\\000\\001\\b\\f\\v\\177/);
+  assert.ok((result.files["generated/ui.c"] ?? "").includes("trigraph \\?\\?/ \\?\\?="));
   assert.match(result.files["generated/ui.c"] ?? "", /lume_ui_create/);
 });
 
@@ -109,6 +110,59 @@ test("filters every non-node child through the public core interface", () => {
   assert.deepEqual(normalizeChildren([undefined]), []);
   assert.deepEqual(normalizeChildren([false]), []);
   assert.deepEqual(normalizeChildren(["not-a-node" as unknown as UiNode]), []);
+  assert.deepEqual(normalizeChildren([(() => "not-a-node") as unknown as UiNode]), []);
+});
+
+test("rejects object-shaped malformed children instead of dropping them", () => {
+  assert.throws(
+    () => normalizeChildren([{ kind: "not-an-element" } as unknown as UiNode]),
+    /Invalid child at children\[0\]/,
+  );
+  assert.throws(
+    () => normalizeChildren([[{ kind: "not-an-element" } as unknown as UiNode]]),
+    /Invalid child at children\[0\]\[0\]/,
+  );
+  assert.throws(
+    () => normalizeChildren([{
+      kind: "not-an-element",
+      type: "Text",
+      props: {},
+      children: [],
+    } as unknown as UiNode]),
+    /Invalid child at children\[0\]/,
+  );
+  assert.throws(
+    () => normalizeChildren([{
+      kind: "element",
+      type: "Text",
+      props: null,
+      children: [],
+    } as unknown as UiNode]),
+    /Invalid child at children\[0\]/,
+  );
+});
+
+test("recognizes every supported core node type and rejects unknown types", () => {
+  for (const type of ["Screen", "View", "Text", "Button", "Fragment"]) {
+    assert.equal(
+      normalizeChildren([{
+        kind: "element",
+        type,
+        props: {},
+        children: [],
+      } as unknown as UiNode]).length,
+      1,
+    );
+  }
+  assert.throws(
+    () => normalizeChildren([{
+      kind: "element",
+      type: "Unknown",
+      props: {},
+      children: [],
+    } as unknown as UiNode]),
+    /Invalid child at children\[0\]/,
+  );
 });
 
 test("compiles JSX fragments as transparent groups", () => {
@@ -129,7 +183,12 @@ test("rejects an invalid root node", () => {
 });
 
 test("rejects an invalid nested node with its structural path", () => {
-  const invalidNested = () => Screen({ children: [{ kind: "not-an-element" } as unknown as UiNode] });
+  const invalidNested = (() => ({
+    kind: "element",
+    type: "Screen",
+    props: {},
+    children: [{ kind: "not-an-element" }],
+  })) as unknown as () => UiNode;
   assert.throws(
     () => compileProject({ root: invalidNested }),
     /Unsupported node at root\.children\[0\]/,
@@ -150,17 +209,31 @@ test("rejects a non-text value for a text node", () => {
   );
 });
 
+test("rejects children on leaf widgets", () => {
+  const textWithChildren = (() => ({
+    kind: "element",
+    type: "Text",
+    props: { text: "parent" },
+    children: [Text({ text: "discarded" })],
+  })) as unknown as () => UiNode;
+
+  assert.throws(
+    () => compileProject({ root: textWithChildren }),
+    /Invalid children at root\.children: Text does not accept children/,
+  );
+});
+
 test("reports invalid button props at their public paths", () => {
   const invalidLabel = () => Button({ label: { unsupported: true } as unknown as string, action: "increment" });
   assert.throws(
     () => compileProject({ root: invalidLabel }),
-    /Expected string or number at root\.label/,
+    /Expected string at root\.label/,
   );
 
   const invalidAction = () => Button({ label: "+", action: { unsupported: true } as unknown as string });
   assert.throws(
     () => compileProject({ root: invalidAction }),
-    /Expected string or number at root\.action/,
+    /Expected string at root\.action/,
   );
 
   const injectedAction = () => Button({ label: "+", action: "*/\nint injected = 1;\n/*" });
@@ -198,7 +271,7 @@ test("rejects malformed node shapes at the compiler boundary", () => {
   })) as unknown as () => UiNode;
   assert.throws(
     () => compileProject({ root: primitiveProps }),
-    /Invalid props at root\.props/,
+    (error: unknown) => error instanceof Error && error.message === "Invalid props at root.props",
   );
 
   const invalidChildren = (() => ({
@@ -222,4 +295,26 @@ test("rejects malformed node shapes at the compiler boundary", () => {
     () => compileProject({ root: invalidType }),
     /Unsupported node type at root\.type/,
   );
+
+  const invalidScreenChildren = (() => ({
+    kind: "element",
+    type: "Screen",
+    props: {},
+    children: "not-an-array",
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: invalidScreenChildren }),
+    /Invalid children at root\.children/,
+  );
+
+  for (const invalidNode of [
+    { kind: "element", type: "Screen", props: { extra: true }, children: [] },
+    { kind: "element", type: "Text", props: { text: "ok", extra: true }, children: [] },
+    { kind: "element", type: "Button", props: { label: "ok", action: "go", extra: true }, children: [] },
+  ]) {
+    assert.throws(
+      () => compileProject({ root: (() => invalidNode) as unknown as () => UiNode }),
+      /Invalid props at root\.props\.extra/,
+    );
+  }
 });
