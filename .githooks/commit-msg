@@ -1,0 +1,5 @@
+#!/bin/sh
+
+set -eu
+REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+exec node "$REPOSITORY_ROOT/scripts/validate-commit-message.mjs" "$1"
