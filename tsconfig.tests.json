@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "test-dist",
+    "composite": true,
+    "tsBuildInfoFile": "test-dist/tsconfig.tsbuildinfo",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@lume/core",
+    "types": ["node"]
+  },
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/compiler" }
+  ],
+  "include": ["tests/**/*.ts", "tests/**/*.tsx"]
+}

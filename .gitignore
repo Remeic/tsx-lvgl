@@ -4,6 +4,7 @@
 # Node / TypeScript
 node_modules/
 dist/
+test-dist/
 coverage/
 .turbo/
 *.tsbuildinfo
@@ -35,4 +36,3 @@ arrival-backup-*/
 .venv-*/
 .idea/
 .vscode/
-

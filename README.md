@@ -56,9 +56,18 @@ docs/                  architecture and operational recovery decisions
 
 The module interfaces are intentionally small. Complexity should live behind deep modules and clean seams, not in every application screen.
 
-## Status
+## Development
 
-Pre-alpha. The development host and the official Waveshare baseline are prepared; the physical board still needs the documented arrival, backup and restore gates before custom firmware is flashed.
+The first host-side compiler slice is implemented: imported TSX components become a typed `UiNode` tree and `compileProject` emits deterministic LVGL 9 C plus a manifest. The development host and official Waveshare baseline are prepared; the physical board still needs the documented arrival, backup and restore gates before custom firmware is flashed.
+
+The pinned host is Node.js 24.19.0 with npm 11.17.0:
+
+```bash
+npm ci
+npm test
+```
+
+These commands build all workspace packages, typecheck the TSX test fixture and run the native host tests.
 
 Read [the architecture decision](docs/architecture.md) and [the recovery protocol](docs/recovery.md) before adding code.
 

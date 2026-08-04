@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/compiler" },
+    { "path": "tsconfig.tests.json" }
+  ]
+}

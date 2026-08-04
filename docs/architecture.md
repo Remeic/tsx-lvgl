@@ -40,7 +40,9 @@ The simulator compiles the exact generated C and native runtime against LVGL SDL
 
 ## v0 language contract
 
-Supported first: `Screen`, `View`, `Text`, `Button`, `Image`, `Stack`, typed props, finite styles, scalar signals, derived values, visibility/enabled bindings, events and build-time list expansion.
+Implemented first: `Screen`, `View`, `Text` and `Button` with typed props, a static tree and deterministic LVGL C emission. This is the host-side tracer bullet that lets us validate the compiler seam before the board arrives.
+
+Next in the same contract: `Image`, `Stack`, finite styles, scalar signals, derived values, visibility/enabled bindings, events and build-time list expansion.
 
 Deferred: arbitrary React imports, hooks/effects/context/suspense, runtime-created component types, DOM/CSS compatibility, hot reload and an unrestricted native-widget escape hatch.
 
@@ -54,4 +56,3 @@ Every addition needs compiler diagnostics, generated-C coverage, native-host cov
 - SDL screenshots cover layout and visual regressions;
 - ESP-IDF builds use pinned versions and record firmware-size headroom;
 - custom firmware is not flashed before the board's factory state is backed up and restorable.
-
