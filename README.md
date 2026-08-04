@@ -1,6 +1,14 @@
 # Lume
 
-**Typed TSX interfaces compiled to native LVGL for small screens.**
+<p align="center">
+  <img src="assets/lume-logo.png" alt="Lume TSX to LVGL" width="720">
+</p>
+
+<p align="center"><strong>Typed TSX interfaces compiled to native LVGL for small screens.</strong></p>
+
+<p align="center">
+  <a href="https://github.com/Remeic/lume-tsx-lvgl/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/Remeic/lume-tsx-lvgl/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+</p>
 
 Lume is an independent experiment for writing declarative interfaces in TypeScript/TSX and compiling them into readable, native LVGL 9 C for ESP32-class hardware.
 
@@ -75,17 +83,38 @@ The module interfaces are intentionally small. Complexity should live behind dee
 
 The first host-side compiler slice is implemented: imported TSX components become a typed `UiNode` tree and `compileProject` emits deterministic LVGL 9 C plus a manifest. The development host and official Waveshare baseline are prepared; the physical board still needs the documented arrival, backup and restore gates before custom firmware is flashed.
 
-The pinned host is Node.js 24.19.0 with npm 11.17.0:
+The supported reproducible path requires Docker Desktop as the only host prerequisite. It builds the pinned development image and runs the project commands inside it:
+
+```bash
+./tools/dev test
+./tools/dev c-compile
+./tools/dev mutation
+```
+
+The container owns Node.js 24.19.0, npm 11.17.0, ESP-IDF 5.5.5, QEMU and the native build tools. `tools/dev` mounts the checkout, bootstraps dependencies from the lockfile and remains non-interactive in CI while preserving an interactive terminal locally. No host Node.js or ESP-IDF installation is required for the reproducible path. See [the development environment guide](docs/development-environment.md).
+
+The host-only fast path remains available when the pinned toolchain is already installed:
 
 ```bash
 npm ci
 npm test
+npm run test:c
+npm run mutation
 ```
 
-These commands build all workspace packages, typecheck the TSX test fixture and run the native host tests.
+These commands build all workspace packages, typecheck the TSX test fixture, run the native host tests, compile the generated C and execute mutation testing.
+
+The public container command ladder is continuously validated from a fresh GitHub checkout. The latest `main` run ([`68904cb`](https://github.com/Remeic/lume-tsx-lvgl/commit/68904cbb7154995bc8a3b799c01343f84ce60ff3), [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30926221548)) recorded:
+
+- 17/17 host tests passing;
+- generated-C compilation passing;
+- mutation score 100.00%: 235 mutants killed, 0 survived and 0 timed out;
+- image `sha256:6ee79cb3a1e7830bd91b05bf4146b2da7474a1909db76135ce81c541fe449e74`;
+- validation artifact [container-validation-68904cb...](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30926221548/artifacts/8899520413).
+
+This validates the development container, not the physical board. `./tools/dev qemu` remains gated on the ESP-IDF application in [issue #8](https://github.com/Remeic/lume-tsx-lvgl/issues/8); USB flashing, display/touch behavior and factory-state recovery remain explicit hardware gates.
 
 Read [the architecture decision](docs/architecture.md) and [the recovery protocol](docs/recovery.md) before adding code.
-For a single-prerequisite development setup, use [the reproducible container](docs/development-environment.md).
 
 ## License
 
