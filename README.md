@@ -104,13 +104,13 @@ npm run mutation
 
 These commands build all workspace packages, typecheck the TSX test fixture, run the native host tests, compile the generated C and execute mutation testing.
 
-The public container command ladder is continuously validated from a fresh GitHub checkout. The latest `main` run ([`68904cb`](https://github.com/Remeic/lume-tsx-lvgl/commit/68904cbb7154995bc8a3b799c01343f84ce60ff3), [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30926221548)) recorded:
+The public container command ladder is continuously validated from a fresh GitHub checkout. The latest `main` run ([`996914e`](https://github.com/Remeic/lume-tsx-lvgl/commit/996914ea878a4f92bf9c232a18fb1bd2fa20d483), [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488)) recorded:
 
 - 17/17 host tests passing;
 - generated-C compilation passing;
-- mutation score 100.00%: 235 mutants killed, 0 survived and 0 timed out;
-- image `sha256:6ee79cb3a1e7830bd91b05bf4146b2da7474a1909db76135ce81c541fe449e74`;
-- validation artifact [container-validation-68904cb...](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30926221548/artifacts/8899520413).
+- mutation score 100.00%: 232 mutants killed, 0 survived and 0 timed out;
+- image `sha256:b76d0b9bc0b553d928301c059826275b2c53969d88e25e40443aa5601165765d`;
+- validation artifact [container-validation-996914e...](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488/artifacts/8900621645).
 
 This validates the development container, not the physical board. `./tools/dev qemu` remains gated on the ESP-IDF application in [issue #8](https://github.com/Remeic/lume-tsx-lvgl/issues/8); USB flashing, display/touch behavior and factory-state recovery remain explicit hardware gates.
 
