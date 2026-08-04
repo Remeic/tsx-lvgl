@@ -37,3 +37,50 @@ jobs:
           name: mutation-report-${{ github.sha }}
           path: reports/mutation/
           if-no-files-found: error
+
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build pinned development image
+        run: |
+          docker build \
+            --build-arg TARGETARCH=amd64 \
+            --file .devcontainer/Dockerfile \
+            --tag "lume-tsx-lvgl-ci:${GITHUB_SHA}" \
+            .
+
+      - name: Record container identity and tool versions
+        run: |
+          {
+            docker image inspect "lume-tsx-lvgl-ci:${GITHUB_SHA}" --format 'image_id={{.Id}} created={{.Created}}'
+            docker run --rm "lume-tsx-lvgl-ci:${GITHUB_SHA}" bash -lc '
+              node --version
+              npm --version
+              idf.py --version
+            '
+          } | tee container-toolchain.txt
+
+      - name: Run host and C checks inside the development image
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp/lume-home \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            "lume-tsx-lvgl-ci:${GITHUB_SHA}" \
+            bash -lc '
+              set -euo pipefail
+              npm ci --ignore-scripts --no-audit --no-fund
+              npm test
+              npm run test:c
+            '
+
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-toolchain-${{ github.sha }}
+          path: container-toolchain.txt
+          if-no-files-found: error
