@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+
+# Node / TypeScript
+node_modules/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# ESP-IDF / LVGL build outputs
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Generated UI artifacts
+generated/
+*.bin
+*.elf
+*.map
+
+# Board evidence and sensitive recovery material
+arrival-backup-*/
+*.dump
+*.flash
+*.nvs
+*.key
+*.pem
+*.token
+
+# Local tooling
+.venv/
+.venv-*/
+.idea/
+.vscode/
+
