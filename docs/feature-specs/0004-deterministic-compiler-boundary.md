@@ -26,7 +26,7 @@ flowchart LR
 - [x] A stateful or time-varying root fails deterministically with a path-aware diagnostic.
 - [x] Pure roots continue to produce byte-identical artifacts.
 - [x] The deterministic check does not weaken validation or allow malformed nodes.
-- [ ] Tests cover state, time and random-like variation without relying on timing races.
+- [x] Tests cover state, time and random-like variation without relying on timing races.
 
 ## Test plan
 

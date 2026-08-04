@@ -81,6 +81,24 @@ test("rejects a root component that changes between evaluations", () => {
   );
 });
 
+test("rejects a root component that reads a changing clock", () => {
+  let clock = 1700000000;
+  const timeVarying = () => <Screen><Text text={clock++} /></Screen>;
+  assert.throws(
+    () => compileProject({ root: timeVarying }),
+    /Root component is not deterministic/,
+  );
+});
+
+test("rejects random-like root variation without timing races", () => {
+  const samples = [0.25, 0.75];
+  const randomLike = () => <Screen><Text text={samples.shift() ?? 0} /></Screen>;
+  assert.throws(
+    () => compileProject({ root: randomLike }),
+    /Root component is not deterministic/,
+  );
+});
+
 test("normalizes optional and nested children through the public core interface", () => {
   const label = Text({ text: "hello" });
   assert.deepEqual(normalizeChildren([null, [false, label], undefined]), [label]);
