@@ -1,0 +1,20 @@
+{
+  "name": "Lume ESP32 development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "root",
+  "workspaceFolder": "/workspace",
+  "containerEnv": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "postCreateCommand": "npm ci --ignore-scripts --no-audit --no-fund",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "espressif.esp-idf-extension"
+      ]
+    }
+  }
+}

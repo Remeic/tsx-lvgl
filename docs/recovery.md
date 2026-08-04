@@ -58,9 +58,22 @@ shasum -a 256 "$ARRIVAL_DIR/factory-16mb-a.bin" \
 
 Do not write anything until both reads are exactly 16,777,216 bytes and byte-identical. If the read is unstable, lower the baud rate and repeat both reads.
 
+## Security-state decision matrix
+
+The raw full-flash recipe below is permitted only after the identity gate proves the first row. Security state is a safety boundary, not a detail to infer after writing.
+
+| Confirmed state | Full read | Generic same-board raw restore | Required path |
+| --- | --- | --- | --- |
+| Flash encryption disabled, secure boot disabled, secure download restrictions disabled | Allowed after the two-read gate | Allowed with size/checksum/MAC/security comparison | This document's dump/write/verify sequence |
+| Flash encryption enabled | Do not assume a dump is a portable or usable backup | Not allowed by this generic procedure | Validated signed/encrypted update and key/provisioning procedure for the exact device |
+| Secure boot enabled | Do not assume an arbitrary dump is bootable | Not allowed by this generic procedure | Exact signed-image recovery procedure for the configured secure-boot mode |
+| Secure download mode or any restriction not understood | Stop; do not probe with write commands | Forbidden | Obtain a device-specific, read-only-supported recovery procedure |
+
+If any security field is unknown, stop before `read-flash` and before every write. QEMU can exercise reversible security workflows, but it does not authorize a physical-board restore path.
+
 ## Restore
 
-Restore only to the same physical board after validating size and checksum and comparing the current MAC/security output with the saved reports:
+For the first row only, restore to the same physical board after validating size and checksum and comparing the current MAC/security output with the saved reports:
 
 ```bash
 "$RECOVERY_PY" -m esptool --chip esp32s3 --port "$BOARD_PORT" --baud 460800 \
@@ -70,4 +83,3 @@ Restore only to the same physical board after validating size and checksum and c
 ```
 
 Release BOOT, power-cycle fully and validate the recorded factory display, touch, power and exposed peripherals. Official revision-matched Waveshare images are a fallback, not a replacement for the personal dump.
-

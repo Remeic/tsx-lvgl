@@ -47,6 +47,8 @@ Rules are enforced by the versioned hook in `.githooks/commit-msg`. `feat` commi
 
 Every pull request must link an issue, describe the acceptance-criteria evidence and state whether hardware or recovery behavior is affected. Keep generated firmware, full-flash dumps and credentials out of Git.
 
+The default branch is intended to be protected: changes land through a pull request with the required CI checks and CODEOWNERS review. Direct pushes are reserved for repository bootstrap or an explicitly documented recovery action.
+
 ## Testing expectations
 
 Use [the layered testing strategy](docs/feature-specs/0002-testing-and-mutation-strategy.md) to choose evidence. Do not claim hardware confidence from host tests alone, and do not use code coverage as a substitute for mutation or behavior evidence.

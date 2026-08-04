@@ -1,0 +1,7 @@
+.git
+.stryker-tmp
+node_modules
+dist
+test-dist
+reports
+arrival-backup-*
