@@ -11,6 +11,7 @@ const config = {
   symlinkNodeModules: false,
   mutate: [
     "packages/core/src/**/*.ts",
+    "packages/lvgl-emitter/src/**/*.ts",
     "packages/compiler/src/**/*.ts",
   ],
   checkers: ["typescript"],

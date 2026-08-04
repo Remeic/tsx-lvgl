@@ -30,6 +30,8 @@ The interface includes diagnostics, deterministic output rules and asset/compile
 
 Adapter at the IR-to-firmware seam. It lowers validated IR to readable LVGL 9 C and a small native runtime. It knows LVGL; it does not know Waveshare pins, USB or board revision.
 
+The first host tracer bullet now has this adapter in `packages/lvgl-emitter`. The semantic `UiNode` shape is still structural and visible to the first public tests; issue #4 tracks making that IR opaque without weakening the compiler seam.
+
 ### `boards`
 
 Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. V2 uses the managed Waveshare BSP path. V1, if the delivered board requires it, gets an explicit SH8601 adapter. The compiler never imports a board adapter.
@@ -56,3 +58,5 @@ Every addition needs compiler diagnostics, generated-C coverage, native-host cov
 - SDL screenshots cover layout and visual regressions;
 - ESP-IDF builds use pinned versions and record firmware-size headroom;
 - custom firmware is not flashed before the board's factory state is backed up and restorable.
+
+The deterministic host compiler evaluates a root component twice and rejects divergent generated artifacts. The component must therefore be pure with respect to time, randomness, environment and mutable external state.

@@ -4,7 +4,6 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { compileProject } from "@lume/compiler";
 import { Button, Screen, Text, View, normalizeChildren, type UiNode } from "@lume/core";
-import { Fragment } from "@lume/core/jsx-runtime";
 
 function Counter(): UiNode {
   return (
@@ -54,12 +53,12 @@ void lume_ui_create(void)
 
 test("escapes C string literals", () => {
   function Escaped(): UiNode {
-    return <Screen><Text text={'quote " and slash \\ and\nnewline'} /></Screen>;
+    return <Screen><Text text={'quote " and slash \\ and\nnewline\r\t\0\x01\b\f\v\x7f'} /></Screen>;
   }
 
   const result = compileProject({ root: Escaped });
   assert.match(result.files["generated/ui.c"] ?? "", /quote \\" and slash \\\\/);
-  assert.match(result.files["generated/ui.c"] ?? "", /and\\nnewline/);
+  assert.match(result.files["generated/ui.c"] ?? "", /and\\nnewline\\r\\t\\000\\001\\b\\f\\v\\177/);
   assert.match(result.files["generated/ui.c"] ?? "", /lume_ui_create/);
 });
 
@@ -71,6 +70,15 @@ test("uses a stable default project name", () => {
   const result = compileProject({ root: DefaultProject });
   assert.equal(result.manifest.projectName, "lume-project");
   assert.match(result.files["generated/manifest.json"] ?? "", /"projectName": "lume-project"/);
+});
+
+test("rejects a root component that changes between evaluations", () => {
+  let value = 0;
+  const stateful = () => <Screen><Text text={value++} /></Screen>;
+  assert.throws(
+    () => compileProject({ root: stateful }),
+    /Root component is not deterministic/,
+  );
 });
 
 test("normalizes optional and nested children through the public core interface", () => {
@@ -85,8 +93,13 @@ test("filters every non-node child through the public core interface", () => {
   assert.deepEqual(normalizeChildren(["not-a-node" as unknown as UiNode]), []);
 });
 
-test("exposes a stable JSX fragment marker", () => {
-  assert.equal(Fragment, "Fragment");
+test("compiles JSX fragments as transparent groups", () => {
+  function Fragmented(): UiNode {
+    return <Screen><><Text text="inside" /></></Screen>;
+  }
+
+  const result = compileProject({ root: Fragmented });
+  assert.match(result.files["generated/ui.c"] ?? "", /lv_label_set_text\(root_0_0, "inside"\)/);
 });
 
 test("rejects an invalid root node", () => {
@@ -130,5 +143,65 @@ test("reports invalid button props at their public paths", () => {
   assert.throws(
     () => compileProject({ root: invalidAction }),
     /Expected string or number at root\.action/,
+  );
+
+  const injectedAction = () => Button({ label: "+", action: "*/\nint injected = 1;\n/*" });
+  assert.throws(
+    () => compileProject({ root: injectedAction }),
+    /Expected C identifier at root\.action/,
+  );
+
+  for (const action of ["-ok", "ok!"]) {
+    const invalidIdentifier = () => Button({ label: "+", action });
+    assert.throws(
+      () => compileProject({ root: invalidIdentifier }),
+      /Expected C identifier at root\.action/,
+    );
+  }
+});
+
+test("rejects malformed node shapes at the compiler boundary", () => {
+  const invalidProps = (() => ({
+    kind: "element",
+    type: "Text",
+    props: null,
+    children: [],
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: invalidProps }),
+    /Invalid props at root\.props/,
+  );
+
+  const primitiveProps = (() => ({
+    kind: "element",
+    type: "Text",
+    props: "not-an-object",
+    children: [],
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: primitiveProps }),
+    /Invalid props at root\.props/,
+  );
+
+  const invalidChildren = (() => ({
+    kind: "element",
+    type: "Text",
+    props: { text: "ok" },
+    children: "not-an-array",
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: invalidChildren }),
+    /Invalid children at root\.children/,
+  );
+
+  const invalidType = (() => ({
+    kind: "element",
+    type: "Unknown",
+    props: {},
+    children: [],
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: invalidType }),
+    /Unsupported node type at root\.type/,
   );
 });

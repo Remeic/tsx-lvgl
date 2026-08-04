@@ -1,4 +1,4 @@
-export type ElementType = "Screen" | "View" | "Text" | "Button";
+export type ElementType = "Screen" | "View" | "Text" | "Button" | "Fragment";
 
 export type Child = UiNode | readonly Child[] | null | undefined | false;
 
@@ -30,6 +30,10 @@ export interface TextProps {
 export interface ButtonProps {
   readonly label: string;
   readonly action: string;
+}
+
+export interface FragmentProps {
+  readonly children?: Child;
 }
 
 export function Screen(props: ScreenProps): UiNode {

@@ -1,4 +1,5 @@
-import type { LumeComponent, UiElement, UiNode } from "@lume/core";
+import { emitLvgl } from "@lume/lvgl-emitter";
+import type { LumeComponent, UiNode } from "@lume/core";
 
 export interface CompileConfig {
   readonly root: LumeComponent;
@@ -15,24 +16,22 @@ export interface BuildArtifacts {
   };
 }
 
+/**
+ * Compile a pure root component. The component is evaluated twice so a state,
+ * time or random-dependent root fails before its artifacts can be consumed.
+ */
 export function compileProject(config: CompileConfig): BuildArtifacts {
   const projectName = config.projectName ?? "lume-project";
-  const root = config.root({});
-  validateNode(root, "root");
+  const first = compileRoot(config.root({}), projectName);
+  const second = compileRoot(config.root({}), projectName);
+  if (first.files["generated/ui.c"] !== second.files["generated/ui.c"]) {
+    throw new Error("Root component is not deterministic at root: repeated evaluation produced different artifacts");
+  }
+  return first;
+}
 
-  const body: string[] = [];
-  emitNode(root, "root", "root", body);
-
-  const uiC = [
-    "#include \"lvgl.h\"",
-    "",
-    "void lume_ui_create(void)",
-    "{",
-    "    lv_obj_t *root = lv_screen_active();",
-    ...body.map((line) => `    ${line}`),
-    "}",
-    "",
-  ].join("\n");
+function compileRoot(root: UiNode, projectName: string): BuildArtifacts {
+  const uiC = emitLvgl(root);
 
   const manifest = {
     format: "lume-build-artifacts-v0" as const,
@@ -48,47 +47,4 @@ export function compileProject(config: CompileConfig): BuildArtifacts {
     },
     manifest,
   };
-}
-
-function validateNode(node: UiNode, path: string): asserts node is UiElement {
-  if (node.kind !== "element") {
-    throw new Error(`Unsupported node at ${path}`);
-  }
-  node.children.forEach((child, index) => validateNode(child, `${path}.children[${index}]`));
-}
-
-function emitNode(node: UiElement, variable: string, parent: string, output: string[]): void {
-  switch (node.type) {
-    case "Screen":
-      node.children.forEach((child, index) => emitNode(child, `${variable}_${index}`, parent, output));
-      return;
-    case "View":
-      output.push(`lv_obj_t *${variable} = lv_obj_create(${parent});`);
-      node.children.forEach((child, index) => emitNode(child, `${variable}_${index}`, variable, output));
-      return;
-    case "Text": {
-      const text = asString(node.props.text, `${variable}.text`);
-      output.push(`lv_obj_t *${variable} = lv_label_create(${parent});`);
-      output.push(`lv_label_set_text(${variable}, ${quoteC(text)});`);
-      return;
-    }
-    case "Button": {
-      const label = asString(node.props.label, `${variable}.label`);
-      const action = asString(node.props.action, `${variable}.action`);
-      output.push(`lv_obj_t *${variable} = lv_button_create(${parent});`);
-      output.push(`lv_obj_t *${variable}_label = lv_label_create(${variable});`);
-      output.push(`lv_label_set_text(${variable}_label, ${quoteC(label)});`);
-      output.push(`/* Lume action: ${action} */`);
-      return;
-    }
-  }
-}
-
-function asString(value: unknown, path: string): string {
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  throw new Error(`Expected string or number at ${path}`);
-}
-
-function quoteC(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n")}"`;
 }

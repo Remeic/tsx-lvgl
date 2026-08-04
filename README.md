@@ -11,7 +11,7 @@ The first hardware target is the Waveshare ESP32-S3-Touch-AMOLED-1.8. The same g
 - build-time TSX authoring with a deliberately bounded, typed UI vocabulary;
 - a semantic intermediate representation kept behind the compiler interface;
 - native LVGL 9 output, with no JavaScript engine on the microcontroller;
-- explicit signals, derived values and events lowered to native LVGL mechanisms;
+- a planned path for explicit signals, derived values and events lowered to native LVGL mechanisms;
 - a narrow board adapter so the compiler remains independent from display drivers;
 - desktop SDL parity and generated-source tests before hardware flashing.
 
@@ -19,7 +19,7 @@ The first hardware target is the Waveshare ESP32-S3-Touch-AMOLED-1.8. The same g
 
 Lume is not React, is not affiliated with React or Meta, and does not claim to compile arbitrary React applications. React is an inspiration for the authoring ergonomics; the device target is native LVGL firmware.
 
-## The first tracer bullet
+## Target API sketch (not implemented yet)
 
 ```tsx
 const count = signal(0);
@@ -29,6 +29,21 @@ export function Counter() {
     <Screen>
       <Text text={count} />
       <Button label="+" onClick={() => count.set(count.get() + 1)} />
+    </Screen>
+  );
+}
+```
+
+This is the intended reactive API, not the current implementation. The host tracer bullet currently supports a static `Text`/`Button` tree with `action` strings; signals and `onClick` are future work.
+
+## The first tracer bullet
+
+```tsx
+export function Counter() {
+  return (
+    <Screen>
+      <Text text={0} />
+      <Button label="+" action="increment" />
     </Screen>
   );
 }
@@ -47,10 +62,10 @@ Success means the same generated C:
 ```text
 packages/core          TSX types and the supported authoring vocabulary
 packages/compiler      TSX analysis and compileProject(config)
-packages/lvgl-emitter  semantic IR to LVGL 9 C
+packages/lvgl-emitter  semantic IR to LVGL 9 C adapter (IR opacity in issue #4)
 packages/runtime       small native support library for generated UI
-boards/                display, touch, power and tick adapters
-apps/simulator         LVGL SDL build using the generated C
+boards/                planned display, touch, power and tick adapters
+apps/simulator         planned LVGL SDL build using the generated C (issue #8)
 docs/                  architecture and operational recovery decisions
 ```
 
@@ -70,6 +85,7 @@ npm test
 These commands build all workspace packages, typecheck the TSX test fixture and run the native host tests.
 
 Read [the architecture decision](docs/architecture.md) and [the recovery protocol](docs/recovery.md) before adding code.
+For a single-prerequisite development setup, use [the reproducible container](docs/development-environment.md).
 
 ## License
 

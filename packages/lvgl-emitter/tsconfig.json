@@ -7,8 +7,7 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "references": [
-    { "path": "../core" },
-    { "path": "../lvgl-emitter" }
+    { "path": "../core" }
   ],
   "include": ["src/**/*.ts"]
 }

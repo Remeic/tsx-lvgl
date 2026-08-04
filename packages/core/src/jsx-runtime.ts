@@ -3,6 +3,7 @@ import {
   normalizeChildren,
   type Child,
   type ElementType,
+  type FragmentProps,
   type LumeComponent,
   type UiNode,
 } from "./index.js";
@@ -22,7 +23,9 @@ export namespace JSX {
   }
 }
 
-export const Fragment = "Fragment";
+export function Fragment(props: FragmentProps): UiNode {
+  return element("Fragment", {}, [props.children]);
+}
 
 export function jsx(
   type: ElementType | LumeComponent,

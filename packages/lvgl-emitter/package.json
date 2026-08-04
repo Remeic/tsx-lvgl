@@ -1,10 +1,10 @@
 {
-  "name": "@lume/compiler",
+  "name": "@lume/lvgl-emitter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@lume/lvgl-emitter": "0.1.0"
+    "@lume/core": "0.1.0"
   },
   "exports": {
     ".": {

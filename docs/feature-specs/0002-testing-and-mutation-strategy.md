@@ -41,9 +41,9 @@ flowchart TD
 
 Stryker mutates `packages/core` and `packages/compiler`, where behavior is deterministic and tests can kill mutants quickly. We do not mutate vendor drivers, generated C, hardware timing or the physical board: those require compile, simulator, serial and hardware evidence instead.
 
-The first configuration uses Stryker's command runner because the repository currently uses Node's built-in test runner. Its sandbox runs a lockfile installation before building so workspace package links resolve inside the mutated copy. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner (for example Vitest) as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
+The first configuration uses Stryker's command runner because the repository currently uses Node's built-in test runner. The `mutation` script prebuilds workspace declarations before Stryker initializes its TypeScript checker; its sandbox then runs a lockfile installation before building so workspace package links resolve inside the mutated copy. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner (for example Vitest) as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
-The initial deterministic baseline is 100% (77 killed, 0 survived, 45 rejected by the TypeScript checker) and blocks below 80% (`break: 80`). The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
+The current deterministic baseline is 100% (153 killed, 0 survived, 47 rejected by the TypeScript checker) and blocks below 80% (`break: 80`). The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
 
 ## Acceptance criteria
 
