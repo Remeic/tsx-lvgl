@@ -23,13 +23,14 @@ flowchart LR
 
 ## Acceptance criteria
 
-- [ ] `.devcontainer` or an equivalent pinned container image contains Node, ESP-IDF, QEMU, CMake/Ninja, Python tools and simulator dependencies.
-- [ ] `./tools/dev test`, `./tools/dev mutation`, `./tools/dev qemu` and `./tools/dev c-compile` work from a fresh clone after Docker Desktop installation.
+- [x] `.devcontainer` or an equivalent pinned container image contains Node, ESP-IDF, QEMU, CMake/Ninja, Python tools and simulator dependencies.
+- [x] `./tools/dev test`, `./tools/dev mutation` and `./tools/dev c-compile` work from a fresh checkout after Docker Desktop installation.
+- [ ] `./tools/dev qemu` is enabled and validated after the ESP-IDF application from issue #8 exists.
 - [x] Tool versions and the built image ID are recorded; the base image uses an immutable digest and no implicit `latest` tag is used.
-- [ ] Host-only development remains possible as an optional fast path, not a second source of truth.
+- [x] Host-only development remains possible as an optional fast path, not a second source of truth.
 - [ ] Physical flashing/serial access is documented as a separate, explicit host bridge with recovery safeguards.
-- [x] CI builds this exact container definition and runs the host/C checks inside it.
+- [x] CI builds this exact container definition and runs the public `tools/dev` command path inside it.
 
 ## Test plan
 
-The first CI slice builds the container on GitHub's x86_64 Linux runner, records the image ID and Node/npm/ESP-IDF versions, and runs `npm test` plus `npm run test:c` inside the image. Apple Silicon build evidence, the container mutation/QEMU ladder and the physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.
+The blocking container job starts from a fresh GitHub checkout, invokes `./tools/dev test`, `./tools/dev c-compile` and `./tools/dev mutation` without host Node/ESP-IDF installation, and records the image ID, tool versions and command output. The QEMU command remains gated on issue #8; Apple Silicon build evidence and physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.
