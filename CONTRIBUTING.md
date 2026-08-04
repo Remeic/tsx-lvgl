@@ -46,3 +46,7 @@ Rules are enforced by the versioned hook in `.githooks/commit-msg`. `feat` commi
 ## Pull requests
 
 Every pull request must link an issue, describe the acceptance-criteria evidence and state whether hardware or recovery behavior is affected. Keep generated firmware, full-flash dumps and credentials out of Git.
+
+## Testing expectations
+
+Use [the layered testing strategy](docs/feature-specs/0002-testing-and-mutation-strategy.md) to choose evidence. Do not claim hardware confidence from host tests alone, and do not use code coverage as a substitute for mutation or behavior evidence.

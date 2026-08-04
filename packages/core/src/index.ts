@@ -1,6 +1,6 @@
 export type ElementType = "Screen" | "View" | "Text" | "Button";
 
-export type Child = UiNode | readonly UiNode[] | null | undefined | false;
+export type Child = UiNode | readonly Child[] | null | undefined | false;
 
 export interface UiElement {
   readonly kind: "element";
@@ -64,7 +64,6 @@ export function element(
 export function normalizeChildren(children: readonly Child[]): readonly UiNode[] {
   const normalized: UiNode[] = [];
   for (const child of children) {
-    if (child === null || child === undefined || child === false) continue;
     if (Array.isArray(child)) {
       normalized.push(...normalizeChildren(child));
       continue;

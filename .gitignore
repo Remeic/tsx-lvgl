@@ -6,6 +6,8 @@ node_modules/
 dist/
 test-dist/
 coverage/
+.stryker-tmp/
+reports/mutation/
 .turbo/
 *.tsbuildinfo
 

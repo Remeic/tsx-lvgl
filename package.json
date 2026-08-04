@@ -16,12 +16,18 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
     "test": "npm run build && node --test test-dist/tests/compiler.test.js",
+    "mutation": "stryker run",
     "clean": "tsc -b --clean && rm -rf test-dist",
     "setup-hooks": "node scripts/install-git-hooks.mjs",
     "prepare": "npm run setup-hooks"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
     "@types/node": "24.3.0",
     "typescript": "5.9.2"
+  },
+  "overrides": {
+    "qs": "6.15.3"
   }
 }
