@@ -59,4 +59,4 @@ Every addition needs compiler diagnostics, generated-C coverage, native-host cov
 - ESP-IDF builds use pinned versions and record firmware-size headroom;
 - custom firmware is not flashed before the board's factory state is backed up and restorable.
 
-The deterministic host compiler evaluates a root component twice and rejects divergent generated artifacts. The component must therefore be pure with respect to time, randomness, environment and mutable external state.
+The deterministic host compiler evaluates a root component twice and rejects divergent generated artifacts within one invocation. This catches stateful roots that change their output, but cannot prove that an opaque JavaScript function is pure across separate invocations. Reproducible builds therefore require pure components plus pinned tool and environment inputs; a controlled evaluator remains tracked in issue #7.

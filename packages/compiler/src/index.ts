@@ -17,8 +17,10 @@ export interface BuildArtifacts {
 }
 
 /**
- * Compile a pure root component. The component is evaluated twice so a state,
- * time or random-dependent root fails before its artifacts can be consumed.
+ * Compile a root component and repeat its evaluation to detect divergent
+ * artifacts within one invocation. This check is not a proof that an opaque
+ * component is pure across separate compiler invocations; callers must keep
+ * roots pure and pin their tool/environment inputs for reproducible builds.
  */
 export function compileProject(config: CompileConfig): BuildArtifacts {
   const projectName = config.projectName ?? "lume-project";
