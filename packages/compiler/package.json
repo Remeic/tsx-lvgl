@@ -1,10 +1,10 @@
 {
-  "name": "@lume/compiler",
+  "name": "@tsx-lvgl/compiler",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@lume/lvgl-emitter": "0.1.0"
+    "@tsx-lvgl/lvgl-emitter": "0.1.0"
   },
   "exports": {
     ".": {

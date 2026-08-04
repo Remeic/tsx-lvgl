@@ -12,7 +12,7 @@ Compile a TSX component tree containing `Screen`, `Text`, `View` and `Button` in
 
 ```mermaid
 flowchart LR
-    TSX[Typed TSX components] --> Core[@lume/core JSX runtime]
+    TSX[Typed TSX components] --> Core[@tsx-lvgl/core JSX runtime]
     Core --> IR[UiNode semantic tree]
     IR --> Compiler[compileProject]
     Compiler --> Emitter[LVGL 9 C emitter]

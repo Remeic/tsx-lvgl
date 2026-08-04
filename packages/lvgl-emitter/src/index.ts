@@ -1,4 +1,4 @@
-import type { UiElement, UiNode } from "@lume/core";
+import type { UiElement, UiNode } from "@tsx-lvgl/core";
 
 /** Emit validated semantic nodes as readable LVGL 9 C. */
 export function emitLvgl(root: UiNode): string {
@@ -10,7 +10,7 @@ export function emitLvgl(root: UiNode): string {
   return [
     "#include \"lvgl.h\"",
     "",
-    "void lume_ui_create(void)",
+    "void tsx_lvgl_ui_create(void)",
     "{",
     "    lv_obj_t *root = lv_screen_active();",
     ...body.map((line) => `    ${line}`),
@@ -104,7 +104,7 @@ function emitNode(node: UiElement, variable: string, parent: string, output: str
       output.push(`lv_obj_t *${variable} = lv_button_create(${parent});`);
       output.push(`lv_obj_t *${variable}_label = lv_label_create(${variable});`);
       output.push(`lv_label_set_text(${variable}_label, ${quoteC(label)});`);
-      output.push(`/* Lume action: ${action} */`);
+      output.push(`/* TSX-LVGL action: ${action} */`);
       return;
     }
   }

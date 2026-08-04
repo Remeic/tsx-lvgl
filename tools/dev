@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image_name="lume-tsx-lvgl-dev:local"
+image_name="tsx-lvgl-dev:local"
 command_name="${1:-shell}"
 shift || true
 
@@ -41,7 +41,7 @@ fi
 
 docker run "${docker_run_args[@]}" \
   --user "$(id -u):$(id -g)" \
-  --env HOME=/tmp/lume-home \
+  --env HOME=/tmp/tsx-lvgl-home \
   --volume "${repo_root}:/workspace" \
   --workdir /workspace \
   "${image_name}" bash -lc "${bootstrap_command}; ${inner_command}"

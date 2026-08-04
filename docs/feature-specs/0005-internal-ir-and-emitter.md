@@ -12,10 +12,10 @@ Keep authoring types public, move validated semantic IR behind an internal packa
 
 ```mermaid
 flowchart LR
-    TSX[Public TSX vocabulary] --> Core[@lume/core]
+    TSX[Public TSX vocabulary] --> Core[@tsx-lvgl/core]
     Core --> Normalize[Internal IR normalization]
     Normalize --> IR[Opaque semantic IR]
-    IR --> Emitter[@lume/lvgl-emitter]
+    IR --> Emitter[@tsx-lvgl/lvgl-emitter]
     Emitter --> LVGL[LVGL 9 C]
     IR --> Future[Future target emitter]
 ```
@@ -23,7 +23,7 @@ flowchart LR
 ## Acceptance criteria
 
 - [ ] Consumers cannot construct or depend on the internal IR shape through the public package entry point.
-- [x] `@lume/lvgl-emitter` owns LVGL-specific lowering and has an exhaustive unsupported-node diagnostic.
+- [x] `@tsx-lvgl/lvgl-emitter` owns LVGL-specific lowering and has an exhaustive unsupported-node diagnostic.
 - [x] Compiler tests exercise the emitter through the compiler public seam, not private object mutation.
 - [ ] Adding a second target does not require changing TSX authoring types.
 - [x] Mutation scope includes the deterministic compiler and emitter modules.

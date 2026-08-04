@@ -6,7 +6,7 @@
     "composite": true,
     "tsBuildInfoFile": "test-dist/tsconfig.tsbuildinfo",
     "jsx": "react-jsx",
-    "jsxImportSource": "@lume/core",
+    "jsxImportSource": "@tsx-lvgl/core",
     "types": ["node"]
   },
   "references": [

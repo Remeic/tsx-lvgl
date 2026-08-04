@@ -1,20 +1,20 @@
-# Lume
+# TSX-LVGL
 
 <p align="center">
-  <img src="assets/lume-logo.png" alt="Lume TSX to LVGL" width="720">
+  <img src="assets/tsx-lvgl-logo.png" alt="TSX-LVGL" width="720">
 </p>
 
 <p align="center"><strong>Typed TSX interfaces compiled to native LVGL for small screens.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/Remeic/lume-tsx-lvgl/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/Remeic/lume-tsx-lvgl/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/Remeic/tsx-lvgl/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/Remeic/tsx-lvgl/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
 </p>
 
-Lume is an independent experiment for writing declarative interfaces in TypeScript/TSX and compiling them into readable, native LVGL 9 C for ESP32-class hardware.
+TSX-LVGL is an independent experiment for writing declarative interfaces in TypeScript/TSX and compiling them into readable, native LVGL 9 C for ESP32-class hardware.
 
 The first hardware target is the Waveshare ESP32-S3-Touch-AMOLED-1.8. The same generated C should also run against LVGL's desktop SDL driver, so the simulator and the device exercise one UI artifact.
 
-## What Lume is
+## What TSX-LVGL is
 
 - build-time TSX authoring with a deliberately bounded, typed UI vocabulary;
 - a semantic intermediate representation kept behind the compiler interface;
@@ -23,9 +23,9 @@ The first hardware target is the Waveshare ESP32-S3-Touch-AMOLED-1.8. The same g
 - a narrow board adapter so the compiler remains independent from display drivers;
 - desktop SDL parity and generated-source tests before hardware flashing.
 
-## What Lume is not
+## What TSX-LVGL is not
 
-Lume is not React, is not affiliated with React or Meta, and does not claim to compile arbitrary React applications. React is an inspiration for the authoring ergonomics; the device target is native LVGL firmware.
+TSX-LVGL is not React, is not affiliated with React or Meta, and does not claim to compile arbitrary React applications. React is an inspiration for the authoring ergonomics; the device target is native LVGL firmware.
 
 ## Target API sketch (not implemented yet)
 
@@ -104,15 +104,15 @@ npm run mutation
 
 These commands build all workspace packages, typecheck the TSX test fixture, run the native host tests, compile the generated C and execute mutation testing.
 
-The public container command ladder is continuously validated from a fresh GitHub checkout. The verified baseline for this README is commit [`996914e`](https://github.com/Remeic/lume-tsx-lvgl/commit/996914ea878a4f92bf9c232a18fb1bd2fa20d483), with [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488):
+The public container command ladder is continuously validated from a fresh GitHub checkout. The verified baseline for this README is commit [`996914e`](https://github.com/Remeic/tsx-lvgl/commit/996914ea878a4f92bf9c232a18fb1bd2fa20d483), with [CI evidence](https://github.com/Remeic/tsx-lvgl/actions/runs/30928995488):
 
 - 17/17 host tests passing;
 - generated-C compilation passing;
 - mutation score 100.00%: 232 mutants killed, 0 survived and 0 timed out;
 - image `sha256:b76d0b9bc0b553d928301c059826275b2c53969d88e25e40443aa5601165765d`;
-- validation artifact [container-validation-996914e...](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488/artifacts/8900621645).
+- validation artifact [container-validation-996914e...](https://github.com/Remeic/tsx-lvgl/actions/runs/30928995488/artifacts/8900621645).
 
-This validates the development container, not the physical board. `./tools/dev qemu` remains gated on the ESP-IDF application in [issue #8](https://github.com/Remeic/lume-tsx-lvgl/issues/8); USB flashing, display/touch behavior and factory-state recovery remain explicit hardware gates.
+This validates the development container, not the physical board. `./tools/dev qemu` remains gated on the ESP-IDF application in [issue #8](https://github.com/Remeic/tsx-lvgl/issues/8); USB flashing, display/touch behavior and factory-state recovery remain explicit hardware gates.
 
 Read [the architecture decision](docs/architecture.md) and [the recovery protocol](docs/recovery.md) before adding code.
 
