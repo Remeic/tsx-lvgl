@@ -34,7 +34,12 @@ case "${command_name}" in
     ;;
 esac
 
-docker run --rm --interactive --tty \
+docker_run_args=(--rm)
+if [[ -t 0 && -t 1 ]]; then
+  docker_run_args+=(--interactive --tty)
+fi
+
+docker run "${docker_run_args[@]}" \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp/lume-home \
   --volume "${repo_root}:/workspace" \

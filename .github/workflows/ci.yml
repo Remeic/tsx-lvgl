@@ -44,43 +44,41 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Build pinned development image
+      - name: Run public fresh-clone test command
         run: |
-          docker build \
-            --build-arg TARGETARCH=amd64 \
-            --file .devcontainer/Dockerfile \
-            --tag "lume-tsx-lvgl-ci:${GITHUB_SHA}" \
-            .
+          set -o pipefail
+          {
+            echo '$ ./tools/dev test'
+            ./tools/dev test
+          } 2>&1 | tee container-command-ladder.txt
 
       - name: Record container identity and tool versions
+        if: always()
         run: |
           {
-            docker image inspect "lume-tsx-lvgl-ci:${GITHUB_SHA}" --format 'image_id={{.Id}} created={{.Created}}'
-            docker run --rm "lume-tsx-lvgl-ci:${GITHUB_SHA}" bash -lc '
+            docker image inspect "lume-tsx-lvgl-dev:local" --format 'image_id={{.Id}} created={{.Created}}'
+            docker run --rm "lume-tsx-lvgl-dev:local" bash -lc '
               node --version
               npm --version
               idf.py --version
             '
           } | tee container-toolchain.txt
 
-      - name: Run host and C checks inside the development image
+      - name: Run public fresh-clone C and mutation commands
         run: |
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            --env HOME=/tmp/lume-home \
-            --volume "${GITHUB_WORKSPACE}:/workspace" \
-            --workdir /workspace \
-            "lume-tsx-lvgl-ci:${GITHUB_SHA}" \
-            bash -lc '
-              set -euo pipefail
-              npm ci --ignore-scripts --no-audit --no-fund
-              npm test
-              npm run test:c
-            '
+          set -o pipefail
+          {
+            echo '$ ./tools/dev c-compile'
+            ./tools/dev c-compile
+            echo '$ ./tools/dev mutation'
+            ./tools/dev mutation
+          } 2>&1 | tee -a container-command-ladder.txt
 
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: container-toolchain-${{ github.sha }}
-          path: container-toolchain.txt
+          name: container-validation-${{ github.sha }}
+          path: |
+            container-toolchain.txt
+            container-command-ladder.txt
           if-no-files-found: error
