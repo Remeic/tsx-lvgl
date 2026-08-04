@@ -21,10 +21,10 @@ flowchart LR
 
 ## Acceptance criteria
 
-- [x] Text and label values encode quote, slash, newline, carriage return, tab, NUL and other C control characters safely.
+- [x] Text and label values encode quote, slash, question marks, newline, carriage return, tab, NUL and other C control characters safely, including C11 trigraph-looking sequences.
 - [x] Action values cannot terminate a generated comment or inject source; invalid action names fail with a path-aware diagnostic.
 - [x] Generated C is compiled with the host C compiler using warnings as errors and a checked-in LVGL API stub.
-- [x] Adversarial tests cover comment terminators and control characters.
+- [x] Adversarial tests cover comment terminators, C11 trigraph-looking sequences and control characters.
 - [x] CI uploads mutation evidence for the exact commit SHA and blocks on generated-C compilation.
 
 ## Test plan

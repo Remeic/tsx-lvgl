@@ -36,4 +36,4 @@ jobs:
         with:
           name: mutation-report-${{ github.sha }}
           path: reports/mutation/
-          if-no-files-found: warn
+          if-no-files-found: error
