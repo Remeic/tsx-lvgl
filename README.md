@@ -104,7 +104,7 @@ npm run mutation
 
 These commands build all workspace packages, typecheck the TSX test fixture, run the native host tests, compile the generated C and execute mutation testing.
 
-The public container command ladder is continuously validated from a fresh GitHub checkout. The latest `main` run ([`996914e`](https://github.com/Remeic/lume-tsx-lvgl/commit/996914ea878a4f92bf9c232a18fb1bd2fa20d483), [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488)) recorded:
+The public container command ladder is continuously validated from a fresh GitHub checkout. The verified baseline for this README is commit [`996914e`](https://github.com/Remeic/lume-tsx-lvgl/commit/996914ea878a4f92bf9c232a18fb1bd2fa20d483), with [CI evidence](https://github.com/Remeic/lume-tsx-lvgl/actions/runs/30928995488):
 
 - 17/17 host tests passing;
 - generated-C compilation passing;
