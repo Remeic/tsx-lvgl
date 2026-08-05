@@ -28,7 +28,7 @@ void app_main(void)
     tsx_lvgl_ui_create();
     bsp_display_unlock();
 
-    ESP_LOGI(TAG, "TSX-LVGL UI installed; touch action is labelled touch_probe");
+    ESP_LOGI(TAG, "TSX-LVGL UI installed; touching the button should change its label to Touched");
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
