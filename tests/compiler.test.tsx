@@ -178,6 +178,34 @@ test("compiles JSX fragments as transparent groups", () => {
   assert.match(result.files["generated/ui.c"] ?? "", /lv_label_set_text\(root_0_0, "inside"\)/);
 });
 
+test("legacy JSX runtime requires the legacy leaf props", () => {
+  const numberText = <Text text={42} />;
+  const stringButton = <Button label="+" action="increment" />;
+  function Nested(): UiNode {
+    return <View><Text text="nested" /></View>;
+  }
+  const nested = <Nested />;
+
+  assert.equal(numberText.props.text, 42);
+  assert.equal(stringButton.props.label, "+");
+  assert.equal(nested.type, "View");
+  assert.equal(nested.children.length, 1);
+  assert.equal(nested.children[0]?.type, "Text");
+});
+
+test("legacy runtime rejects React-only layout props at the compiler boundary", () => {
+  const legacyWithReactProps = (() => ({
+    kind: "element",
+    type: "View",
+    props: { direction: "row", gap: 8, onClick: () => undefined },
+    children: [],
+  })) as unknown as () => UiNode;
+  assert.throws(
+    () => compileProject({ root: legacyWithReactProps }),
+    /Invalid props at root\.props\.direction/,
+  );
+});
+
 test("rejects an invalid root node", () => {
   const invalidRoot = (() => ({ kind: "not-an-element" })) as unknown as () => UiNode;
   assert.throws(

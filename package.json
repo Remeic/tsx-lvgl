@@ -15,9 +15,15 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "npm run build && node --test test-dist/tests/compiler.test.js",
+    "test": "npm run build && node --test test-dist/tests/*.test.js",
     "test:c": "npm run build && node scripts/compile-generated-c.mjs",
-    "mutation": "npm run build && stryker run",
+    "simulator:build": "npm run build && cmake -S apps/simulator -B \"${TSX_LVGL_SIMULATOR_BUILD_DIR:-build/simulator}\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"${TSX_LVGL_SIMULATOR_BUILD_DIR:-build/simulator}\" --parallel",
+    "simulator:test": "npm run simulator:build && mkdir -p \"${TSX_LVGL_SIMULATOR_BUILD_DIR:-build/simulator}/evidence\" && SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software TSX_LVGL_TEST=1 TSX_LVGL_SCREENSHOT_DIR=\"${TSX_LVGL_SIMULATOR_BUILD_DIR:-build/simulator}/evidence\" \"${TSX_LVGL_SIMULATOR_BUILD_DIR:-build/simulator}/tsx_lvgl_simulator\"",
+    "esp-idf:v1:build": "npm run build && NINJAFLAGS=-j2 idf.py -C apps/esp-idf-v1 build && idf.py -C apps/esp-idf-v1 size",
+    "generated:parity": "npm run build && node scripts/check-generated-parity.mjs",
+    "mutation:legacy": "stryker run stryker.config.mjs",
+    "mutation:mvp": "stryker run stryker.mvp.config.mjs",
+    "mutation": "npm run build && npm run mutation:legacy && npm run mutation:mvp",
     "clean": "tsc -b --clean && rm -rf test-dist",
     "setup-hooks": "node scripts/install-git-hooks.mjs",
     "prepare": "npm run setup-hooks"

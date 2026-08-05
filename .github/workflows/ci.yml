@@ -40,7 +40,7 @@ jobs:
 
   container:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -74,6 +74,20 @@ jobs:
             ./tools/dev mutation
           } 2>&1 | tee -a container-command-ladder.txt
 
+      - name: Run pinned simulator and ESP-IDF integration commands
+        run: |
+          set -o pipefail
+          mkdir -p build/simulator-container/evidence
+          git rev-parse HEAD > build/simulator-container/evidence/commit.txt
+          {
+            echo '$ ./tools/dev simulator'
+            ./tools/dev simulator
+            echo '$ ./tools/dev esp-idf-v1'
+            ./tools/dev esp-idf-v1
+            echo '$ ./tools/dev parity'
+            ./tools/dev parity
+          } 2>&1 | tee -a container-command-ladder.txt
+
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -81,4 +95,9 @@ jobs:
           path: |
             container-toolchain.txt
             container-command-ladder.txt
+            build/simulator-container/evidence/counter-before.ppm
+            build/simulator-container/evidence/counter-after.ppm
+            build/simulator-container/evidence/commit.txt
+            build/simulator-container/generated/ui.c
+            apps/esp-idf-v1/build/tsx-lvgl-generated/ui.c
           if-no-files-found: error

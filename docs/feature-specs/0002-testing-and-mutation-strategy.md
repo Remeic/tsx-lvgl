@@ -29,7 +29,7 @@ flowchart TD
 | --- | --- | --- |
 | TypeScript public-interface tests | Core and compiler behavior through public seams | Every change |
 | Property/golden tests | IR and generated output invariants | Every compiler feature |
-| Stryker mutation tests | Tests detect realistic changes in core/compiler/emitter | Every milestone; PR on scoped changes when fast |
+| Stryker mutation tests | Tests detect realistic changes in core/compiler/emitter/react | Every milestone; PR on scoped changes when fast |
 | Generated C compile | Emitter output is syntactically and API compatible | Every emitter change |
 | LVGL SDL screenshots | Layout and visual behavior without hardware | Every visual change |
 | ESP-IDF build matrix | Board adapter and generated artifact integrate cleanly | Every board/runtime change |
@@ -39,19 +39,53 @@ flowchart TD
 
 ## Mutation policy
 
-Stryker mutates `packages/core`, `packages/compiler` and `packages/lvgl-emitter`, where behavior is deterministic and tests can kill mutants quickly. We do not mutate vendor drivers, generated C, hardware timing or the physical board: those require compile, simulator, serial and hardware evidence instead.
+Stryker mutates `packages/core`, `packages/compiler`, `packages/lvgl-emitter`
+and `packages/react`, where behavior is deterministic and tests can kill
+mutants quickly. We do not mutate vendor drivers, generated C, hardware timing
+or the physical board: those require compile, simulator, serial and hardware
+evidence instead.
 
 The first configuration uses Stryker's command runner because the repository currently uses Node's built-in test runner. The `mutation` script prebuilds workspace declarations before Stryker initializes its TypeScript checker; its sandbox then runs a lockfile installation before building so workspace package links resolve inside the mutated copy. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner (for example Vitest) as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
-The current deterministic baseline is 100% with zero surviving mutants across 315 generated mutants and blocks below 80% (`break: 80`). The exact killed/CompileError classification is recorded in the SHA-bound JSON artifact rather than prose, because TypeScript diagnostic classification can vary by tool-process timing even when the score and survivor set are stable. The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
+The 100% / 315-mutant result is a pre-MVP historical baseline. The React
+source-entry slice expands the deterministic parser, compatibility-surface and
+native-emitter behavior substantially. `./tools/dev mutation` runs two
+independent blocking configurations so the legacy baseline cannot dilute the
+MVP score: `mutation:legacy` covers `packages/core/src/**/*.ts` and the legacy
+`packages/lvgl-emitter/src/**/*.ts`; `mutation:mvp` covers
+`packages/compiler/src/**/*.ts` and `packages/react/src/**/*.ts`. Both keep a
+break threshold of 80. CI uploads both SHA-bound report directories under
+`reports/mutation/`.
+
+The final exact pinned run used Node 24.19.0 and had no timeouts:
+
+- Legacy: 300 instrumented, 222 killed, 0 survived, 77 compile errors, 1
+  ignored, effective score 100.00% (`222 / (222 + 0)`).
+- MVP: 1,190 instrumented, 648 killed, 40 survived, 502 compile errors, 0
+  ignored, effective score 94.19% (`648 / (648 + 40)`).
+
+Survivor dispositions are recorded rather than hidden behind a per-file
+counter. The compiler-private native emitter and React JSX runtime have zero
+survivors; event filtering, C0 escaping, and null/undefined/false child
+handling are behavior-tested. The remaining compiler `index.ts` survivors are
+the deterministic-failure guard and its diagnostic text, which require an
+injected nondeterministic compiler to observe. The remaining `source.ts`
+survivors are diagnostic wording, defensive AST/parser branches, and identity
+sanitization branches outside the accepted TSX shapes; accepted syntax,
+diagnostics, bounds, identity, and deterministic output are covered by direct
+tests. The two React `index.ts` survivors are the compiler-only `useState`
+error wording and a redundant non-null guard after the caller has already
+filtered nullish values. These are retained as nonblocking hardening follow-up
+items and remain visible in the JSON report. This is host evidence only, not
+hardware confidence.
 
 ## Acceptance criteria
 
 - [ ] Public interfaces and test seams are documented before each new test slice.
-- [x] Stryker runs against only deterministic core/compiler/emitter source.
+- [x] Stryker runs against only deterministic core/compiler/emitter/react source.
 - [ ] TypeScript checker rejects mutants that cannot compile.
-- [ ] Mutation report is reproducible with the lockfile and Node 24.19.0.
-- [ ] The baseline mutation score is recorded with surviving mutants triaged.
+- [x] Mutation report is reproducible with the lockfile and Node 24.19.0.
+- [x] The final mutation scores and survivor dispositions are recorded in the SHA-bound evidence.
 - [ ] Generated C has a host compile check before hardware flashing.
 - [ ] SDL visual evidence is attached for visual UI features.
 - [ ] ESP-IDF Unity/serial tests cover board integration at the hardware milestone.
