@@ -4,15 +4,26 @@ import type { UiElement, UiNode } from "@tsx-lvgl/core";
 export function emitLvgl(root: UiNode): string {
   validateNode(root, "root");
 
+  const actions = collectActions(root);
   const body: string[] = [];
   emitNode(root, "root", "root", body);
 
   return [
     "#include \"lvgl.h\"",
     "",
+    ...[...actions].flatMap((action) => [
+      `static void tsx_lvgl_action_${action}(lv_event_t *event)`,
+      "{",
+      "    lv_obj_t *label = lv_event_get_user_data(event);",
+      "    lv_label_set_text(label, \"Touched\");",
+      "}",
+      "",
+    ]),
     "void tsx_lvgl_ui_create(void)",
     "{",
     "    lv_obj_t *root = lv_screen_active();",
+    "    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);",
+    "    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);",
     ...body.map((line) => `    ${line}`),
     "}",
     "",
@@ -90,6 +101,8 @@ function emitNode(node: UiElement, variable: string, parent: string, output: str
       return;
     case "View":
       output.push(`lv_obj_t *${variable} = lv_obj_create(${parent});`);
+      output.push(`lv_obj_set_flex_flow(${variable}, LV_FLEX_FLOW_COLUMN);`);
+      output.push(`lv_obj_set_flex_align(${variable}, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);`);
       node.children.forEach((child, index) => emitNode(child, `${variable}_${index}`, variable, output));
       return;
     case "Text": {
@@ -104,10 +117,19 @@ function emitNode(node: UiElement, variable: string, parent: string, output: str
       output.push(`lv_obj_t *${variable} = lv_button_create(${parent});`);
       output.push(`lv_obj_t *${variable}_label = lv_label_create(${variable});`);
       output.push(`lv_label_set_text(${variable}_label, ${quoteC(label)});`);
-      output.push(`/* TSX-LVGL action: ${action} */`);
+      output.push(`lv_obj_center(${variable}_label);`);
+      output.push(`lv_obj_add_event_cb(${variable}, tsx_lvgl_action_${action}, LV_EVENT_CLICKED, ${variable}_label);`);
       return;
     }
   }
+}
+
+function collectActions(node: UiNode, actions = new Set<string>()): Set<string> {
+  if (node.type === "Button") {
+    actions.add(String(node.props.action));
+  }
+  node.children.forEach((child) => collectActions(child, actions));
+  return actions;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

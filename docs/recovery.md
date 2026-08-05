@@ -6,7 +6,7 @@ The current unit is V1: SH8601 display, FT3168 touch, ESP32-S3, 8 MiB PSRAM and 
 
 ## Current gate
 
-The arrival manifest is currently `HARD STOP — FACTORY RECOVERY NOT PROVEN`. No flash write, erase, eFuse operation or custom firmware operation is authorized until its pending evidence gates are closed. A complete-size candidate A exists but is explicitly untrusted; it is not a recovery image.
+The current unit's arrival manifest is `CONDITIONAL PASS`: the local FileVault-protected B/C pair and one independently verified plaintext T7 copy provide two current failure domains under a documented owner exception because encrypted media were unavailable. An Intenso copy later failed verification and is quarantined. A fresh, separately logged same-session identity/security preflight is still required before any physical write; the manifest alone never authorizes one. A complete-size candidate A remains explicitly untrusted and is not a recovery image.
 
 ## Full-flash dump custody
 
@@ -115,6 +115,25 @@ No standalone write command is published while the per-unit manifest is in hard-
 9. perform post-restore identity and functional checks, then close the operation log with a terminal result.
 
 Esptool 5.3.1 uses `hard-reset` by default. A separate `verify-flash` after that reset is not automatically a proof of byte stability because factory code may mutate NVS/OTA state between commands. The eventual procedure must use a validated no-application-run verification sequence or clearly separate immediate transport verification from post-boot functional verification.
+
+## App-only development reload
+
+The repository provides `npm run board:reload` for the V1 application image.
+This is a development convenience layered on top of the recovery gate, not a
+replacement for it. The wrapper requires the external per-unit recovery
+directory, creates a `0600` operation log before the first serial command,
+rechecks the same-unit identity/security/eFuse evidence, validates the local
+image offline, writes only the app partition at `0x10000`, runs a separate
+`verify-flash`, and then requests an explicit reset. It refuses `/Volumes`
+paths and contains no global erase or eFuse-write operation.
+
+The default reset candidate is esptool 5.3.1's `watchdog-reset`, because the
+observed RTS-only reset did not reliably launch the application on this unit.
+That reset mode is not considered proven until a logged physical run shows the
+new firmware booting without a power-cycle. The wrapper's terminal PASS covers
+the app-only transport and reset request; display, touch, USB stability and
+thermal behavior remain manual gates. If the boot marker is absent or the
+screen remains stale, record `FAIL/UNKNOWN` and do not loop or add an erase.
 
 Never use `--force`, preliminary erase, eFuse writes or an official image as a substitute for the unit's own validated dump.
 

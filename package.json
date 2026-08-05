@@ -15,7 +15,10 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "npm run build && node --test test-dist/tests/compiler.test.js",
+    "generate:board": "npm run build && node scripts/generate-board-ui.mjs",
+    "board:build": "npm run generate:board && ./tools/dev qemu \"cd examples/esp-idf/tsx_lvgl_v1 && idf.py build\"",
+    "board:reload": "tools/board-reload",
+    "test": "npm run build && node --test test-dist/tests/compiler.test.js && node --test tests/board-reload-plan.test.mjs",
     "test:c": "npm run build && node scripts/compile-generated-c.mjs",
     "mutation": "npm run build && stryker run",
     "clean": "tsc -b --clean && rm -rf test-dist",
