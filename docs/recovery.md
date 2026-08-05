@@ -6,7 +6,7 @@ The current unit is V1: SH8601 display, FT3168 touch, ESP32-S3, 8 MiB PSRAM and 
 
 ## Current gate
 
-The arrival manifest is currently `HARD STOP — FACTORY RECOVERY NOT PROVEN`. No flash write, erase, eFuse operation or custom firmware operation is authorized until its pending evidence gates are closed. A complete-size candidate A exists but is explicitly untrusted; it is not a recovery image.
+The current unit's arrival manifest is `HARD STOP`: B/C are independently acquired, byte-identical full-flash reads; the factory baseline is recorded; and two plaintext external copies were previously verified under a documented owner exception because encrypted media were unavailable. Both media became unavailable during final pre-write validation, so their current availability must be re-established before another fresh, separately logged same-session identity/security preflight. The manifest alone never authorizes a physical write. A complete-size candidate A remains explicitly untrusted and is not a recovery image.
 
 ## Full-flash dump custody
 
