@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { compileProject } from "@tsx-lvgl/compiler";
-import { Button, Screen, Text, View, normalizeChildren, type UiNode } from "@tsx-lvgl/core";
+import { Button, Screen, Text, View, element, normalizeChildren, type UiNode } from "@tsx-lvgl/core";
 
 function Counter(): UiNode {
   return (
@@ -103,6 +103,10 @@ test("rejects random-like root variation without timing races", () => {
 test("normalizes optional and nested children through the public core interface", () => {
   const label = Text({ text: "hello" });
   assert.deepEqual(normalizeChildren([null, [false, label], undefined]), [label]);
+});
+
+test("uses an empty child list when element children are omitted", () => {
+  assert.deepEqual(element("View", {}).children, []);
 });
 
 test("filters every non-node child through the public core interface", () => {
