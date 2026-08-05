@@ -15,6 +15,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
+    "generate:board": "npm run build && node scripts/generate-board-ui.mjs",
     "test": "npm run build && node --test test-dist/tests/compiler.test.js",
     "test:c": "npm run build && node scripts/compile-generated-c.mjs",
     "mutation": "npm run build && stryker run",
