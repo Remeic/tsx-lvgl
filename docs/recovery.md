@@ -6,7 +6,7 @@ The current unit is V1: SH8601 display, FT3168 touch, ESP32-S3, 8 MiB PSRAM and 
 
 ## Current gate
 
-The current unit's arrival manifest is `HARD STOP`: B/C are independently acquired, byte-identical full-flash reads; the factory baseline is recorded; and two plaintext external copies were previously verified under a documented owner exception because encrypted media were unavailable. Both media became unavailable during final pre-write validation, so their current availability must be re-established before another fresh, separately logged same-session identity/security preflight. The manifest alone never authorizes a physical write. A complete-size candidate A remains explicitly untrusted and is not a recovery image.
+The current unit's arrival manifest is `CONDITIONAL PASS`: the local FileVault-protected B/C pair and one independently verified plaintext T7 copy provide two current failure domains under a documented owner exception because encrypted media were unavailable. An Intenso copy later failed verification and is quarantined. A fresh, separately logged same-session identity/security preflight is still required before any physical write; the manifest alone never authorizes one. A complete-size candidate A remains explicitly untrusted and is not a recovery image.
 
 ## Full-flash dump custody
 
