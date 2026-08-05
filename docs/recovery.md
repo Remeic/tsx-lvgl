@@ -116,6 +116,25 @@ No standalone write command is published while the per-unit manifest is in hard-
 
 Esptool 5.3.1 uses `hard-reset` by default. A separate `verify-flash` after that reset is not automatically a proof of byte stability because factory code may mutate NVS/OTA state between commands. The eventual procedure must use a validated no-application-run verification sequence or clearly separate immediate transport verification from post-boot functional verification.
 
+## App-only development reload
+
+The repository provides `npm run board:reload` for the V1 application image.
+This is a development convenience layered on top of the recovery gate, not a
+replacement for it. The wrapper requires the external per-unit recovery
+directory, creates a `0600` operation log before the first serial command,
+rechecks the same-unit identity/security/eFuse evidence, validates the local
+image offline, writes only the app partition at `0x10000`, runs a separate
+`verify-flash`, and then requests an explicit reset. It refuses `/Volumes`
+paths and contains no global erase or eFuse-write operation.
+
+The default reset candidate is esptool 5.3.1's `watchdog-reset`, because the
+observed RTS-only reset did not reliably launch the application on this unit.
+That reset mode is not considered proven until a logged physical run shows the
+new firmware booting without a power-cycle. The wrapper's terminal PASS covers
+the app-only transport and reset request; display, touch, USB stability and
+thermal behavior remain manual gates. If the boot marker is absent or the
+screen remains stale, record `FAIL/UNKNOWN` and do not loop or add an erase.
+
 Never use `--force`, preliminary erase, eFuse writes or an official image as a substitute for the unit's own validated dump.
 
 ## PASS/FAIL criteria
