@@ -19,9 +19,10 @@ const config = {
   coverageAnalysis: "off",
   reporters: ["clear-text", "html", "json", "progress"],
   thresholds: {
-    high: 80,
-    low: 60,
-    break: 80,
+    high: 100,
+    low: 100,
+    // A surviving or timed-out mutant lowers the score and must fail CI.
+    break: 100,
   },
   timeoutMS: 5000,
   // A single mutation worker keeps TypeScript incremental diagnostics stable

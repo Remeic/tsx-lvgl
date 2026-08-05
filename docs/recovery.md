@@ -2,6 +2,17 @@
 
 This document is the short repository policy. The detailed working checklist lives in the Codex readiness dossier; keep its evidence outside Git because a full flash dump can contain credentials and provisioning data.
 
+## Full-flash dump custody
+
+Treat every full-flash dump and its associated identity/security reports as sensitive recovery material.
+
+- Store it encrypted at rest using an approved, access-controlled encrypted volume or vault; do not leave plaintext dumps on shared disks.
+- Restrict access to the minimum named maintainers needed for recovery. Do not share dumps through chat or email.
+- Keep exactly two controlled copies: the encrypted working/recovery copy and one separately controlled encrypted recovery copy. Record the owner and location outside this repository.
+- Create and retain a SHA-256 checksum alongside each copy; verify it after copying and immediately before any restore.
+- Retain the copies only for the approved recovery window. At expiry, securely delete every copy and its temporary plaintext working files, then record the deletion outside this repository.
+- Do not place dumps, reports, keys, tokens, or checksums in unapproved cloud-sync folders. Never add them to Git, a Docker build context, issue attachments, or CI artifacts.
+
 ## Non-negotiable order
 
 1. Photograph the board and rear label.
