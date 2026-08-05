@@ -318,3 +318,19 @@ test("rejects malformed node shapes at the compiler boundary", () => {
     );
   }
 });
+
+test("rejects unexpected props on public container nodes", () => {
+  for (const type of ["Screen", "View", "Fragment"] as const) {
+    const node = {
+      kind: "element",
+      type,
+      props: { unexpected: true },
+      children: [],
+    } as unknown as UiNode;
+
+    assert.throws(
+      () => compileProject({ root: (() => node) as unknown as () => UiNode }),
+      new RegExp(`Invalid props at root\\.props\\.unexpected`),
+    );
+  }
+});

@@ -43,16 +43,16 @@ Stryker mutates `packages/core`, `packages/compiler` and `packages/lvgl-emitter`
 
 The first configuration uses Stryker's command runner because the repository currently uses Node's built-in test runner. The `mutation` script prebuilds workspace declarations before Stryker initializes its TypeScript checker; its sandbox then runs a lockfile installation before building so workspace package links resolve inside the mutated copy. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner (for example Vitest) as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
-The current deterministic baseline is 100% with zero surviving mutants across 315 generated mutants and blocks below 80% (`break: 80`). The exact killed/CompileError classification is recorded in the SHA-bound JSON artifact rather than prose, because TypeScript diagnostic classification can vary by tool-process timing even when the score and survivor set are stable. The threshold rises as the test population grows; a perfect score here is deliberately limited to the deterministic host slice, not hardware confidence.
+Mutation results are evidence for one exact commit SHA, lockfile, Node version, operating system and Stryker/toolchain invocation. Do not claim a repository-wide or current 100% baseline in this document until the JSON report for that exact SHA has been retained and the killed, CompileError, survivor and timeout classifications have been reviewed. TypeScript diagnostic classification can vary by platform and tool-process timing, so the report—not prose—is the source of truth while that classification is being stabilized. The configured break threshold is 100%, therefore a survivor or timeout cannot produce a green mutation run. This remains evidence only for the deterministic host slice, not hardware confidence.
 
 ## Acceptance criteria
 
-- [ ] Public interfaces and test seams are documented before each new test slice.
+- [x] Public interfaces and test seams are documented for the current host compiler slice.
 - [x] Stryker runs against only deterministic core/compiler/emitter source.
 - [ ] TypeScript checker rejects mutants that cannot compile.
 - [ ] Mutation report is reproducible with the lockfile and Node 24.19.0.
 - [ ] The baseline mutation score is recorded with surviving mutants triaged.
-- [ ] Generated C has a host compile check before hardware flashing.
+- [x] Generated C has a host compile check before hardware flashing.
 - [ ] SDL visual evidence is attached for visual UI features.
 - [ ] ESP-IDF Unity/serial tests cover board integration at the hardware milestone.
 - [ ] Recovery evidence is recorded after the first custom flash.
