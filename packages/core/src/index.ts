@@ -55,6 +55,7 @@ export function Button(props: ButtonProps): UiNode {
 export function element(
   type: ElementType,
   props: Readonly<Record<string, unknown>>,
+  // Stryker disable next-line ArrayDeclaration: normalizeChildren removes the non-node sentinel.
   children: readonly Child[] = [],
 ): UiElement {
   return {
