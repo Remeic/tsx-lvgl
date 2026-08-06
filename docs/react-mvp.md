@@ -88,15 +88,20 @@ it is not the parity artifact for `examples/counter.tsx`.
 The pinned mutation gate is `./tools/dev mutation`, which runs independent
 legacy and MVP Stryker configurations. The legacy configuration preserves
 origin/main's high/low/break 100/100/100 policy with concurrency 1; the MVP
-configuration uses high/low/break 80/70/80 with concurrency 4. The final exact
-Node 24.19.0 run had no timeouts: legacy instrumented 321 mutants (240
-killed, 0 survived, 80 compile errors, 1 ignored; 100.00% effective), while
-the MVP compiler+React slice instrumented 1,190 (644 killed, 39 survived, 507
-compile errors, 0 ignored; 94.29% effective, `644 / (644 + 39)`). The MVP
-scope includes `packages/react/src/**/*.ts`; reports are written to
-`reports/mutation/legacy/` and `reports/mutation/mvp/`, so legacy mutants cannot
-dilute the MVP score. The remaining survivors and their dispositions are
-documented in [the mutation strategy](feature-specs/0002-testing-and-mutation-strategy.md);
+configuration uses high/low/break 80/70/80 with concurrency 4. A retained
+reference Node 24.19.0 run, kept as historical context rather than current
+evidence, reported no timeouts and classified legacy as 321 instrumented (240
+killed, 0 survived, 80 `CompileError`, 1 ignored; 100.00% effective) and the
+MVP compiler+React slice as 1,190 instrumented (644 killed, 39 survived, 507
+`CompileError`, 0 ignored; 94.29% effective). TypeScript checker timing can
+change killed/`CompileError`/survivor classification between runs, so neither
+counts nor scores are invariant and these prose values must not be treated as
+the result for a later SHA. The MVP scope includes `packages/react/src/**/*.ts`;
+reports are written to `reports/mutation/legacy/` and `reports/mutation/mvp/`,
+so legacy mutants cannot dilute the MVP score. The JSON reports paired with
+the CI artifact `mutation-report-${GITHUB_SHA}` are authoritative for the
+exact reviewed SHA; match that artifact SHA to the checked-out commit. The
+remaining survivors and their dispositions are documented in [the mutation strategy](feature-specs/0002-testing-and-mutation-strategy.md);
 native-emitter and JSX-runtime correctness cases have no survivors. CI uploads
 both report directories as `mutation-report-${GITHUB_SHA}`. The simulator
 evidence is uploaded as `container-validation-${GITHUB_SHA}` with `commit.txt`,

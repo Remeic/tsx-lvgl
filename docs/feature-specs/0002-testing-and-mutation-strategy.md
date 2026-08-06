@@ -59,12 +59,24 @@ high/low/break 100 and concurrency 1. `mutation:mvp` covers
 independent high/low/break 80/70/80 policy and concurrency 4. CI uploads both
 SHA-bound report directories under `reports/mutation/`.
 
-The final exact pinned run used Node 24.19.0 and had no timeouts:
+A retained/reference run under Node 24.19.0 (historical context, not a
+current-HEAD claim) classified the mutants as follows and reported no
+timeouts:
 
-- Legacy: 321 instrumented, 240 killed, 0 survived, 80 compile errors, 1
-  ignored, 0 timeouts, effective score 100.00% (`240 / (240 + 0)`).
-- MVP: 1,190 instrumented, 644 killed, 39 survived, 507 compile errors, 0
-  ignored, 0 timeouts, effective score 94.29% (`644 / (644 + 39)`).
+- Legacy: 321 instrumented, 240 killed, 0 survived, 80 `CompileError`, 1
+  ignored, reported effective score 100.00% (`240 / (240 + 0)`).
+- MVP: 1,190 instrumented, 644 killed, 39 survived, 507 `CompileError`, 0
+  ignored, reported effective score 94.29% (`644 / (644 + 39)`).
+
+The killed/`CompileError`/survivor classification can vary between otherwise
+equivalent runs because of TypeScript checker timing; counts and scores are
+not invariant. These prose values are reference context only and must not be
+copied forward as current evidence after a source or documentation change.
+For each reviewed SHA, the JSON reports in
+`reports/mutation/{legacy,mvp}/mutation.json`, together with the CI artifact
+`mutation-report-${GITHUB_SHA}` that contains them, are authoritative. The
+artifact SHA and the checked-out commit must be matched before recording a
+result.
 
 Survivor dispositions are recorded rather than hidden behind a per-file
 counter. The compiler-private native emitter and React JSX runtime have zero
