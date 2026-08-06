@@ -11,7 +11,8 @@
   },
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/react" },
     { "path": "packages/compiler" }
   ],
-  "include": ["tests/**/*.ts", "tests/**/*.tsx"]
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "examples/**/*.tsx"]
 }

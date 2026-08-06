@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/react" },
     { "path": "packages/lvgl-emitter" },
     { "path": "packages/compiler" },
     { "path": "tsconfig.tests.json" }

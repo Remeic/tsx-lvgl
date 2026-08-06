@@ -17,6 +17,7 @@ managed_components/
 sdkconfig
 sdkconfig.old
 dependencies.lock
+!apps/esp-idf-v1/dependencies.lock
 !examples/esp-idf/tsx_lvgl_v1/dependencies.lock
 
 # Generated UI artifacts

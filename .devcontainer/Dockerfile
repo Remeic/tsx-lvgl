@@ -8,7 +8,7 @@ ENV NODE_HOME=/opt/node
 ENV PATH="${NODE_HOME}/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates curl xz-utils \
+    && apt-get install --no-install-recommends --yes ca-certificates curl xz-utils libsdl2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

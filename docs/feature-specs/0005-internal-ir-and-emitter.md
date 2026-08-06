@@ -15,15 +15,17 @@ flowchart LR
     TSX[Public TSX vocabulary] --> Core[@tsx-lvgl/core]
     Core --> Normalize[Internal IR normalization]
     Normalize --> IR[Opaque semantic IR]
-    IR --> Emitter[@tsx-lvgl/lvgl-emitter]
+    IR --> Emitter[Compiler-private LVGL target emitter]
     Emitter --> LVGL[LVGL 9 C]
+    Core --> LegacyEmitter[@tsx-lvgl/lvgl-emitter]
+    LegacyEmitter --> LVGL
     IR --> Future[Future target emitter]
 ```
 
 ## Acceptance criteria
 
-- [ ] Consumers cannot construct or depend on the internal IR shape through the public package entry point.
-- [x] `@tsx-lvgl/lvgl-emitter` owns LVGL-specific lowering and has an exhaustive unsupported-node diagnostic.
+- [x] Consumers cannot construct or depend on the internal IR shape through the public package entry point.
+- [x] The legacy `@tsx-lvgl/lvgl-emitter` owns legacy-node lowering; the React source target emitter stays compiler-private so no forgeable native-IR API is published.
 - [x] Compiler tests exercise the emitter through the compiler public seam, not private object mutation.
 - [ ] Adding a second target does not require changing TSX authoring types.
 - [x] Mutation scope includes the deterministic compiler and emitter modules.

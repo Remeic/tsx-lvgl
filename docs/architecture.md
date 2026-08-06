@@ -12,7 +12,7 @@ This preserves the useful part of the React idea—composition, declarative tree
 
 ### `core`
 
-Public interface: the supported TSX vocabulary, prop types, styles, signals and event declarations.
+Public interface: the legacy static TSX vocabulary and its exact prop types.
 
 The interface must remain smaller than raw LVGL. It contains only capabilities that can be validated, generated and tested consistently.
 
@@ -28,13 +28,21 @@ The interface includes diagnostics, deterministic output rules and asset/compile
 
 ### `lvgl-emitter`
 
-Adapter at the IR-to-firmware seam. It lowers validated IR to readable LVGL 9 C and a small native runtime. It knows LVGL; it does not know Waveshare pins, USB or board revision.
+Adapter for the legacy core tree at the IR-to-firmware seam. It lowers
+validated legacy nodes to readable LVGL 9 C and knows LVGL; it does not know
+Waveshare pins, USB or board revision. Source-entry compilation uses a
+compiler-private native target emitter after the parser has produced the same
+opaque, typed internal program; neither native program nor native emitter is a
+package-root API.
 
-The first host tracer bullet now has this adapter in `packages/lvgl-emitter`. The semantic `UiNode` shape is still structural and visible to the first public tests; issue #4 tracks making that IR opaque without weakening the compiler seam.
+The first host tracer bullet remains available through the legacy `UiNode`
+path. The React MVP keeps its semantic program private to the compiler target
+seam; neither package root exports `NativeProgram`, `NativeNode`, or action
+constructors.
 
 ### `boards`
 
-Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. V2 uses the managed Waveshare BSP path. V1, if the delivered board requires it, gets an explicit SH8601 adapter. The compiler never imports a board adapter.
+Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. The V1 applications use the pinned Waveshare SH8601/FT3168 BSP 1.1.4. `apps/esp-idf-v1` consumes the React MVP counter artifact for SDL/ESP parity; `examples/esp-idf/tsx_lvgl_v1` remains the legacy-core tracer bullet used by the guarded app-only reload workflow. These are intentionally separate targets, and the compiler never imports a board adapter.
 
 ### `simulator`
 
@@ -42,13 +50,26 @@ The simulator compiles the exact generated C and native runtime against LVGL SDL
 
 ## v0 language contract
 
-Implemented first: `Screen`, `View`, `Text` and `Button` with typed props, a static tree and deterministic LVGL C emission. This is the host-side tracer bullet that lets us validate the compiler seam before the board arrives.
+Implemented MVP: `Screen`, `View`, `Text` and `Button`, fragments,
+zero-argument static function composition, integer-only `useState`, native
+event callbacks, minimal flex layout, deterministic LVGL C, LVGL 9.5.0 SDL
+coverage and a V1 ESP-IDF integration target. The legacy static tree remains
+available for compatibility tests.
 
-Next in the same contract: `Image`, `Stack`, finite styles, scalar signals, derived values, visibility/enabled bindings, events and build-time list expansion.
+Deferred: `Image`, `Stack`, arbitrary styles, scalar values other than bounded
+integers, derived values, visibility/enabled bindings, props, lists and dynamic
+tree expansion.
 
-Deferred: arbitrary React imports, hooks/effects/context/suspense, runtime-created component types, DOM/CSS compatibility, hot reload and an unrestricted native-widget escape hatch.
+Also rejected: arbitrary React imports, effects/context/suspense, runtime-created
+component types, DOM/CSS compatibility, hot reload, and an unrestricted
+native-widget escape hatch.
 
 Every addition needs compiler diagnostics, generated-C coverage, native-host coverage and SDL coverage before it becomes part of the public interface.
+
+Known follow-up: `packages/compiler/src/source.ts` still combines source collection,
+validation, lowering, diagnostics and identity allocation. Splitting those
+responsibilities is maintainability debt for a later bounded change; this MVP
+does not expand the monolith further.
 
 ## Quality gates
 
@@ -59,4 +80,8 @@ Every addition needs compiler diagnostics, generated-C coverage, native-host cov
 - ESP-IDF builds use pinned versions and record firmware-size headroom;
 - custom firmware is not flashed before the board's factory state is backed up and restorable.
 
-The deterministic host compiler evaluates a root component twice and rejects divergent generated artifacts within one invocation. This catches stateful roots that change their output, but cannot prove that an opaque JavaScript function is pure across separate invocations. Reproducible builds therefore require pure components plus pinned tool and environment inputs; a controlled evaluator remains tracked in issue #7.
+The legacy host compiler evaluates a root component twice and rejects divergent
+artifacts within one invocation. The source-entry compiler instead parses the
+bounded TSX subset, so hook order, component-instance paths and native update
+targets are deterministic by construction. Both paths still require pinned
+tool/environment inputs for reproducible builds.
