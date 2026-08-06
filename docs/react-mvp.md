@@ -86,11 +86,13 @@ guarded `board:reload` workflow and includes the visible boot/reload diagnostic;
 it is not the parity artifact for `examples/counter.tsx`.
 
 The pinned mutation gate is `./tools/dev mutation`, which runs independent
-legacy and MVP Stryker configurations, each with break threshold 80. The final
-exact Node 24.19.0 run had no timeouts: legacy instrumented 321 mutants (241
-killed, 0 survived, 79 compile errors, 1 ignored; 100.00% effective), while
-the MVP compiler+React slice instrumented 1,190 (647 killed, 39 survived, 504
-compile errors, 0 ignored; 94.31% effective, `647 / (647 + 39)`). The MVP
+legacy and MVP Stryker configurations. The legacy configuration preserves
+origin/main's high/low/break 100/100/100 policy with concurrency 1; the MVP
+configuration uses high/low/break 80/70/80 with concurrency 4. The final exact
+Node 24.19.0 run had no timeouts: legacy instrumented 321 mutants (240
+killed, 0 survived, 80 compile errors, 1 ignored; 100.00% effective), while
+the MVP compiler+React slice instrumented 1,190 (644 killed, 39 survived, 507
+compile errors, 0 ignored; 94.29% effective, `644 / (644 + 39)`). The MVP
 scope includes `packages/react/src/**/*.ts`; reports are written to
 `reports/mutation/legacy/` and `reports/mutation/mvp/`, so legacy mutants cannot
 dilute the MVP score. The remaining survivors and their dispositions are

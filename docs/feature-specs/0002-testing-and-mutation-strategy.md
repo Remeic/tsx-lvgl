@@ -53,17 +53,18 @@ source-entry slice expands the deterministic parser, compatibility-surface and
 native-emitter behavior substantially. `./tools/dev mutation` runs two
 independent blocking configurations so the legacy baseline cannot dilute the
 MVP score: `mutation:legacy` covers `packages/core/src/**/*.ts` and the legacy
-`packages/lvgl-emitter/src/**/*.ts`; `mutation:mvp` covers
-`packages/compiler/src/**/*.ts` and `packages/react/src/**/*.ts`. Both keep a
-break threshold of 80. CI uploads both SHA-bound report directories under
-`reports/mutation/`.
+`packages/lvgl-emitter/src/**/*.ts`; it preserves the origin/main policy of
+high/low/break 100 and concurrency 1. `mutation:mvp` covers
+`packages/compiler/src/**/*.ts` and `packages/react/src/**/*.ts`, with its
+independent high/low/break 80/70/80 policy and concurrency 4. CI uploads both
+SHA-bound report directories under `reports/mutation/`.
 
 The final exact pinned run used Node 24.19.0 and had no timeouts:
 
-- Legacy: 321 instrumented, 241 killed, 0 survived, 79 compile errors, 1
-  ignored, 0 timeouts, effective score 100.00% (`241 / (241 + 0)`).
-- MVP: 1,190 instrumented, 647 killed, 39 survived, 504 compile errors, 0
-  ignored, 0 timeouts, effective score 94.31% (`647 / (647 + 39)`).
+- Legacy: 321 instrumented, 240 killed, 0 survived, 80 compile errors, 1
+  ignored, 0 timeouts, effective score 100.00% (`240 / (240 + 0)`).
+- MVP: 1,190 instrumented, 644 killed, 39 survived, 507 compile errors, 0
+  ignored, 0 timeouts, effective score 94.29% (`644 / (644 + 39)`).
 
 Survivor dispositions are recorded rather than hidden behind a per-file
 counter. The compiler-private native emitter and React JSX runtime have zero
@@ -87,7 +88,7 @@ hardware confidence.
 - [ ] TypeScript checker rejects mutants that cannot compile.
 - [x] Mutation report is reproducible with the lockfile and Node 24.19.0.
 - [x] The final mutation scores and survivor dispositions are recorded in the SHA-bound evidence.
-- [ ] Generated C has a host compile check before hardware flashing.
+- [x] Generated C has a host compile check before hardware flashing.
 - [ ] SDL visual evidence is attached for visual UI features.
 - [ ] ESP-IDF Unity/serial tests cover board integration at the hardware milestone.
 - [x] The guarded app-only reload plan is tested without executing hardware commands.

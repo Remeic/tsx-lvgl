@@ -21,18 +21,20 @@ const sharedConfig = {
     "apps/**/build/**",
     "managed_components/**",
     "apps/**/managed_components/**",
+    "examples/**/build/**",
+    "examples/**/managed_components/**",
   ],
   thresholds: {
-    // Keep the pre-existing quality gate. The source-entry parser and emitter
-    // need meaningful behavior/diagnostic coverage rather than a relaxed floor.
-    high: 80,
-    low: 70,
-    break: 80,
+    // Preserve origin/main's strict legacy gate. The MVP config overrides this
+    // policy explicitly for the independent source-entry slice.
+    high: 100,
+    low: 100,
+    break: 100,
   },
   timeoutMS: 5000,
-  // Keep the worker count bounded so mutation runs remain reproducible without
-  // turning the full source-entry suite into an unbounded process fan-out.
-  concurrency: 4,
+  // Preserve origin/main's serial legacy run for reproducible resource use.
+  // The MVP config overrides this with its independently bounded concurrency.
+  concurrency: 1,
   cleanTempDir: true,
 };
 
