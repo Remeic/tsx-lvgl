@@ -10,6 +10,19 @@ The supported reproducible path is the Dev Container. Install Docker Desktop onc
 ./tools/dev mutation
 ```
 
+The guarded legacy-core tracer bullet has a separate software path:
+
+```bash
+npm run generate:board
+npm run board:build
+npm run board:reload -- --dry-run
+```
+
+`board:build` targets `examples/esp-idf/tsx_lvgl_v1`; `./tools/dev esp-idf-v1`
+targets the React MVP artifact under `apps/esp-idf-v1`. Both are software-only
+builds. The reload dry run prints an app-only plan and performs no hardware or
+recovery-directory access.
+
 The container pins ESP-IDF 5.5.5, its toolchain/QEMU tools, Node.js 24.19.0,
 npm 11.17.0 and the SDL development headers used by the LVGL 9.5.0 simulator.
 The image is pinned by digest and the Node archives are checksum-verified for

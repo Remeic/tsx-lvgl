@@ -33,6 +33,7 @@ flowchart TD
 | Generated C compile | Emitter output is syntactically and API compatible | Every emitter change |
 | LVGL SDL screenshots | Layout and visual behavior without hardware | Every visual change |
 | ESP-IDF build matrix | Board adapter and generated artifact integrate cleanly | Every board/runtime change |
+| Guarded board-reload plan tests | App-only offset, identity preflight and forbidden-operation policy | Every reload-policy change |
 | ESP32 Unity/serial smoke | Real boot, touch, display, timing and memory behavior | Hardware milestone |
 | Recovery validation | Same-board factory restore remains possible | Before and after risky flash work |
 | Independent evaluator | Fresh architecture, testing, safety and maintainability review | Before milestone release |
@@ -59,10 +60,10 @@ break threshold of 80. CI uploads both SHA-bound report directories under
 
 The final exact pinned run used Node 24.19.0 and had no timeouts:
 
-- Legacy: 300 instrumented, 222 killed, 0 survived, 77 compile errors, 1
-  ignored, effective score 100.00% (`222 / (222 + 0)`).
-- MVP: 1,190 instrumented, 648 killed, 40 survived, 502 compile errors, 0
-  ignored, effective score 94.19% (`648 / (648 + 40)`).
+- Legacy: 321 instrumented, 241 killed, 0 survived, 79 compile errors, 1
+  ignored, 0 timeouts, effective score 100.00% (`241 / (241 + 0)`).
+- MVP: 1,190 instrumented, 647 killed, 39 survived, 504 compile errors, 0
+  ignored, 0 timeouts, effective score 94.31% (`647 / (647 + 39)`).
 
 Survivor dispositions are recorded rather than hidden behind a per-file
 counter. The compiler-private native emitter and React JSX runtime have zero
@@ -89,6 +90,7 @@ hardware confidence.
 - [ ] Generated C has a host compile check before hardware flashing.
 - [ ] SDL visual evidence is attached for visual UI features.
 - [ ] ESP-IDF Unity/serial tests cover board integration at the hardware milestone.
+- [x] The guarded app-only reload plan is tested without executing hardware commands.
 - [ ] Recovery evidence is recorded after the first custom flash.
 - [ ] A fresh SOL high evaluator reviews the completed milestone in a separate thread.
 - [ ] Findings become GitHub issues or linked fixes; no finding is silently dismissed.

@@ -5,3 +5,11 @@ dist
 test-dist
 reports
 arrival-backup-*
+
+# Board recovery data and credentials must never enter a Docker build context.
+*.dump
+*.flash
+*.nvs
+*.key
+*.pem
+*.token

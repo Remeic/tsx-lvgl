@@ -6,6 +6,7 @@
 
 typedef struct lv_obj_t lv_obj_t;
 typedef struct lv_event_t lv_event_t;
+typedef void (*lv_event_cb_t)(lv_event_t *event);
 typedef int32_t lv_event_code_t;
 
 enum {
@@ -25,9 +26,11 @@ void lv_label_set_text_static(lv_obj_t *label, const char *text);
 lv_obj_t *lv_button_create(lv_obj_t *parent);
 void lv_obj_set_flex_flow(lv_obj_t *obj, int32_t flow);
 void lv_obj_set_flex_align(lv_obj_t *obj, int32_t main_place, int32_t cross_place, int32_t track_place);
+void lv_obj_center(lv_obj_t *obj);
 void lv_obj_set_style_pad_all(lv_obj_t *obj, int32_t value, int32_t selector);
 void lv_obj_set_style_pad_row(lv_obj_t *obj, int32_t value, int32_t selector);
 void lv_obj_set_style_pad_column(lv_obj_t *obj, int32_t value, int32_t selector);
-void lv_obj_add_event_cb(lv_obj_t *obj, void (*callback)(lv_event_t *), lv_event_code_t filter, void *user_data);
+void *lv_event_get_user_data(lv_event_t *event);
+void lv_obj_add_event_cb(lv_obj_t *obj, lv_event_cb_t callback, lv_event_code_t filter, void *user_data);
 lv_event_code_t lv_event_get_code(lv_event_t *event);
 void lv_obj_send_event(lv_obj_t *obj, lv_event_code_t event_code, void *param);

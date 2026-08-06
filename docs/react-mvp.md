@@ -80,12 +80,17 @@ Waveshare BSP `1.1.4` with ESP-IDF 5.5.5 and reports firmware size. The
 `generated:parity` check compares the source output with the simulator and
 ESP-IDF `ui.c` byte-for-byte.
 
+The legacy-core tracer bullet at `examples/esp-idf/tsx_lvgl_v1` is intentionally
+separate from that React MVP target. It is the firmware image used by the
+guarded `board:reload` workflow and includes the visible boot/reload diagnostic;
+it is not the parity artifact for `examples/counter.tsx`.
+
 The pinned mutation gate is `./tools/dev mutation`, which runs independent
 legacy and MVP Stryker configurations, each with break threshold 80. The final
-exact Node 24.19.0 run had no timeouts: legacy instrumented 300 mutants (222
-killed, 0 survived, 77 compile errors, 1 ignored; 100.00% effective), while
-the MVP compiler+React slice instrumented 1,190 (648 killed, 40 survived, 502
-compile errors, 0 ignored; 94.19% effective, `648 / (648 + 40)`). The MVP
+exact Node 24.19.0 run had no timeouts: legacy instrumented 321 mutants (241
+killed, 0 survived, 79 compile errors, 1 ignored; 100.00% effective), while
+the MVP compiler+React slice instrumented 1,190 (647 killed, 39 survived, 504
+compile errors, 0 ignored; 94.31% effective, `647 / (647 + 39)`). The MVP
 scope includes `packages/react/src/**/*.ts`; reports are written to
 `reports/mutation/legacy/` and `reports/mutation/mvp/`, so legacy mutants cannot
 dilute the MVP score. The remaining survivors and their dispositions are
@@ -98,6 +103,8 @@ equal the artifact SHA.
 
 None of those software gates proves physical boot, SH8601 panel output,
 FT3168 touch, flush timing, power sequencing, board revision, or recovery. The
-V1 application uses the real BSP path, but `docs/recovery.md` remains
-`HARD STOP — FACTORY RECOVERY NOT PROVEN`. No flash, erase, eFuse operation, or
-board mutation is part of this MVP.
+V1 applications use the real BSP path. The current recovery manifest is
+`CONDITIONAL PASS`, but it never authorizes a write by itself: the guarded
+reload wrapper still requires a fresh same-session identity/security/eFuse
+preflight and writes only the app partition. No flash, erase, eFuse operation,
+or board mutation is part of this validation.

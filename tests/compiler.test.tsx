@@ -26,16 +26,27 @@ test("compiles a TSX tree into deterministic LVGL C", () => {
     first.files["generated/ui.c"],
     `#include "lvgl.h"
 
+static void tsx_lvgl_action_increment(lv_event_t *event)
+{
+    lv_obj_t *label = lv_event_get_user_data(event);
+    lv_label_set_text(label, "Touched");
+}
+
 void tsx_lvgl_ui_create(void)
 {
     lv_obj_t *root = lv_screen_active();
+    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *root_0 = lv_label_create(root);
     lv_label_set_text(root_0, "0");
     lv_obj_t *root_1 = lv_obj_create(root);
+    lv_obj_set_flex_flow(root_1, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(root_1, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *root_1_0 = lv_button_create(root_1);
     lv_obj_t *root_1_0_label = lv_label_create(root_1_0);
     lv_label_set_text(root_1_0_label, "+");
-    /* TSX-LVGL action: increment */
+    lv_obj_center(root_1_0_label);
+    lv_obj_add_event_cb(root_1_0, tsx_lvgl_action_increment, LV_EVENT_CLICKED, root_1_0_label);
 }
 `,
   );
@@ -347,6 +358,22 @@ test("rejects malformed node shapes at the compiler boundary", () => {
     assert.throws(
       () => compileProject({ root: (() => invalidNode) as unknown as () => UiNode }),
       /Invalid props at root\.props\.extra/,
+    );
+  }
+});
+
+test("rejects unexpected props on public container nodes", () => {
+  for (const type of ["Screen", "View", "Fragment"] as const) {
+    const node = {
+      kind: "element",
+      type,
+      props: { unexpected: true },
+      children: [],
+    } as unknown as UiNode;
+
+    assert.throws(
+      () => compileProject({ root: (() => node) as unknown as () => UiNode }),
+      new RegExp(`Invalid props at root\\.props\\.unexpected`),
     );
   }
 });

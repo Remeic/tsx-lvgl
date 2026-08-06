@@ -77,10 +77,17 @@ packages/compiler      source analysis, private native lowering and compileProje
 packages/lvgl-emitter  legacy core-tree to LVGL 9 C adapter
 packages/react         React-shaped compatibility authoring module
 apps/simulator         LVGL 9.5.0 SDL build using the generated C
-apps/esp-idf-v1        pinned ESP-IDF V1 integration target
-examples/              source-entry fixtures
+apps/esp-idf-v1        React MVP source-entry ESP-IDF V1 integration target
+examples/counter.tsx   React MVP source-entry fixture
+examples/esp-idf/...   legacy-core V1 tracer bullet for guarded reload
 docs/                  architecture and operational recovery decisions
 ```
+
+The two ESP-IDF layouts are intentional: `apps/esp-idf-v1` builds the same
+React-shaped `examples/counter.tsx` artifact used by SDL and parity checks;
+`examples/esp-idf/tsx_lvgl_v1` is the legacy-core tracer bullet used by the
+guarded `board:reload` workflow and its visible boot/reload diagnostic. They
+share the pinned V1 BSP but are separate firmware targets.
 
 The module interfaces are intentionally small. Complexity should live behind deep modules and clean seams, not in every application screen.
 

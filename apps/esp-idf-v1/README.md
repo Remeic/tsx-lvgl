@@ -14,9 +14,13 @@ ESP-IDF `5.5.5`. Run the build through the pinned container:
 ```
 
 The CMake custom command dependency-tracks the source entry, compiler, emitter,
-compatibility module, and lockfile, then regenerates before the firmware target
-builds. The recovery manifest remains a hard stop: never flash from this
-workflow. A successful pinned ESP-IDF build proves software compilation and BSP
-integration only; it does not prove physical boot, display pixels, touch input,
-timing, power, or V1 board behavior. Record the standard ESP-IDF size report
-with the exact commit and container identity.
+compatibility module, package/TypeScript configuration, and lockfile, then
+regenerates before the firmware target builds. The current recovery manifest is
+`CONDITIONAL PASS`, but every physical write still requires a fresh same-session
+identity/security/eFuse preflight; never flash from this workflow. A successful
+pinned ESP-IDF build proves software compilation and BSP integration only; it
+does not prove physical boot, display pixels, touch input, timing, power, or V1
+board behavior. The separate legacy-core tracer bullet at
+`examples/esp-idf/tsx_lvgl_v1` is the only target used by the guarded
+`board:reload` workflow. Record the standard ESP-IDF size report with the exact
+commit and container identity.

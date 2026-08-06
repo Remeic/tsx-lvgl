@@ -42,7 +42,7 @@ constructors.
 
 ### `boards`
 
-Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. The V1 application uses the pinned Waveshare SH8601/FT3168 BSP 1.1.4. The compiler never imports a board adapter.
+Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. The V1 applications use the pinned Waveshare SH8601/FT3168 BSP 1.1.4. `apps/esp-idf-v1` consumes the React MVP counter artifact for SDL/ESP parity; `examples/esp-idf/tsx_lvgl_v1` remains the legacy-core tracer bullet used by the guarded app-only reload workflow. These are intentionally separate targets, and the compiler never imports a board adapter.
 
 ### `simulator`
 

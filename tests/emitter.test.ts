@@ -23,7 +23,9 @@ test("emits the legacy core tree deterministically", () => {
   assert.equal(first, emitLvgl(tree));
   assert.match(first, /lv_obj_t \*root_0 = lv_obj_create\(root\);/);
   assert.match(first, /lv_label_set_text\(root_0_0, "hello"\)/);
-  assert.match(first, /TSX-LVGL action: confirm/);
+  assert.match(first, /static void tsx_lvgl_action_confirm\(lv_event_t \*event\)/);
+  assert.match(first, /lv_obj_center\(root_0_1_label\);/);
+  assert.match(first, /lv_obj_add_event_cb\(root_0_1, tsx_lvgl_action_confirm, LV_EVENT_CLICKED, root_0_1_label\);/);
 });
 
 test("escapes legacy labels and action comments before C emission", () => {
@@ -39,7 +41,8 @@ test("escapes legacy labels and action comments before C emission", () => {
     }],
   });
   assert.match(output, /quote\\" slash\\\\ newline\\n \\?/);
-  assert.match(output, /TSX-LVGL action: safe_action/);
+  assert.match(output, /static void tsx_lvgl_action_safe_action\(lv_event_t \*event\)/);
+  assert.match(output, /lv_label_set_text\(label, "Touched"\);/);
 });
 
 test("rejects malformed legacy nodes at the emitter boundary", () => {

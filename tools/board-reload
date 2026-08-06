@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+has_dry_run=0
+has_execute=0
+for argument in "$@"; do
+  if [[ "${argument}" == "--dry-run" ]]; then
+    has_dry_run=1
+  fi
+  if [[ "${argument}" == "--execute" ]]; then
+    has_execute=1
+  fi
+done
+
+if [[ "${TSX_LVGL_SKIP_BUILD:-0}" != "1" && "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
+  npm run board:build
+fi
+
+exec node "${repo_root}/scripts/board-reload.mjs" "$@"
