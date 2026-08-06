@@ -16,7 +16,10 @@ enum {
   LV_FLEX_ALIGN_START = 0,
   LV_FLEX_ALIGN_CENTER = 1,
   LV_FLEX_ALIGN_END = 2,
+  LV_OBJ_FLAG_HIDDEN = 1,
 };
+
+#define LV_SIZE_CONTENT ((int32_t)0x7FFF)
 
 lv_obj_t *lv_screen_active(void);
 lv_obj_t *lv_obj_create(lv_obj_t *parent);
@@ -30,6 +33,10 @@ void lv_obj_center(lv_obj_t *obj);
 void lv_obj_set_style_pad_all(lv_obj_t *obj, int32_t value, int32_t selector);
 void lv_obj_set_style_pad_row(lv_obj_t *obj, int32_t value, int32_t selector);
 void lv_obj_set_style_pad_column(lv_obj_t *obj, int32_t value, int32_t selector);
+void lv_obj_remove_style_all(lv_obj_t *obj);
+void lv_obj_set_size(lv_obj_t *obj, int32_t width, int32_t height);
+void lv_obj_add_flag(lv_obj_t *obj, int32_t flag);
+void lv_obj_remove_flag(lv_obj_t *obj, int32_t flag);
 void *lv_event_get_user_data(lv_event_t *event);
 void lv_obj_add_event_cb(lv_obj_t *obj, lv_event_cb_t callback, lv_event_code_t filter, void *user_data);
 lv_event_code_t lv_event_get_code(lv_event_t *event);

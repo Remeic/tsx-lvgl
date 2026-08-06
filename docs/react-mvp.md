@@ -15,17 +15,21 @@ the ESP32.
 | Zero-argument local function components | Supported; each JSX instance gets independent native state slots |
 | `useState(0)`-style hooks | Supported only with signed 32-bit integer literals and fixed top-level hook order |
 | `Text text={count}` or `<Text>{count}</Text>` | Supported for a direct state identifier |
+| Derived Text expressions, e.g. `text={count * 2 + 1}` | Supported; lowered to saturating int32 arithmetic (`+ - * / %`), recomputed on state change. `/` and `%` are guarded (divide-by-zero yields 0) |
 | Static integer Text literals | Exact decimal rendering is preserved, including values outside int32; state remains int32-only |
-| `setCount(1)` | Supported for signed 32-bit integer literals |
-| `setCount(previous => previous + 1)` | Supported; native update is saturating |
-| `setCount(previous => previous - 1)` | Supported; native update is saturating |
+| Compile-time string concatenation, e.g. `text={"#" + name}` | Supported; folded to one literal. Runtime string state stays unsupported |
+| `setCount(1)` / `setCount(expr)` | Supported for signed 32-bit integer literals and derived int32 expressions |
+| `setCount(previous => previous + 1)` / `- 1` / `* 2` / `/ 2` | Supported; native update is saturating (division guarded) |
 | `onClick={handler}` and `onClick={() => ...}` | Supported when the handler is same-component and contains one supported state update |
+| State-driven conditionals: `{cond && <X/>}`, `{cond ? <A/> : <B/>}` | Supported; both branches are built once and toggled by `LV_OBJ_FLAG_HIDDEN` from an int32 predicate. Constant predicates fold at compile time |
+| Component props (literals and state): `<Item value={count} />` | Supported; resolved by inlining each instance. A state prop forwards the caller's slot; props are a single destructured object parameter |
+| Static lists: `{[a, b, c].map(item => <X ... />)}` | Supported for inline array literals of int/string literals, unrolled to fixed children; items flow into props. Runtime-length lists are rejected |
 | `View direction="row" | "column"` | Supported |
 | `View align="start" | "center" | "end"` | Supported |
 | `View gap={0}` | Supported for non-negative signed 32-bit integer literals |
-| Component props, effects, context, refs, suspense, lists, conditional trees | Rejected with a source-positioned diagnostic |
+| Effects, context, refs, suspense, async components/handlers | Rejected with a source-positioned diagnostic: they need a JavaScript runtime the fixed-tree native target does not include |
 | Out-of-range setter or functional-update literals | Rejected; arithmetic overflow is saturated at runtime |
-| Arbitrary expressions, derived Text values, async code, time/random/env reads | Rejected or outside the source-entry contract |
+| Runtime string values, floats, time/random/env reads, arbitrary calls | Rejected or outside the source-entry contract |
 | Physical display/touch/power behavior | Not proven by this MVP |
 
 The source compiler API is:
@@ -50,8 +54,10 @@ objects and static label buffers; the generated callback never rebuilds the
 tree.
 
 This is a compiler contract, not a claim that JavaScript numbers are generally
-safe on the device. Floating point, strings, objects, arrays, arbitrary setter
-expressions, and runtime hook dispatch are outside the contract.
+safe on the device. Floating point, runtime strings, objects, arrays, arbitrary
+calls, and runtime hook dispatch are outside the contract. Integer arithmetic
+(`+ - * / %`) and comparisons over state are supported and lower to saturating
+int32 operations; division and modulo are guarded against a zero divisor.
 
 ## Rejected semantics and diagnostics
 
@@ -60,13 +66,15 @@ include the absolute entry path, one-based line, and one-based column, for
 example:
 
 ```text
-entry.tsx:4:19: Text bindings must be a direct state identifier or literal
+entry.tsx:4:19: unknown identifier total in expression
 ```
 
 The compiler rejects conditional hook calls, non-literal initial state, hook
-reordering constructs, unsupported arithmetic, unknown handlers, spread props,
-component props, dynamic children, and non-fixed trees. This keeps component
-instance identity and hook order statically knowable.
+reordering constructs, out-of-range or floating-point literals, unknown handlers
+and identifiers, spread props, runtime-length lists, effects/context/refs/async,
+and any construct that would make the object tree dynamic. Props, static lists,
+and conditionals are resolved at build time, so component instance identity and
+hook order stay statically knowable.
 
 ## Evidence boundary
 

@@ -1,6 +1,18 @@
 import { readFileSync } from "node:fs";
 import * as ts from "typescript";
-import type { NativeAction, NativeNode, NativeProgram, NativeState, NativeText } from "./native-program.js";
+import {
+  exprStates,
+  type BinaryOp,
+  type CompareOp,
+  type NativeAction,
+  type NativeBinding,
+  type NativeCondition,
+  type NativeExpr,
+  type NativeNode,
+  type NativeProgram,
+  type NativeState,
+  type NativeText,
+} from "./native-program.js";
 
 const REACT_MODULE = "@tsx-lvgl/react";
 const MIN_INT32 = -2147483648n;
@@ -34,13 +46,22 @@ interface ComponentDeclaration {
 interface StateBinding {
   readonly sourceName: string;
   readonly setterName: string;
-  readonly state: MutableState;
+  readonly stateId: string;
 }
 
-interface MutableState {
-  readonly id: string;
-  readonly initial: number;
-  readonly bindingIds: string[];
+/**
+ * A build-time value bound to an identifier: a state slot, or a compile-time
+ * constant fed in through a prop or a list-item parameter. Props and list items
+ * carry no device runtime; they are resolved entirely here.
+ */
+type CompileValue =
+  | { readonly kind: "int"; readonly value: bigint }
+  | { readonly kind: "string"; readonly value: string }
+  | { readonly kind: "state"; readonly binding: StateBinding };
+
+interface PropValue {
+  readonly value: CompileValue;
+  readonly node: ts.Node;
 }
 
 interface ComponentContext {
@@ -49,6 +70,8 @@ interface ComponentContext {
   readonly statesBySourceName: Map<string, StateBinding>;
   readonly setters: Map<string, StateBinding>;
   readonly handlers: Map<string, string>;
+  /** Prop and list-item bindings visible to expressions in this instance. */
+  readonly env: Map<string, CompileValue>;
   readonly actionIndexes: { value: number };
   hookIndex: number;
 }
@@ -57,6 +80,19 @@ interface SourceProgram {
   readonly program: NativeProgram;
   readonly entryFile: string;
 }
+
+const UNSUPPORTED_REACT_IMPORTS: Readonly<Record<string, string>> = {
+  useEffect: "effects",
+  useLayoutEffect: "layout effects",
+  useRef: "refs",
+  useContext: "context",
+  createContext: "context",
+  useMemo: "memoization hooks",
+  useCallback: "memoization hooks",
+  useReducer: "reducers",
+  Suspense: "suspense",
+  use: "the use() hook",
+};
 
 export function compileSourceToProgram(config: SourceCompileConfig): SourceProgram {
   const sourceText = readFileSync(config.entryFile, "utf8");
@@ -90,7 +126,10 @@ class SourceCompiler {
   private readonly components = new Map<string, ComponentDeclaration>();
   private readonly intrinsicNames = new Map<string, string>();
   private readonly hookNames = new Set<string>();
-  private readonly states: MutableState[] = [];
+  private readonly states: NativeState[] = [];
+  private readonly bindings: NativeBinding[] = [];
+  private readonly conditions: NativeCondition[] = [];
+  private readonly bindingCounters = new Map<string, number>();
   private readonly actions: Record<string, NativeAction> = {};
   private readonly sourceFile: ts.SourceFile;
   private defaultRootName: string | undefined;
@@ -116,15 +155,12 @@ class SourceCompiler {
       this.fail(rootComponent.node, "default root must return <Screen>...</Screen>");
     }
 
-    const states: NativeState[] = this.states.map((state) => ({
-      id: state.id,
-      initial: state.initial,
-      bindingIds: [...state.bindingIds],
-    }));
     const program: NativeProgram = {
       format: "tsx-lvgl-native-program-v0",
       root,
-      states,
+      states: [...this.states],
+      bindings: [...this.bindings],
+      conditions: [...this.conditions],
       actions: { ...this.actions },
     };
     if (this.firstButtonActionId !== undefined) {
@@ -211,8 +247,16 @@ class SourceCompiler {
         case "useState":
           this.hookNames.add(local);
           break;
-        default:
+        default: {
+          const feature = UNSUPPORTED_REACT_IMPORTS[imported];
+          if (feature !== undefined) {
+            this.fail(
+              specifier,
+              `${imported} is unsupported: ${feature} need a JavaScript runtime, which the fixed-tree native target does not include`,
+            );
+          }
           this.fail(specifier, `unsupported @tsx-lvgl/react import ${imported}`);
+        }
       }
     }
   }
@@ -221,6 +265,7 @@ class SourceCompiler {
     component: ComponentDeclaration,
     instancePath: string,
     stack: readonly string[],
+    props?: ReadonlyMap<string, PropValue>,
   ): NativeNode {
     if (this.hasModifier(component.node, ts.SyntaxKind.AsyncKeyword)) {
       this.fail(component.node, "async components are unsupported in the fixed-tree MVP");
@@ -228,9 +273,8 @@ class SourceCompiler {
     if (stack.includes(component.name)) {
       this.fail(component.node, `recursive component composition is unsupported (${component.name})`);
     }
-    if (component.node.parameters.length > 0) {
-      this.fail(component.node.parameters[0]!, "component props are not supported yet; compose zero-argument components");
-    }
+
+    const env = this.bindProps(component, props);
 
     const context: ComponentContext = {
       component,
@@ -238,6 +282,7 @@ class SourceCompiler {
       statesBySourceName: new Map(),
       setters: new Map(),
       handlers: new Map(),
+      env,
       actionIndexes: { value: 0 },
       hookIndex: 0,
     };
@@ -265,6 +310,53 @@ class SourceCompiler {
     return returned;
   }
 
+  /** Resolve call-site props against a component's single destructured parameter. */
+  private bindProps(component: ComponentDeclaration, props?: ReadonlyMap<string, PropValue>): Map<string, CompileValue> {
+    const env = new Map<string, CompileValue>();
+    const parameters = component.node.parameters;
+    if (parameters.length === 0) {
+      const first = props !== undefined ? [...props.values()][0] : undefined;
+      if (first !== undefined) this.fail(first.node, `component ${component.name} does not accept props`);
+      return env;
+    }
+    if (parameters.length > 1) this.fail(parameters[1]!, "components accept at most one destructured props parameter");
+    const parameter = parameters[0]!;
+    if (!ts.isObjectBindingPattern(parameter.name)) {
+      this.fail(parameter, "component props must be a single destructured object parameter, for example ({ value })");
+    }
+    const required = new Set<string>();
+    for (const element of parameter.name.elements) {
+      if (element.dotDotDotToken !== undefined) this.fail(element, "rest props are unsupported");
+      if (element.propertyName !== undefined || !ts.isIdentifier(element.name)) {
+        this.fail(element, "props must be plain destructured names without renaming or nesting");
+      }
+      const name = element.name.text;
+      required.add(name);
+      const provided = props?.get(name);
+      if (provided === undefined) {
+        if (element.initializer !== undefined) {
+          env.set(name, this.readDefaultProp(element.initializer));
+          continue;
+        }
+        this.fail(element, `missing required prop ${name}`);
+      }
+      env.set(name, provided.value);
+    }
+    if (props !== undefined) {
+      for (const [name, entry] of props) {
+        if (!required.has(name)) this.fail(entry.node, `unknown prop ${name} for component ${component.name}`);
+      }
+    }
+    return env;
+  }
+
+  private readDefaultProp(initializer: ts.Expression): CompileValue {
+    const literal = this.tryParseIntegerLiteral(initializer);
+    if (literal !== undefined) return { kind: "int", value: literal };
+    if (ts.isStringLiteral(initializer)) return { kind: "string", value: initializer.text };
+    this.fail(initializer, "prop defaults must be an integer or string literal");
+  }
+
   private readComponentVariable(statement: ts.VariableStatement, context: ComponentContext): void {
     if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) {
       this.fail(statement, "component locals must be const declarations");
@@ -277,7 +369,7 @@ class SourceCompiler {
       if (!ts.isIdentifier(declaration.name) || declaration.initializer === undefined || !ts.isArrowFunction(declaration.initializer)) {
         this.fail(declaration, "unsupported component local; only useState destructuring and arrow event handlers are supported");
       }
-      const actionId = this.addHandler(declaration.name.text, declaration.initializer, context, declaration);
+      const actionId = this.addHandler(declaration.initializer, context);
       context.handlers.set(declaration.name.text, actionId);
     }
   }
@@ -295,32 +387,22 @@ class SourceCompiler {
     }
     if (initializer.arguments.length !== 1) this.fail(initializer, "useState requires one signed 32-bit integer literal");
     const initial = this.parseInitialInteger(initializer.arguments[0]!);
-    const state: MutableState = {
-      id: `${sanitize(context.instancePath)}_s${context.hookIndex}`,
-      initial,
-      bindingIds: [],
-    };
+    const stateId = `${sanitize(context.instancePath)}_s${context.hookIndex}`;
     context.hookIndex += 1;
-    this.states.push(state);
-    const stateBinding: StateBinding = { sourceName: stateName.text, setterName: setterName.text, state };
+    this.states.push({ id: stateId, initial });
+    const stateBinding: StateBinding = { sourceName: stateName.text, setterName: setterName.text, stateId };
     context.statesBySourceName.set(stateName.text, stateBinding);
     context.setters.set(setterName.text, stateBinding);
   }
 
-  private addHandler(
-    name: string,
-    handler: ts.ArrowFunction,
-    context: ComponentContext,
-    diagnosticNode: ts.Node,
-  ): string {
+  private addHandler(handler: ts.ArrowFunction, context: ComponentContext): string {
     const actionId = `${sanitize(context.instancePath)}_a${context.actionIndexes.value}`;
     context.actionIndexes.value += 1;
-    const action = this.parseHandler(handler, context, diagnosticNode);
-    this.actions[actionId] = action;
+    this.actions[actionId] = this.parseHandler(handler, context);
     return actionId;
   }
 
-  private parseHandler(handler: ts.ArrowFunction, context: ComponentContext, diagnosticNode: ts.Node): NativeAction {
+  private parseHandler(handler: ts.ArrowFunction, context: ComponentContext): NativeAction {
     if (this.hasModifier(handler, ts.SyntaxKind.AsyncKeyword)) {
       this.fail(handler, "async event handlers are unsupported in the fixed-tree MVP");
     }
@@ -329,12 +411,13 @@ class SourceCompiler {
       ? this.readSingleHandlerStatement(handler.body, handler)
       : handler.body;
     if (!ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)) {
-      this.fail(diagnosticNode, "event handlers must call a local state setter");
+      this.fail(handler, "event handlers must call a local state setter");
     }
     const binding = context.setters.get(expression.expression.text);
     if (binding === undefined) this.fail(expression.expression, `unknown state setter ${expression.expression.text}`);
     if (expression.arguments.length !== 1) this.fail(expression, "state setters require exactly one update argument");
-    return this.parseStateUpdate(binding, expression.arguments[0]!);
+    const expr = this.parseStateUpdate(binding, expression.arguments[0]!, context);
+    return { kind: "assign", stateId: binding.stateId, expr };
   }
 
   private readSingleHandlerStatement(block: ts.Block, diagnosticNode: ts.Node): ts.Expression {
@@ -345,41 +428,26 @@ class SourceCompiler {
     return statement.expression;
   }
 
-  private parseStateUpdate(binding: StateBinding, update: ts.Expression): NativeAction {
+  private parseStateUpdate(binding: StateBinding, update: ts.Expression, context: ComponentContext): NativeExpr {
     const literal = this.tryParseIntegerLiteral(update);
     if (literal !== undefined) {
-      if (literal < MIN_INT32 || literal > MAX_INT32) {
-        this.fail(update, "state setter integer literal must be a signed 32-bit integer literal");
+      return { kind: "literal", value: this.requireInt32(literal, update, "state setter integer literal must be a signed 32-bit integer literal") };
+    }
+    if (ts.isArrowFunction(update)) {
+      if (this.hasModifier(update, ts.SyntaxKind.AsyncKeyword)) {
+        this.fail(update, "async state updates are unsupported in the fixed-tree MVP");
       }
-      return { kind: "set", stateId: binding.state.id, value: Number(literal) };
+      if (update.parameters.length !== 1 || !ts.isIdentifier(update.parameters[0]!.name)) {
+        this.fail(update, "functional state updates require one previous-value parameter");
+      }
+      const previousName = (update.parameters[0]!.name as ts.Identifier).text;
+      const body = ts.isBlock(update.body) ? this.readSingleHandlerStatement(update.body, update) : update.body;
+      const env = new Map(context.env);
+      env.set(previousName, { kind: "state", binding });
+      return this.parseExpr(body, { ...context, env });
     }
-    if (!ts.isArrowFunction(update)) {
-      this.fail(update, "state updates must be an integer literal or previous => previous +/- integerLiteral");
-    }
-    if (this.hasModifier(update, ts.SyntaxKind.AsyncKeyword)) {
-      this.fail(update, "async state updates are unsupported in the fixed-tree MVP");
-    }
-    if (update.parameters.length !== 1 || !ts.isIdentifier(update.parameters[0]!.name)) {
-      this.fail(update, "functional state updates require one previous-value parameter");
-    }
-    const previousName = (update.parameters[0]!.name as ts.Identifier).text;
-    const body = ts.isBlock(update.body)
-      ? this.readSingleHandlerStatement(update.body, update)
-      : update.body;
-    if (!ts.isBinaryExpression(body) || !ts.isIdentifier(body.left) || body.left.text !== previousName) {
-      this.fail(update, "functional state updates must use previous +/- integerLiteral");
-    }
-    const delta = this.tryParseIntegerLiteral(body.right);
-    if (delta === undefined || delta < MIN_INT32 || delta > MAX_INT32) {
-      this.fail(body.right, "functional state update delta must be a signed 32-bit integer literal");
-    }
-    if (body.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      return { kind: "add", stateId: binding.state.id, value: Number(delta) };
-    }
-    if (body.operatorToken.kind === ts.SyntaxKind.MinusToken) {
-      return { kind: "subtract", stateId: binding.state.id, value: Number(delta) };
-    }
-    this.fail(body.operatorToken, "only + and - functional state updates are supported");
+    // Bare setter argument: an integer expression over state, props, or literals.
+    return this.parseExpr(update, context);
   }
 
   private renderJsx(
@@ -415,12 +483,12 @@ class SourceCompiler {
     if (intrinsic === undefined) {
       const component = this.components.get(tag);
       if (component === undefined) this.fail(opening.tagName, `unknown component or intrinsic element ${tag}`);
-      if (opening.attributes.properties.length > 0) this.fail(opening.attributes, "component props are unsupported in this MVP");
+      const props = this.collectProps(opening, context);
       const meaningfulChildren = children.filter((child) => !this.isWhitespaceJsxText(child));
       if (meaningfulChildren.length > 0) {
         this.fail(meaningfulChildren[0]!, "component children are unsupported in this MVP; compose zero-argument components");
       }
-      return this.renderComponent(component, `${path}_c${this.childIndex(path)}`, stack);
+      return this.renderComponent(component, `${path}_c${this.childIndex(path)}`, stack, props);
     }
     switch (intrinsic) {
       case "Screen":
@@ -437,6 +505,36 @@ class SourceCompiler {
         return this.renderButton(opening, children, context, path);
     }
     return this.fail(opening, `unsupported intrinsic element ${intrinsic}`);
+  }
+
+  private collectProps(opening: ts.JsxOpeningLikeElement, context: ComponentContext): Map<string, PropValue> {
+    const props = new Map<string, PropValue>();
+    for (const property of opening.attributes.properties) {
+      if (ts.isJsxSpreadAttribute(property)) this.fail(property, "spread props are unsupported");
+      if (!ts.isJsxAttribute(property) || !ts.isIdentifier(property.name)) this.fail(property, "unsupported prop syntax");
+      const name = property.name.text;
+      props.set(name, { value: this.readPropValue(property, context), node: property });
+    }
+    return props;
+  }
+
+  private readPropValue(attribute: ts.JsxAttribute, context: ComponentContext): CompileValue {
+    const initializer = attribute.initializer;
+    if (initializer === undefined) this.fail(attribute, "boolean props are unsupported; pass an integer, string, or state value");
+    if (ts.isStringLiteral(initializer)) return { kind: "string", value: initializer.text };
+    if (!ts.isJsxExpression(initializer) || initializer.expression === undefined) {
+      this.fail(attribute, "props must be a string, integer, or state identifier");
+    }
+    const expression = initializer.expression;
+    const literal = this.tryParseIntegerLiteral(expression);
+    if (literal !== undefined) return { kind: "int", value: literal };
+    if (ts.isStringLiteral(expression)) return { kind: "string", value: expression.text };
+    if (ts.isIdentifier(expression)) {
+      const resolved = this.resolveName(expression.text, context);
+      if (resolved !== undefined) return resolved;
+      this.fail(expression, `unknown value ${expression.text} passed as prop`);
+    }
+    this.fail(attribute, "props must be a string, integer, or state identifier; expressions are unsupported");
   }
 
   private renderView(
@@ -477,11 +575,6 @@ class SourceCompiler {
       value = this.parseTextChild(meaningfulChildren[0]!, context);
     } else {
       this.fail(opening, "Text requires a direct string, integer, or state binding");
-    }
-    if (value.kind === "state") {
-      const bindingId = `${value.stateId}_b${this.stateById(value.stateId).bindingIds.length}`;
-      this.stateById(value.stateId).bindingIds.push(bindingId);
-      value = { ...value, bindingId };
     }
     this.requireOnlyAttributes(opening, ["text"]);
     return { kind: "text", value };
@@ -533,7 +626,7 @@ class SourceCompiler {
       return actionId;
     }
     if (ts.isArrowFunction(expression)) {
-      return this.addHandler("__inline", expression, context, expression);
+      return this.addHandler(expression, context);
     }
     this.fail(expression, "onClick must be an inline arrow or same-component local arrow function");
   }
@@ -556,15 +649,35 @@ class SourceCompiler {
   }
 
   private parseTextExpression(expression: ts.Expression, context: ComponentContext): NativeText {
-    const literal = this.tryParseIntegerLiteral(expression);
-    if (literal !== undefined) return { kind: "literal", value: literal.toString() };
-    if (ts.isStringLiteral(expression)) return { kind: "literal", value: expression.text };
-    if (ts.isIdentifier(expression)) {
-      const binding = context.statesBySourceName.get(expression.text);
-      if (binding === undefined) this.fail(expression, "Text bindings must reference a state variable directly");
-      return { kind: "state", stateId: binding.state.id, bindingId: "" };
+    if (expression.kind === ts.SyntaxKind.TrueKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
+      this.fail(expression, "Text does not accept boolean values");
     }
-    this.fail(expression, "Text bindings must be a direct state identifier or literal");
+    // Any non-binary compile-time constant (integer literal preserved exactly,
+    // even outside int32; string literal; or a prop/list-item identifier).
+    if (!ts.isBinaryExpression(expression)) {
+      const constant = this.constText(expression, context);
+      if (constant !== undefined) return { kind: "literal", value: constant };
+    }
+    // Compile-time string concatenation folds to one literal.
+    const folded = this.tryFoldConcat(expression, context);
+    if (folded !== undefined) return { kind: "literal", value: folded };
+    // General integer expression. Constant folds to literal text; otherwise a
+    // live int32 binding recomputed whenever a referenced state changes.
+    const expr = this.parseExpr(expression, context);
+    const constant = evalConstExpr(expr);
+    if (constant !== undefined) return { kind: "literal", value: String(constant) };
+    return { kind: "binding", bindingId: this.addBinding(expr) };
+  }
+
+  private addBinding(expr: NativeExpr): string {
+    // A binding is named after the first state it reads; a per-owner counter
+    // disambiguates several bindings of the same state.
+    const owner = [...exprStates(expr)][0] ?? "root";
+    const index = this.bindingCounters.get(owner) ?? 0;
+    this.bindingCounters.set(owner, index + 1);
+    const id = `${owner}_b${index}`;
+    this.bindings.push({ id, expr });
+    return id;
   }
 
   private renderChildren(
@@ -577,10 +690,250 @@ class SourceCompiler {
     for (const [index, child] of children.entries()) {
       if (this.isWhitespaceJsxText(child)) continue;
       if (ts.isJsxText(child)) this.fail(child, "text children are only supported inside Text and Button");
-      if (ts.isJsxExpression(child)) this.fail(child, "expressions cannot be children of Screen, View, or Fragment");
+      if (ts.isJsxExpression(child)) {
+        if (child.expression === undefined) this.fail(child, "empty expressions are not valid children");
+        result.push(...this.renderExpressionChild(child.expression, context, `${path}_${index}`, stack));
+        continue;
+      }
       result.push(this.renderJsx(child, context, `${path}_${index}`, stack));
     }
     return result;
+  }
+
+  private renderExpressionChild(
+    expression: ts.Expression,
+    context: ComponentContext,
+    path: string,
+    stack: readonly string[],
+  ): NativeNode[] {
+    if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+      return [this.renderConditional(expression.left, expression.right, undefined, context, path, stack)];
+    }
+    if (ts.isConditionalExpression(expression)) {
+      return [this.renderConditional(expression.condition, expression.whenTrue, expression.whenFalse, context, path, stack)];
+    }
+    if (ts.isCallExpression(expression)) {
+      return this.renderListChildren(expression, context, path, stack);
+    }
+    this.fail(
+      expression,
+      "expression children must be a state conditional ({cond && <X/>} or a ternary) or an array-literal .map(...)",
+    );
+  }
+
+  private renderConditional(
+    condition: ts.Expression,
+    whenTrue: ts.Expression,
+    whenFalse: ts.Expression | undefined,
+    context: ComponentContext,
+    path: string,
+    stack: readonly string[],
+  ): NativeNode {
+    const predicate = this.parseExpr(condition, context);
+
+    // Fold a constant predicate BEFORE rendering branches: rendering registers
+    // bindings/actions/conditions as side effects, so a discarded branch would
+    // otherwise leak dangling globals (a NULL label pointer, a dead handler).
+    const constant = evalConstExpr(predicate);
+    if (constant !== undefined) {
+      if (constant !== 0) return this.renderBranch(whenTrue, context, `${path}_t`, stack);
+      return whenFalse === undefined
+        ? { kind: "fragment", children: [] }
+        : this.renderBranch(whenFalse, context, `${path}_f`, stack);
+    }
+
+    const consequent = this.renderBranch(whenTrue, context, `${path}_t`, stack);
+    const alternate = whenFalse === undefined ? undefined : this.renderBranch(whenFalse, context, `${path}_f`, stack);
+    const condId = sanitize(path);
+    this.conditions.push({ id: condId, predicate, hasAlternate: alternate !== undefined });
+    return { kind: "conditional", condId, consequent, alternate };
+  }
+
+  private renderBranch(
+    expression: ts.Expression,
+    context: ComponentContext,
+    path: string,
+    stack: readonly string[],
+  ): NativeNode {
+    if (expression.kind === ts.SyntaxKind.NullKeyword || expression.kind === ts.SyntaxKind.FalseKeyword) {
+      return { kind: "fragment", children: [] };
+    }
+    return this.renderJsx(expression, context, path, stack);
+  }
+
+  private renderListChildren(
+    call: ts.CallExpression,
+    context: ComponentContext,
+    path: string,
+    stack: readonly string[],
+  ): NativeNode[] {
+    if (!ts.isPropertyAccessExpression(call.expression) || call.expression.name.text !== "map") {
+      this.fail(call, "list children must be an array-literal .map(callback)");
+    }
+    const source = call.expression.expression;
+    if (!ts.isArrayLiteralExpression(source)) {
+      this.fail(source, "list source must be an inline array literal; runtime-length lists break the fixed tree");
+    }
+    if (call.arguments.length !== 1 || !ts.isArrowFunction(call.arguments[0]!)) {
+      this.fail(call, "list .map requires one inline arrow callback");
+    }
+    const callback = call.arguments[0] as ts.ArrowFunction;
+    if (callback.parameters.length < 1 || callback.parameters.length > 2) {
+      this.fail(callback, "list callback takes (item) or (item, index)");
+    }
+    const itemParameter = callback.parameters[0]!;
+    const indexParameter = callback.parameters[1];
+    if (!ts.isIdentifier(itemParameter.name) || (indexParameter !== undefined && !ts.isIdentifier(indexParameter.name))) {
+      this.fail(callback, "list callback parameters must be plain identifiers");
+    }
+    const itemName = (itemParameter.name as ts.Identifier).text;
+    const indexName = indexParameter === undefined ? undefined : (indexParameter.name as ts.Identifier).text;
+    const body = ts.isBlock(callback.body) ? this.readSingleReturn(callback.body, callback) : callback.body;
+
+    const nodes: NativeNode[] = [];
+    source.elements.forEach((element, elementIndex) => {
+      const itemValue = this.readListElement(element);
+      const env = new Map(context.env);
+      env.set(itemName, itemValue);
+      if (indexName !== undefined) env.set(indexName, { kind: "int", value: BigInt(elementIndex) });
+      const childContext: ComponentContext = { ...context, env };
+      nodes.push(this.renderJsx(body, childContext, `${path}_i${elementIndex}`, stack));
+    });
+    return nodes;
+  }
+
+  private readListElement(element: ts.Expression): CompileValue {
+    const literal = this.tryParseIntegerLiteral(element);
+    if (literal !== undefined) return { kind: "int", value: literal };
+    if (ts.isStringLiteral(element)) return { kind: "string", value: element.text };
+    this.fail(element, "list elements must be integer or string literals");
+  }
+
+  private readSingleReturn(block: ts.Block, diagnosticNode: ts.Node): ts.Expression {
+    const statement = block.statements[0];
+    if (block.statements.length !== 1 || statement === undefined || !ts.isReturnStatement(statement) || statement.expression === undefined) {
+      this.fail(diagnosticNode, "list callback blocks must contain exactly one return of a TSX element");
+    }
+    return statement.expression;
+  }
+
+  /**
+   * Parse a bounded signed-int32 expression: integer literals, state and
+   * prop/list identifiers, unary minus, + - * / %, and comparisons. Anything
+   * outside this grammar (strings, calls, member access, floats) is rejected.
+   */
+  private parseExpr(expression: ts.Expression, context: ComponentContext): NativeExpr {
+    if (ts.isParenthesizedExpression(expression)) return this.parseExpr(expression.expression, context);
+    const literal = this.tryParseIntegerLiteral(expression);
+    if (literal !== undefined) {
+      return { kind: "literal", value: this.requireInt32(literal, expression, "integer literal must be a signed 32-bit integer literal") };
+    }
+    if (expression.kind === ts.SyntaxKind.TrueKeyword) return { kind: "literal", value: 1 };
+    if (expression.kind === ts.SyntaxKind.FalseKeyword) return { kind: "literal", value: 0 };
+    if (ts.isStringLiteral(expression)) {
+      this.fail(expression, "runtime string values are unsupported; only compile-time-constant strings are allowed");
+    }
+    if (ts.isPrefixUnaryExpression(expression)) {
+      if (expression.operator === ts.SyntaxKind.MinusToken) {
+        return { kind: "unary", op: "neg", operand: this.parseExpr(expression.operand, context) };
+      }
+      if (expression.operator === ts.SyntaxKind.PlusToken) return this.parseExpr(expression.operand, context);
+      this.fail(expression, "unsupported unary operator; only integer arithmetic over state is supported");
+    }
+    if (ts.isIdentifier(expression)) {
+      const resolved = this.resolveName(expression.text, context);
+      if (resolved === undefined) this.fail(expression, `unknown identifier ${expression.text} in expression`);
+      if (resolved.kind === "state") return { kind: "state", stateId: resolved.binding.stateId };
+      if (resolved.kind === "int") {
+        return { kind: "literal", value: this.requireInt32(resolved.value, expression, "integer value must be a signed 32-bit integer to use in arithmetic") };
+      }
+      this.fail(expression, "string values are not valid inside an integer expression");
+    }
+    if (ts.isBinaryExpression(expression)) {
+      const binary = this.binaryOperator(expression.operatorToken);
+      const left = this.parseExpr(expression.left, context);
+      const right = this.parseExpr(expression.right, context);
+      if (binary.kind === "arith") return { kind: "binary", op: binary.op, left, right };
+      return { kind: "compare", op: binary.op, left, right };
+    }
+    this.fail(expression, "unsupported expression; only integer arithmetic and comparisons over state are supported");
+  }
+
+  private binaryOperator(
+    token: ts.BinaryOperatorToken,
+  ): { kind: "arith"; op: BinaryOp } | { kind: "compare"; op: CompareOp } {
+    switch (token.kind) {
+      case ts.SyntaxKind.PlusToken:
+        return { kind: "arith", op: "add" };
+      case ts.SyntaxKind.MinusToken:
+        return { kind: "arith", op: "sub" };
+      case ts.SyntaxKind.AsteriskToken:
+        return { kind: "arith", op: "mul" };
+      case ts.SyntaxKind.SlashToken:
+        return { kind: "arith", op: "div" };
+      case ts.SyntaxKind.PercentToken:
+        return { kind: "arith", op: "mod" };
+      case ts.SyntaxKind.LessThanToken:
+        return { kind: "compare", op: "lt" };
+      case ts.SyntaxKind.LessThanEqualsToken:
+        return { kind: "compare", op: "le" };
+      case ts.SyntaxKind.GreaterThanToken:
+        return { kind: "compare", op: "gt" };
+      case ts.SyntaxKind.GreaterThanEqualsToken:
+        return { kind: "compare", op: "ge" };
+      case ts.SyntaxKind.EqualsEqualsToken:
+      case ts.SyntaxKind.EqualsEqualsEqualsToken:
+        return { kind: "compare", op: "eq" };
+      case ts.SyntaxKind.ExclamationEqualsToken:
+      case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+        return { kind: "compare", op: "ne" };
+      default:
+        return this.fail(token, "unsupported operator; use + - * / %, comparisons, or a state conditional");
+    }
+  }
+
+  /** Fold a compile-time string concatenation (string with strings/ints) to text. */
+  private tryFoldConcat(expression: ts.Expression, context: ComponentContext): string | undefined {
+    if (!ts.isBinaryExpression(expression) || expression.operatorToken.kind !== ts.SyntaxKind.PlusToken) return undefined;
+    if (!this.hasStringOperand(expression, context)) return undefined;
+    return this.constText(expression, context);
+  }
+
+  private hasStringOperand(expression: ts.Expression, context: ComponentContext): boolean {
+    if (ts.isParenthesizedExpression(expression)) return this.hasStringOperand(expression.expression, context);
+    if (ts.isStringLiteral(expression)) return true;
+    if (ts.isIdentifier(expression)) return this.resolveName(expression.text, context)?.kind === "string";
+    if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      return this.hasStringOperand(expression.left, context) || this.hasStringOperand(expression.right, context);
+    }
+    return false;
+  }
+
+  private constText(expression: ts.Expression, context: ComponentContext): string | undefined {
+    if (ts.isParenthesizedExpression(expression)) return this.constText(expression.expression, context);
+    const literal = this.tryParseIntegerLiteral(expression);
+    if (literal !== undefined) return literal.toString();
+    if (ts.isStringLiteral(expression)) return expression.text;
+    if (ts.isIdentifier(expression)) {
+      const resolved = this.resolveName(expression.text, context);
+      if (resolved?.kind === "int") return resolved.value.toString();
+      if (resolved?.kind === "string") return resolved.value;
+      return undefined;
+    }
+    if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = this.constText(expression.left, context);
+      const right = this.constText(expression.right, context);
+      return left === undefined || right === undefined ? undefined : left + right;
+    }
+    return undefined;
+  }
+
+  private resolveName(name: string, context: ComponentContext): CompileValue | undefined {
+    const bound = context.env.get(name);
+    if (bound !== undefined) return bound;
+    const state = context.statesBySourceName.get(name);
+    if (state !== undefined) return { kind: "state", binding: state };
+    return undefined;
   }
 
   private requireNoAttributes(opening: ts.JsxOpeningLikeElement, name: string): void {
@@ -659,9 +1012,15 @@ class SourceCompiler {
 
   private parseInitialInteger(expression: ts.Expression): number {
     const value = this.tryParseIntegerLiteral(expression);
-    if (value === undefined || value < MIN_INT32 || value > MAX_INT32) {
+    if (value === undefined) {
       this.fail(expression, "useState initial value must be a signed 32-bit integer literal");
     }
+    return this.requireInt32(value, expression, "useState initial value must be a signed 32-bit integer literal");
+  }
+
+  /** Enforce the signed 32-bit range on an already-parsed integer literal. */
+  private requireInt32(value: bigint, node: ts.Node, message: string): number {
+    if (value < MIN_INT32 || value > MAX_INT32) this.fail(node, message);
     return Number(value);
   }
 
@@ -681,12 +1040,6 @@ class SourceCompiler {
       return expression.operator === ts.SyntaxKind.MinusToken ? -inner : inner;
     }
     return undefined;
-  }
-
-  private stateById(id: string): MutableState {
-    const state = this.states.find((candidate) => candidate.id === id);
-    if (state === undefined) throw new Error(`internal compiler error: unknown state ${id}`);
-    return state;
   }
 
   private childIndex(path: string): number {
@@ -715,4 +1068,73 @@ class SourceCompiler {
 function sanitize(value: string): string {
   const result = value.replace(/[^A-Za-z0-9_]/g, "_");
   return /^[A-Za-z_]/.test(result) ? result : `_${result}`;
+}
+
+function clampInt32(value: bigint): number {
+  if (value > MAX_INT32) return Number(MAX_INT32);
+  if (value < MIN_INT32) return Number(MIN_INT32);
+  return Number(value);
+}
+
+/** Evaluate an expression with no state reads to its int32 value, matching the emitter. */
+function evalConstExpr(expr: NativeExpr): number | undefined {
+  switch (expr.kind) {
+    case "literal":
+      return expr.value;
+    case "state":
+      return undefined;
+    case "unary": {
+      const operand = evalConstExpr(expr.operand);
+      return operand === undefined ? undefined : clampInt32(-BigInt(operand));
+    }
+    case "binary": {
+      const left = evalConstExpr(expr.left);
+      const right = evalConstExpr(expr.right);
+      if (left === undefined || right === undefined) return undefined;
+      return evalBinary(expr.op, BigInt(left), BigInt(right));
+    }
+    case "compare": {
+      const left = evalConstExpr(expr.left);
+      const right = evalConstExpr(expr.right);
+      if (left === undefined || right === undefined) return undefined;
+      return evalCompare(expr.op, left, right);
+    }
+  }
+}
+
+function evalBinary(op: BinaryOp, left: bigint, right: bigint): number {
+  switch (op) {
+    case "add":
+      return clampInt32(left + right);
+    case "sub":
+      return clampInt32(left - right);
+    case "mul":
+      return clampInt32(left * right);
+    case "div":
+      // BigInt division has no overflow; clamp reproduces the emitter's
+      // saturation of INT32_MIN / -1 to INT32_MAX.
+      if (right === 0n) return 0;
+      return clampInt32(left / right);
+    case "mod":
+      // BigInt modulo already yields 0 for x % -1, matching the guarded helper.
+      if (right === 0n) return 0;
+      return clampInt32(left % right);
+  }
+}
+
+function evalCompare(op: CompareOp, left: number, right: number): number {
+  switch (op) {
+    case "lt":
+      return left < right ? 1 : 0;
+    case "le":
+      return left <= right ? 1 : 0;
+    case "gt":
+      return left > right ? 1 : 0;
+    case "ge":
+      return left >= right ? 1 : 0;
+    case "eq":
+      return left === right ? 1 : 0;
+    case "ne":
+      return left !== right ? 1 : 0;
+  }
 }

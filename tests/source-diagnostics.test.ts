@@ -93,7 +93,11 @@ test("reports exact entry, import, component, and source-shape diagnostics", asy
     ],
     [
       `import { useMemo } from "@tsx-lvgl/react"; function App(){return <Screen/>;} export default App;`,
-      "unsupported @tsx-lvgl/react import useMemo",
+      "useMemo is unsupported: memoization hooks need a JavaScript runtime, which the fixed-tree native target does not include",
+    ],
+    [
+      `import { unknownApi } from "@tsx-lvgl/react"; function App(){return <Screen/>;} export default App;`,
+      "unsupported @tsx-lvgl/react import unknownApi",
     ],
     [
       `async function App(){return <Screen/>;} export default App;`,
@@ -105,7 +109,7 @@ test("reports exact entry, import, component, and source-shape diagnostics", asy
     ],
     [
       `function Child(props: unknown){return <Screen/>;} function App(){return <Screen><Child/></Screen>;} export default App;`,
-      "component props are not supported yet; compose zero-argument components",
+      "component props must be a single destructured object parameter, for example ({ value })",
     ],
     [
       `function Tile(){return <Text>tile</Text>;} function App(){return <Screen><Tile><Text>lost</Text></Tile></Screen>;} export default App;`,
@@ -233,27 +237,27 @@ test("reports exact state, handler, and bounded-integer diagnostics", async () =
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount("one")}/></Screen>;} export default App;`,
-      "state updates must be an integer literal or previous => previous +/- integerLiteral",
+      "runtime string values are unsupported; only compile-time-constant strings are allowed",
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((a,b) => a + 1)}/></Screen>;} export default App;`,
       "functional state updates require one previous-value parameter",
     ],
     [
-      `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => count + 1)}/></Screen>;} export default App;`,
-      "functional state updates must use previous +/- integerLiteral",
+      `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => missing + 1)}/></Screen>;} export default App;`,
+      "unknown identifier missing in expression",
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => previous + value)}/></Screen>;} export default App;`,
-      "functional state update delta must be a signed 32-bit integer literal",
+      "unknown identifier value in expression",
     ],
     [
-      `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => previous * 2)}/></Screen>;} export default App;`,
-      "only + and - functional state updates are supported",
+      `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => previous ** 2)}/></Screen>;} export default App;`,
+      "unsupported operator; use + - * / %, comparisons, or a state conditional",
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => previous + 2147483648)}/></Screen>;} export default App;`,
-      "functional state update delta must be a signed 32-bit integer literal",
+      "integer literal must be a signed 32-bit integer literal",
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount(2147483648)}/></Screen>;} export default App;`,
@@ -265,7 +269,7 @@ test("reports exact state, handler, and bounded-integer diagnostics", async () =
     ],
     [
       `function App(){const [count,setCount] = useState(0); return <Screen><Button label="x" onClick={() => setCount((previous) => previous + -2147483649)}/></Screen>;} export default App;`,
-      "functional state update delta must be a signed 32-bit integer literal",
+      "integer literal must be a signed 32-bit integer literal",
     ],
   ];
   for (const [source, detail] of cases) await expectDetail(source, detail);
@@ -327,7 +331,7 @@ test("reports exact JSX, layout, and handler diagnostics", async () => {
     ],
     [
       `function App(){return <Screen><Text text={true}/></Screen>;} export default App;`,
-      "Text bindings must be a direct state identifier or literal",
+      "Text does not accept boolean values",
     ],
     [
       `function App(){return <Screen><Text><View/></Text></Screen>;} export default App;`,
@@ -335,7 +339,7 @@ test("reports exact JSX, layout, and handler diagnostics", async () => {
     ],
     [
       `function App(){return <Screen><Text text={unknown}/></Screen>;} export default App;`,
-      "Text bindings must reference a state variable directly",
+      "unknown identifier unknown in expression",
     ],
     [
       `function App(){return <Screen><Text text="one">two</Text></Screen>;} export default App;`,
@@ -391,7 +395,7 @@ test("reports exact JSX, layout, and handler diagnostics", async () => {
     ],
     [
       `function App(){return <Screen>{1}</Screen>;} export default App;`,
-      "expressions cannot be children of Screen, View, or Fragment",
+      "expression children must be a state conditional ({cond && <X/>} or a ternary) or an array-literal .map(...)",
     ],
     [
       `function App(){return <Screen><Unknown/></Screen>;} export default App;`,
@@ -399,7 +403,7 @@ test("reports exact JSX, layout, and handler diagnostics", async () => {
     ],
     [
       `function Child(){return <Screen/>;} function App(){return <Screen><Child value={1}/></Screen>;} export default App;`,
-      "component props are unsupported in this MVP",
+      "component Child does not accept props",
     ],
   ];
   for (const [source, detail] of cases) await expectDetail(source, detail);

@@ -31,7 +31,16 @@ try {
   await writeFile(sourcePathForMvp, sourceArtifacts.files["generated/ui.c"], "utf8");
 
   const compiler = process.env.CC ?? "cc";
-  for (const generatedPath of [sourcePath, sourcePathForMvp]) {
+  const syntaxOnlyPaths = [sourcePath, sourcePathForMvp];
+  // Every React-subset example must lower to warnings-as-errors-clean C: this
+  // exercises conditionals, derived expressions, props, and static lists.
+  for (const example of ["conditional", "derived", "props", "list"]) {
+    const exampleArtifacts = compileProject({ entryFile: resolve(`examples/${example}.tsx`), projectName: example });
+    const examplePath = join(directory, `${example}-ui.c`);
+    await writeFile(examplePath, exampleArtifacts.files["generated/ui.c"], "utf8");
+    syntaxOnlyPaths.push(examplePath);
+  }
+  for (const generatedPath of syntaxOnlyPaths) {
     const result = spawnSync(
       compiler,
       ["-std=c11", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-I", directory, generatedPath],

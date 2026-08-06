@@ -32,7 +32,7 @@ export namespace JSX {
 }
 
 type IntrinsicName = keyof JSX.IntrinsicElements;
-type StaticComponent = () => ReactElement;
+type StaticComponent = (props?: Readonly<Record<string, unknown>>) => ReactElement;
 type ReactJsxType = IntrinsicName | StaticComponent;
 
 export function jsx(type: ReactJsxType, props: Readonly<Record<string, unknown>> | null): ReactElement {
@@ -55,7 +55,9 @@ export function jsx(type: ReactJsxType, props: Readonly<Record<string, unknown>>
     if (hasMeaningfulChildren(childList)) {
       throw new Error("component children are unsupported in this MVP; compose zero-argument components");
     }
-    return type();
+    // Props are resolved by the compiler; the host runtime forwards them so
+    // component authoring type-checks, but calling this on-device is unsupported.
+    return type(elementProps);
   }
 
   // TypeScript normally lowers intrinsic tags through the branches above. Keep

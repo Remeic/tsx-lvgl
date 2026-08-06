@@ -1,9 +1,24 @@
-import type { NativeAction, NativeNode, NativeProgram } from "./native-program.js";
+import {
+  exprStates,
+  type BinaryOp,
+  type CompareOp,
+  type NativeCondition,
+  type NativeExpr,
+  type NativeNode,
+  type NativeProgram,
+} from "./native-program.js";
 
 /**
  * Compiler-private native emitter. The only caller is compileProject, and the
  * typed program it receives is built by the source compiler. Keeping this seam
  * private prevents consumers from forging a native IR object at package APIs.
+ *
+ * State changes are separated from rendering: each live label owns a
+ * `tsx_render_*` function and each conditional owns a `tsx_visibility_*`
+ * function. A per-state `tsx_update_*` calls exactly the render/visibility
+ * functions whose expression reads that state, so a handler mutates one slot
+ * and repaints only what depends on it. The object tree is still fixed: both
+ * branches of every conditional are created once and toggled by a hidden flag.
  */
 export function emitNativeProgram(program: NativeProgram): string {
   const lines: string[] = [
@@ -15,47 +30,51 @@ export function emitNativeProgram(program: NativeProgram): string {
 
   for (const state of program.states) {
     lines.push(`static int32_t ${stateVariable(state.id)} = ${formatInt32(state.initial)};`);
-    lines.push(`static char ${stateBuffer(state.id)}[12];`);
-    for (const bindingId of state.bindingIds) {
-      lines.push(`static lv_obj_t *${bindingVariable(bindingId)} = NULL;`);
-    }
   }
-  if (program.states.length > 0) lines.push("");
+  for (const binding of program.bindings) {
+    lines.push(`static char ${bindingBuffer(binding.id)}[12];`);
+    lines.push(`static lv_obj_t *${bindingVariable(binding.id)} = NULL;`);
+  }
+  for (const condition of program.conditions) {
+    lines.push(`static lv_obj_t *${condTrue(condition.id)} = NULL;`);
+    if (condition.hasAlternate) lines.push(`static lv_obj_t *${condFalse(condition.id)} = NULL;`);
+  }
+  if (program.states.length > 0 || program.bindings.length > 0 || program.conditions.length > 0) {
+    lines.push("");
+  }
 
-  const actionKinds = new Set(Object.values(program.actions).map((action) => action.kind));
-  if (actionKinds.has("add")) {
-    lines.push(
-      "static int32_t tsx_lvgl_saturating_add(int32_t current, int32_t delta)",
-      "{",
-      "    const int64_t candidate = (int64_t)current + (int64_t)delta;",
-      "    if (candidate > INT32_MAX) return INT32_MAX;",
-      "    if (candidate < INT32_MIN) return INT32_MIN;",
-      "    return (int32_t)candidate;",
-      "}",
-      "",
-    );
+  const used = collectUsedHelpers(program);
+  for (const spec of Object.values(BINARY_OPS)) {
+    if (!used.has(spec.name)) continue;
+    lines.push(...(spec.guarded ? guardedDivHelper(spec.name, spec.operator, spec.overflow ?? "0") : saturatingHelper(spec.name, spec.operator)), "");
   }
-  if (actionKinds.has("subtract")) {
+
+  for (const binding of program.bindings) {
     lines.push(
-      "static int32_t tsx_lvgl_saturating_subtract(int32_t current, int32_t delta)",
+      `static void ${renderFunction(binding.id)}(void)`,
       "{",
-      "    const int64_t candidate = (int64_t)current - (int64_t)delta;",
-      "    if (candidate > INT32_MAX) return INT32_MAX;",
-      "    if (candidate < INT32_MIN) return INT32_MIN;",
-      "    return (int32_t)candidate;",
+      `    (void)snprintf(${bindingBuffer(binding.id)}, sizeof(${bindingBuffer(binding.id)}), "%ld", (long)(${emitExpr(binding.expr)}));`,
+      `    lv_label_set_text_static(${bindingVariable(binding.id)}, ${bindingBuffer(binding.id)});`,
       "}",
       "",
     );
   }
 
+  for (const condition of program.conditions) {
+    lines.push(...visibilityFunction(condition), "");
+  }
+
+  // Precompute each expression's state set once, rather than re-walking every
+  // binding/condition for every state in the nested loop below.
+  const bindingDeps = program.bindings.map((binding) => ({ binding, states: exprStates(binding.expr) }));
+  const conditionDeps = program.conditions.map((condition) => ({ condition, states: exprStates(condition.predicate) }));
   for (const state of program.states) {
-    lines.push(
-      `static void ${updateFunction(state.id)}(void)`,
-      "{",
-      `    (void)snprintf(${stateBuffer(state.id)}, sizeof(${stateBuffer(state.id)}), "%ld", (long)${stateVariable(state.id)});`,
-    );
-    for (const bindingId of state.bindingIds) {
-      lines.push(`    lv_label_set_text_static(${bindingVariable(bindingId)}, ${stateBuffer(state.id)});`);
+    lines.push(`static void ${updateFunction(state.id)}(void)`, "{");
+    for (const { binding, states } of bindingDeps) {
+      if (states.has(state.id)) lines.push(`    ${renderFunction(binding.id)}();`);
+    }
+    for (const { condition, states } of conditionDeps) {
+      if (states.has(state.id)) lines.push(`    ${visibilityName(condition.id)}();`);
     }
     lines.push("}", "");
   }
@@ -65,7 +84,7 @@ export function emitNativeProgram(program: NativeProgram): string {
       `static void ${handlerFunction(actionId)}(lv_event_t *event)`,
       "{",
       "    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;",
-      ...emitAction(action),
+      `    ${stateVariable(action.stateId)} = ${emitExpr(action.expr)};`,
       `    ${updateFunction(action.stateId)}();`,
       "}",
       "",
@@ -116,17 +135,123 @@ export function emitNativeProgram(program: NativeProgram): string {
   return `${lines.join("\n")}\n`;
 }
 
-function emitAction(action: NativeAction): string[] {
-  const variable = stateVariable(action.stateId);
-  const value = formatInt32(action.value);
-  switch (action.kind) {
-    case "set":
-      return [`    ${variable} = ${value};`];
-    case "add":
-      return [`    ${variable} = tsx_lvgl_saturating_add(${variable}, ${value});`];
-    case "subtract":
-      return [`    ${variable} = tsx_lvgl_saturating_subtract(${variable}, ${value});`];
+function collectUsedHelpers(program: NativeProgram): ReadonlySet<string> {
+  const used = new Set<string>();
+  const scan = (expr: NativeExpr): void => {
+    switch (expr.kind) {
+      case "literal":
+      case "state":
+        return;
+      case "unary":
+        used.add("subtract"); // negation lowers to saturating_subtract(0, x)
+        scan(expr.operand);
+        return;
+      case "binary":
+        used.add(binaryHelper(expr.op));
+        scan(expr.left);
+        scan(expr.right);
+        return;
+      case "compare":
+        scan(expr.left);
+        scan(expr.right);
+        return;
+    }
+  };
+  for (const binding of program.bindings) scan(binding.expr);
+  for (const condition of program.conditions) scan(condition.predicate);
+  for (const action of Object.values(program.actions)) scan(action.expr);
+  return used;
+}
+
+/**
+ * Single source of truth for the C shape of each binary operator. `overflow`
+ * is the result for the one guarded case `INT32_MIN OP -1`: division genuinely
+ * overflows and saturates to INT32_MAX, while `x % -1` is always 0.
+ */
+const BINARY_OPS: Record<BinaryOp, { readonly name: string; readonly operator: string; readonly guarded: boolean; readonly overflow?: string }> = {
+  add: { name: "add", operator: "+", guarded: false },
+  sub: { name: "subtract", operator: "-", guarded: false },
+  mul: { name: "mul", operator: "*", guarded: false },
+  div: { name: "div", operator: "/", guarded: true, overflow: "INT32_MAX" },
+  mod: { name: "mod", operator: "%", guarded: true, overflow: "0" },
+};
+
+function binaryHelper(op: BinaryOp): string {
+  return BINARY_OPS[op].name;
+}
+
+function emitExpr(expr: NativeExpr): string {
+  switch (expr.kind) {
+    case "literal":
+      return formatInt32(expr.value);
+    case "state":
+      return stateVariable(expr.stateId);
+    case "unary":
+      return `tsx_lvgl_saturating_subtract(0, ${emitExpr(expr.operand)})`;
+    case "binary":
+      return `${binaryFunction(expr.op)}(${emitExpr(expr.left)}, ${emitExpr(expr.right)})`;
+    case "compare":
+      return `((${emitExpr(expr.left)}) ${compareOperator(expr.op)} (${emitExpr(expr.right)}) ? 1 : 0)`;
   }
+}
+
+function binaryFunction(op: BinaryOp): string {
+  const spec = BINARY_OPS[op];
+  return `tsx_lvgl_${spec.guarded ? "guarded" : "saturating"}_${spec.name}`;
+}
+
+function compareOperator(op: CompareOp): string {
+  switch (op) {
+    case "lt":
+      return "<";
+    case "le":
+      return "<=";
+    case "gt":
+      return ">";
+    case "ge":
+      return ">=";
+    case "eq":
+      return "==";
+    case "ne":
+      return "!=";
+  }
+}
+
+function saturatingHelper(name: string, operator: string): string[] {
+  return [
+    `static int32_t tsx_lvgl_saturating_${name}(int32_t current, int32_t delta)`,
+    "{",
+    `    const int64_t candidate = (int64_t)current ${operator} (int64_t)delta;`,
+    "    if (candidate > INT32_MAX) return INT32_MAX;",
+    "    if (candidate < INT32_MIN) return INT32_MIN;",
+    "    return (int32_t)candidate;",
+    "}",
+  ];
+}
+
+function guardedDivHelper(name: string, operator: string, overflow: string): string[] {
+  return [
+    `static int32_t tsx_lvgl_guarded_${name}(int32_t current, int32_t divisor)`,
+    "{",
+    "    if (divisor == 0) return 0;",
+    `    if (current == INT32_MIN && divisor == -1) return ${overflow};`,
+    `    return current ${operator} divisor;`,
+    "}",
+  ];
+}
+
+function visibilityFunction(condition: NativeCondition): string[] {
+  const lines = [
+    `static void ${visibilityName(condition.id)}(void)`,
+    "{",
+    `    if (${emitExpr(condition.predicate)}) {`,
+    `        lv_obj_remove_flag(${condTrue(condition.id)}, LV_OBJ_FLAG_HIDDEN);`,
+  ];
+  if (condition.hasAlternate) lines.push(`        lv_obj_add_flag(${condFalse(condition.id)}, LV_OBJ_FLAG_HIDDEN);`);
+  lines.push("    } else {", `        lv_obj_add_flag(${condTrue(condition.id)}, LV_OBJ_FLAG_HIDDEN);`);
+  if (condition.hasAlternate) lines.push(`        lv_obj_remove_flag(${condFalse(condition.id)}, LV_OBJ_FLAG_HIDDEN);`);
+  lines.push("    }", "}");
+  return lines;
 }
 
 function emitNativeNode(
@@ -168,7 +293,30 @@ function emitNativeNode(
         output.push("#endif");
       }
       return;
+    case "conditional":
+      emitConditionalBranch(node.condId, "t", node.consequent, `${variable}_t`, parent, program, output);
+      if (node.alternate !== undefined) {
+        emitConditionalBranch(node.condId, "f", node.alternate, `${variable}_f`, parent, program, output);
+      }
+      return;
   }
+}
+
+function emitConditionalBranch(
+  condId: string,
+  side: "t" | "f",
+  child: NativeNode,
+  variable: string,
+  parent: string,
+  program: NativeProgram,
+  output: string[],
+): void {
+  output.push(`lv_obj_t *${variable} = lv_obj_create(${parent});`);
+  output.push(`lv_obj_remove_style_all(${variable});`);
+  output.push(`lv_obj_set_size(${variable}, LV_SIZE_CONTENT, LV_SIZE_CONTENT);`);
+  output.push(`lv_obj_set_flex_flow(${variable}, LV_FLEX_FLOW_COLUMN);`);
+  output.push(`${side === "t" ? condTrue(condId) : condFalse(condId)} = ${variable};`);
+  emitNativeNode(child, `${variable}_0`, variable, program, output);
 }
 
 function flexAlign(value: "start" | "center" | "end"): string {
@@ -179,8 +327,12 @@ function stateVariable(id: string): string {
   return `tsx_state_${id}`;
 }
 
-function stateBuffer(id: string): string {
-  return `tsx_state_${id}_text`;
+function bindingBuffer(id: string): string {
+  return `tsx_binding_${id}_text`;
+}
+
+function renderFunction(id: string): string {
+  return `tsx_render_${id}`;
 }
 
 function updateFunction(id: string): string {
@@ -193,6 +345,18 @@ function handlerFunction(id: string): string {
 
 function bindingVariable(id: string): string {
   return `tsx_binding_${id}`;
+}
+
+function visibilityName(id: string): string {
+  return `tsx_visibility_${id}`;
+}
+
+function condTrue(id: string): string {
+  return `tsx_cond_${id}_t`;
+}
+
+function condFalse(id: string): string {
+  return `tsx_cond_${id}_f`;
 }
 
 function formatInt32(value: number): string {

@@ -77,7 +77,7 @@ export default App;
         "#include <stdint.h>",
         "#include <stdio.h>",
         "static int32_t tsx_state_root_s0 = (-2147483647 - 1);",
-        "static char tsx_state_root_s0_text[12];",
+        "static char tsx_binding_root_s0_b0_text[12];",
         "static lv_obj_t *tsx_binding_root_s0_b0 = NULL;",
         "static int32_t tsx_lvgl_saturating_add(int32_t current, int32_t delta)",
         "static int32_t tsx_lvgl_saturating_subtract(int32_t current, int32_t delta)",
@@ -105,7 +105,7 @@ export default App;
         "int32_t tsx_lvgl_ui_state_root_s0(void)",
       ];
       for (const line of expected) assert.ok(c.includes(line), `missing generated line: ${line}`);
-      assert.match(c, /static char tsx_state_root_s0_text\[12\];\nstatic lv_obj_t \*tsx_binding_root_s0_b0 = NULL;\n\nstatic int32_t/);
+      assert.match(c, /static char tsx_binding_root_s0_b0_text\[12\];\nstatic lv_obj_t \*tsx_binding_root_s0_b0 = NULL;\n\nstatic int32_t/);
       assert.match(c, /#ifdef TSX_LVGL_TEST_HOOKS[\s\S]*tsx_lvgl_test_button = root_0_0_2;/);
     },
   );
@@ -134,7 +134,7 @@ export default App;
 #include <stdio.h>
 
 static int32_t tsx_state_root_s0 = (-2147483647 - 1);
-static char tsx_state_root_s0_text[12];
+static char tsx_binding_root_s0_b0_text[12];
 static lv_obj_t *tsx_binding_root_s0_b0 = NULL;
 
 static int32_t tsx_lvgl_saturating_add(int32_t current, int32_t delta)
@@ -153,10 +153,15 @@ static int32_t tsx_lvgl_saturating_subtract(int32_t current, int32_t delta)
     return (int32_t)candidate;
 }
 
+static void tsx_render_root_s0_b0(void)
+{
+    (void)snprintf(tsx_binding_root_s0_b0_text, sizeof(tsx_binding_root_s0_b0_text), "%ld", (long)(tsx_state_root_s0));
+    lv_label_set_text_static(tsx_binding_root_s0_b0, tsx_binding_root_s0_b0_text);
+}
+
 static void tsx_update_root_s0(void)
 {
-    (void)snprintf(tsx_state_root_s0_text, sizeof(tsx_state_root_s0_text), "%ld", (long)tsx_state_root_s0);
-    lv_label_set_text_static(tsx_binding_root_s0_b0, tsx_state_root_s0_text);
+    tsx_render_root_s0_b0();
 }
 
 static void tsx_handler_root_a0(lv_event_t *event)
@@ -560,12 +565,12 @@ test("rejects invalid initial state, layout, hook ordering, and update syntax", 
     [`function App(){const [count,setCount]=useState(2147483648);return <Screen/>;}export default App;`, /signed 32-bit integer literal/],
     [`function App(){return <Screen><View gap={-1}/></Screen>;}export default App;`, /gap must be a non-negative signed 32-bit integer literal/],
     [`function App(){return <Screen><View gap={2147483648}/></Screen>;}export default App;`, /gap must be a non-negative signed 32-bit integer literal/],
-    [`function App(){const [count,setCount]=useState(0);const update=()=>setCount((previous)=>previous*2);return <Screen><Button label="x" onClick={update}/></Screen>;}export default App;`, /only \+ and - functional state updates/],
+    [`function App(){const [count,setCount]=useState(0);const update=()=>setCount((previous)=>previous**2);return <Screen><Button label="x" onClick={update}/></Screen>;}export default App;`, /unsupported operator/],
     [`function App(){const [count,setCount]=useState(0);return <Screen><Button label="x" onClick={() => setCount(999999999999999999999999)}/></Screen>;}export default App;`, /state setter integer literal must be a signed 32-bit integer literal/],
-    [`function App(){const [count,setCount]=useState(0);return <Screen><Button label="x" onClick={() => setCount((previous) => previous + 999999999999999999999999)}/></Screen>;}export default App;`, /functional state update delta must be a signed 32-bit integer literal/],
-    [`function App(){const [count,setCount]=useState(0);return <Screen><Button label="x" onClick={() => setCount(~1)}/></Screen>;}export default App;`, /state updates must be an integer literal/],
+    [`function App(){const [count,setCount]=useState(0);return <Screen><Button label="x" onClick={() => setCount((previous) => previous + 999999999999999999999999)}/></Screen>;}export default App;`, /integer literal must be a signed 32-bit integer literal/],
+    [`function App(){const [count,setCount]=useState(0);return <Screen><Button label="x" onClick={() => setCount(~1)}/></Screen>;}export default App;`, /unsupported unary operator/],
     [`const value = 1; function App(){return <Screen/>;}export default App;`, /unsupported top-level variable/],
-    [`function App(){const [count,setCount]=useState(0);return <Screen><Text text={count+1}/></Screen>;}export default App;`, /Text bindings must be a direct state identifier or literal/],
+    [`function App(){const [count,setCount]=useState(0);return <Screen><Text text={count.value}/></Screen>;}export default App;`, /unsupported expression/],
   ];
   for (const [body, message] of cases) {
     await withSource(`${header}\n${body}\n`, (entryFile) => {
