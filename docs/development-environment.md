@@ -30,7 +30,7 @@ Apple Silicon and Intel hosts.
 
 Each `./tools/dev` invocation reconciles the pinned image (using Docker's build cache) and bootstraps `npm ci` inside the mounted checkout when dependencies are absent or the lockfile is newer. A fresh clone therefore needs no host Node installation.
 
-GitHub Actions also builds this exact Dockerfile on `ubuntu-24.04` through the public `./tools/dev` path from a fresh checkout. The blocking container job runs `test`, `c-compile`, `mutation`, `simulator` and `esp-idf-v1`, records the image ID/tool versions and uploads the command output. The host and mutation jobs remain separate so container parity does not hide host-specific regressions.
+GitHub Actions also builds this exact Dockerfile on `ubuntu-24.04` through the public `./tools/dev` path from a fresh checkout. The blocking container job runs `test`, `c-compile`, `simulator`, `esp-idf-v1` and `parity`, records the image ID/tool versions and uploads the command output. The dedicated mutation job is the sole CI mutation execution and owns the SHA-bound mutation reports; host, mutation and container jobs remain separate so container parity does not hide host-specific regressions.
 
 `./tools/dev qemu` remains a separate optional emulator command. The
 `esp-idf-v1` command now builds the V1 application and records the standard

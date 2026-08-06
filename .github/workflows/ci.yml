@@ -64,14 +64,12 @@ jobs:
             '
           } | tee container-toolchain.txt
 
-      - name: Run public fresh-clone C and mutation commands
+      - name: Run public fresh-clone C command
         run: |
           set -o pipefail
           {
             echo '$ ./tools/dev c-compile'
             ./tools/dev c-compile
-            echo '$ ./tools/dev mutation'
-            ./tools/dev mutation
           } 2>&1 | tee -a container-command-ladder.txt
 
       - name: Run pinned simulator and ESP-IDF integration commands
