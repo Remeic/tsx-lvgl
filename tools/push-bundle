@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+has_port=0
+for argument in "$@"; do
+  if [[ "${argument}" == "--port" || "${argument}" == --port=* ]]; then
+    has_port=1
+  fi
+  if [[ "${argument}" == "--help" ]]; then
+    has_port=1
+  fi
+done
+
+if [[ "${has_port}" == "0" ]]; then
+  echo "tools/push-bundle: --port is required (dev-only bundle transport)" >&2
+  exit 2
+fi
+
+exec node "${repo_root}/scripts/push-bundle.mjs" "$@"

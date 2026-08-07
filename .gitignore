@@ -5,6 +5,7 @@
 node_modules/
 dist/
 test-dist/
+examples-dist/
 coverage/
 .stryker-tmp/
 reports/mutation/

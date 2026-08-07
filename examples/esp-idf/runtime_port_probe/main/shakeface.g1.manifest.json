@@ -1,0 +1,10 @@
+{
+  "bundleId": "shakeface",
+  "format": "js",
+  "engine": "quickjs-ng",
+  "protocolVersion": 1,
+  "boardId": "waveshare.esp32s3.touch-amoled-1.8",
+  "generation": 1,
+  "sha256": "627f3d49b60414f058e04d9dfa394e156257bb2c95f080a2426c9fa555a87efd",
+  "byteLength": 1681
+}
