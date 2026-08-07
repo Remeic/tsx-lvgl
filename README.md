@@ -4,112 +4,249 @@
   <img src="assets/tsx-lvgl-logo.png" alt="TSX-LVGL" width="720">
 </p>
 
+<p align="center"><strong>Build typed TSX interfaces for small LVGL devices.</strong></p>
+
 <p align="center">
   <a href="https://github.com/Remeic/tsx-lvgl/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/Remeic/tsx-lvgl/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
 </p>
 
-<p align="center"><strong>Runtime TSX interfaces for LVGL on ESP32-S3.</strong></p>
+TSX-LVGL lets embedded teams author interactive interfaces in TypeScript/TSX,
+run them in a small device-owned JavaScript runtime, and render them through
+native LVGL on ESP32-class hardware.
 
-TSX-LVGL is an embedded UI experiment for authoring a bounded TypeScript/TSX
-component model, bundling it as JavaScript, and running that bundle on a
-device-owned runtime. The first hardware target is the Waveshare
-ESP32-S3-Touch-AMOLED-1.8 (V1: SH8601 display and FT3168 touch).
+The result is a focused development loop for constrained displays:
 
-## Runtime path
+- write a typed component instead of hand-maintaining widget plumbing;
+- keep hardware access behind versioned, typed capabilities;
+- validate changes on the host and use a dev-only bundle path designed to try
+  app changes without reflashing firmware once the board gate is available;
+- reject a bad bundle or roll it back while the previous in-memory app stays
+  live.
 
-The TSX→bundle→engine→VNode→reconciler→LVGL pipeline diagram lives in
-[the runtime architecture](docs/architecture.md#core-decision).
+The first hardware target is the Waveshare ESP32-S3-Touch-AMOLED-1.8 V1
+(SH8601 display and FT3168 touch).
 
-The runtime owns component identity, state/effect lifecycle, event replacement,
-typed sensor access, scheduler handoff and transactional bundle epochs. Native
-C is limited to the ESP-IDF/board/LVGL/sensor boundary. UI is not generated as
-C. See [Feature 0010](docs/feature-specs/0010-runtime-tsx-hot-reload.md) for
-detail.
+> Status: M1 tracer bullet. The host/runtime contracts and the ESP32-S3 probe
+> are implemented; physical-board application reload, complete display/touch
+> behavior and recovery remain separate acceptance gates.
 
-## M1 tracer bullet
+## Why use TSX-LVGL?
 
-The current host slice proves:
+TSX-LVGL is for developers who want the composition and type safety of modern
+UI authoring without bringing a browser or a general-purpose React stack onto
+a microcontroller.
+
+| You need | TSX-LVGL provides |
+| --- | --- |
+| A maintainable UI authoring model | A deliberately small, typed TSX vocabulary and immutable VNodes |
+| Fast feedback on embedded hardware | Deterministic app bundles and a dev-only USB Serial/JTAG reload path; host smoke proves the workflow without a board |
+| Hardware-aware application code | Versioned sensor schemas, validated samples and reload-epoch fencing |
+| Native embedded behavior | A thin LVGL host and board boundary; UI changes do not require generated UI C |
+| Safe iteration | Bounded staging, manifest/size validation, transport integrity checks and transactional root replacement |
+| Reproducible builds | Stable JavaScript, manifest and kernel artifacts with pinned tooling |
+
+## How the runtime works
+
+The application is the reloadable part. The kernel, reconciler, native ABI and
+firmware remain fixed until a separate guarded firmware workflow is used.
+QuickJS-NG is the first measured engine candidate in the current probe, not a
+permanent engine-selection promise.
+
+```mermaid
+flowchart LR
+    A[Developer writes TSX] --> B[Deterministic JS bundle]
+    B --> C[Manifest: version, board, size, SHA-256]
+    C --> D{Validate bundle}
+    D -->|invalid| R[Reject; keep current app live]
+    D -->|valid| E[Dev USB transport]
+    E --> F[Bounded staging in ESP32-S3 PSRAM]
+    F --> G[QuickJS-NG kernel]
+    G --> H[Runtime reconciliation]
+    H --> I[Typed sensors, timers and events]
+    I --> J[LVGL host]
+    J --> K[Display and touch]
+    G --> L{Evaluate or commit fails?}
+    L -->|yes| R
+    L -->|no| J
+```
+
+At the host/runtime transaction seam, a failed evaluation, mount or native root
+replacement restores the previous in-memory root. A rejected bundle does not
+advance the generation. Transport timeout behavior, physical-board reload and
+persistent last-known-good storage remain explicit gates rather than claims of
+the M1 host evidence.
+
+## Write an app
+
+The supported M1 component model is intentionally small and explicit:
 
 ```tsx
-function Counter() {
+import { Button, Screen, Text, type VNode } from "@tsx-lvgl/core";
+import { useState } from "@tsx-lvgl/runtime";
+
+export default function Counter(): VNode {
   const [count, setCount] = useState(0);
-  const uptime = useSensor(boardUptime);
-  useInterval(() => setCount((value) => value + 1), 1000);
 
   return (
     <Screen>
-      <Text text={`count=${count} uptime=${uptime?.value ?? "?"}`} />
-      <Button label="increment" onClick={() => setCount((value) => value + 1)} />
+      <Text text={`count=${count}`} />
+      <Button
+        label="increment"
+        onClick={() => setCount((value) => value + 1)}
+      />
     </Screen>
   );
 }
 ```
 
-Deterministic tests cover lazy immutable VNodes, keyed state preservation,
-host operations, event/timer disposal, typed sensor validation, reload epochs
-and rollback. The real QuickJS-NG/LVGL/touch probe remains a separate hardware
-feasibility gate; passing host tests does not prove board readiness.
+The same runtime also exposes `useEffect`, `useInterval` and `useSensor`.
+Sensor code consumes a schema and validated sample rather than a raw native
+pointer, so stale callbacks and samples from an old reload epoch cannot update
+the current app.
 
-## Dev loop (bundle hot reload)
+Every app bundle must export a default component or VNode. A committed M1
+reload starts a new application state and reload epoch; state migration is not
+part of the current contract.
 
-Edit a TSX app, rebuild its bundle, push it to a running dev firmware — no
-reflash:
+## Developer workflow
+
+### 1. Run the host gates
+
+The reproducible path uses the pinned development container and Docker Desktop:
 
 ```bash
-node scripts/bundle-app.mjs --entry examples/apps/ShakeFace.tsx --out build/bundles --generation 2
-tools/push-bundle --port /dev/cu.usbmodemXXX \
+./tools/dev test
+./tools/dev mutation
+```
+
+For a fast host-only iteration when Node.js 24.19.0 and npm 11.17.0 are already
+installed:
+
+```bash
+npm ci
+npm run typecheck
+npm test
+```
+
+The host runner exercises the same bundle, runtime and host contracts without
+requiring a board:
+
+```bash
+./tools/run-host --entry examples/apps/ShakeFace.tsx --shake
+```
+
+### 2. Build and try a bundle
+
+Build a new generation of an app bundle:
+
+```bash
+node scripts/bundle-app.mjs \
+  --entry examples/apps/ShakeFace.tsx \
+  --out build/bundles \
+  --bundle-id shakeface \
+  --generation 2
+```
+
+If a guarded development probe is already running and its serial port is
+available, push that bundle without reflashing:
+
+```bash
+./tools/push-bundle --port /dev/cu.usbmodemXXX \
   --bundle build/bundles/shakeface.g2.js \
   --manifest build/bundles/shakeface.g2.manifest.json
 ```
 
-A committed bundle swaps the UI transactionally; a malformed, oversized or
-throwing bundle is rejected/rolled back and the running app stays live. The
-same path runs on the host without hardware: `tools/run-host --entry
-examples/apps/ShakeFace.tsx --shake`. Protocol and guarantees:
-[Feature 0010](docs/feature-specs/0010-runtime-tsx-hot-reload.md). The dev
-transport is integrity-checked but unauthenticated; it is not OTA and never
-flashes firmware.
+The generation must be greater than the currently running generation; replace
+`2` with the next unused generation when repeating the workflow. This command
+is a bundle push, not an installer: it assumes a running probe and a host-side
+serial bridge. Docker Desktop for Mac does not provide USB passthrough by
+itself; see [the development environment guide](docs/development-environment.md)
+and [the recovery protocol](docs/recovery.md) before attempting physical-board
+work.
+
+The transport is development-only, integrity-checked and unauthenticated. It
+uses RAM/PSRAM staging, never writes flash and must not be treated as a secure
+OTA or production update channel.
+
+App-only changes use this bundle path. Changes to the kernel, native bindings,
+board host or baked-in application require regenerating the embedded artifacts
+and rebuilding firmware; see the
+[runtime-port probe guide](examples/esp-idf/runtime_port_probe/README.md).
+
+### 3. Build the runtime-port probe
+
+The committed runtime-port probe is a feasibility harness for the target board.
+Build it with the pinned toolchain:
+
+```bash
+./tools/dev qemu \
+  "cd examples/esp-idf/runtime_port_probe && idf.py build"
+```
+
+This validates the ESP-IDF composition and build path; it does not prove
+physical display, touch, reset or app-reload behavior. Do not flash directly.
+Physical-board work is gated by the recovery, identity and app-only workflow in
+[the recovery protocol](docs/recovery.md).
+
+## What is supported today
+
+The current M1 runtime slice includes:
+
+- `Screen`, `View`, `Text` and `Button` with typed props;
+- immutable VNodes and keyed reconciliation;
+- `useState`, effects, deterministic intervals and event replacement;
+- versioned typed sensor schemas, validation and stale-epoch fencing;
+- deterministic TSX-to-JavaScript bundling with a manifest and SHA-256;
+- a board-host composition using QuickJS-NG, currently the first measured
+  engine candidate, with a thin native LVGL host;
+- a host-tested transactional reload seam plus a dev-only bounded transport and
+  ESP32-S3 probe path; physical-board application reload is a later acceptance
+  gate;
+- host tests, mutation gates, deterministic artifact checks and an ESP-IDF
+  build path.
+
+## Honest boundaries
+
+TSX-LVGL is not React, is not affiliated with React or Meta, and does not claim
+to run arbitrary React applications. The supported UI model is deliberately
+smaller than browser React: DOM, CSS, Suspense, browser APIs and an unrestricted
+native-widget escape hatch are outside the current contract.
+
+The repository is an npm workspace, but application-side npm availability is
+not yet the same as on-device npm support. The current M1 bundler does not
+resolve and include arbitrary `node_modules` packages in the app bundle. Pure
+JavaScript dependency bundling is a planned capability; packages that require
+Node.js, the DOM, filesystem access, network APIs or native addons will also
+need an explicit device adapter.
+
+State migration across reloads, authenticated transport, persistent
+last-known-good storage, OTA and production deployment are separate gates.
+
+## Evidence boundaries
+
+Host reconciliation, QuickJS-NG feasibility, simulator behavior, ESP-IDF
+builds, QEMU, physical display/touch behavior and recovery are different kinds
+of evidence. A passing host test or firmware build does not prove physical
+board readiness.
+
+The transient FT3168/I2C warm-reset issue remains open; see the
+[diagnosis note](docs/diagnostics/ft3168-i2c-reset.md) for the current status
+and required evidence.
 
 ## Project shape
 
 ```text
-packages/core       immutable VNodes and TSX vocabulary
-packages/runtime    reconciler, hooks, engine seam and reload transaction
+packages/core       immutable VNodes and the supported TSX vocabulary
+packages/runtime    reconciliation, hooks, engine seam and reload transaction
 packages/sensors    versioned typed capabilities and samples
-packages/bundler    deterministic TSX->JS bundle + manifest, transport framing
-packages/device     kernel glue: LVGL host over the native ABI, scheduler, sensors
-examples/apps       internal dev apps (ShakeFace)
-examples/esp-idf    board host: QuickJS-NG kernel + TSXB bundle transport
-docs/               architecture, feature and recovery evidence
+packages/bundler    deterministic TSX-to-JS bundles, manifests and transport
+packages/device     QuickJS/LVGL kernel composition and native host boundary
+examples/apps       internal development apps, including ShakeFace
+examples/esp-idf    ESP-IDF runtime-port probe and embedded kernel artifacts
+docs/                architecture, feature contracts, development and recovery
 ```
 
-The repository retains only a frozen generated-C firmware artifact for guarded
-board recovery while runtime gates are open. It is not an alternate runtime
-path and receives no new features; Git history is the source rollback. The
-guarded board recovery process remains in force and must not be bypassed.
-
-## Development
-
-Use the pinned repository environment when available. The local fast path is:
-
-```bash
-npm install
-npm test
-npm run build
-```
-
-The committed runtime-port probe under `examples/esp-idf/runtime_port_probe`
-is a separate feasibility harness, not physical proof; board captures and
-other transient evidence are not committed. Do not flash directly. Read
-[the recovery protocol](docs/recovery.md) and use the guarded app-only board
-workflow only after the external identity, security and recovery gates pass.
-
-## Evidence boundaries
-
-QuickJS-NG feasibility, host reconciliation, simulator behavior, ESP-IDF
-builds, QEMU, physical display/touch behavior and recovery are separate gates.
-The transient FT3168/I2C warm-reset failure remains open; see the
-[diagnosis note](docs/diagnostics/ft3168-i2c-reset.md).
+Read [the runtime architecture](docs/architecture.md), [Feature 0010](docs/feature-specs/0010-runtime-tsx-hot-reload.md) and [the development environment guide](docs/development-environment.md) before extending the public contract.
 
 ## License
 
