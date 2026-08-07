@@ -76,7 +76,7 @@ function main() {
     rewriteInternalImports(stagingDist);
 
     const sourceSha = gitValue(["rev-parse", "HEAD"]);
-    const dirty = gitValue(["status", "--porcelain", "--untracked-files=no"]).length > 0;
+    const dirty = gitValue(["status", "--porcelain"]).length > 0;
     const provenance = {
       formatVersion: 1,
       packageName: sdkPackage.name,
