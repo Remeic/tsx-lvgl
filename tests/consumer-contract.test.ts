@@ -58,6 +58,37 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   const update = runJson(process.execPath, [cliPath, "update", "--source", repoRoot, "--json"], appRoot);
   assert.equal(update.code, "UPDATE_OK");
   assert.equal(update.sourceSha, metadata.sourceSha);
+  const updatedPackageLock = JSON.parse(readFileSync(join(appRoot, "package-lock.json"), "utf8")) as {
+    packages: Record<string, { dependencies?: Record<string, string>; resolved?: string }>;
+  };
+  const updatedRootPackage = updatedPackageLock.packages[""]!;
+  const updatedSdkPackage = updatedPackageLock.packages["node_modules/@tsx-lvgl/sdk"]!;
+  assert.equal(
+    updatedRootPackage.dependencies?.["@tsx-lvgl/sdk"],
+    "file:.tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
+  );
+  assert.equal(
+    updatedSdkPackage.resolved,
+    "file:.tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
+  );
+  const dirtySource = join(sandbox, "dirty-framework");
+  mkdirSync(join(dirtySource, "scripts"), { recursive: true });
+  writeFileSync(join(dirtySource, "package.json"), "{\"private\":true}\n");
+  const dirtyMetadata = {
+    ...metadata,
+    sourceSha: "0000000000000000000000000000000000000000",
+    sourceDirty: true,
+  };
+  writeFileSync(
+    join(dirtySource, "scripts/pack-sdk.mjs"),
+    `console.log(${JSON.stringify(JSON.stringify(dirtyMetadata))});\n`,
+  );
+  const dirtyUpdate = runFailure(
+    process.execPath,
+    [cliPath, "update", "--source", dirtySource, "--json"],
+    appRoot,
+  );
+  assert.equal(dirtyUpdate.code, "SOURCE_DIRTY");
   const check = runJson(process.execPath, [cliPath, "check", "--json"], appRoot);
   assert.equal(check.code, "CHECK_OK");
   assert.deepEqual(check.files, ["src/App.tsx"]);
@@ -117,4 +148,10 @@ function run(command: string, args: readonly string[], cwd: string): string {
 function runJson(command: string, args: readonly string[], cwd: string): Record<string, any> {
   const stdout = run(command, args, cwd).trim();
   return JSON.parse(stdout) as Record<string, any>;
+}
+
+function runFailure(command: string, args: readonly string[], cwd: string): Record<string, any> {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: "pipe" });
+  assert.notEqual(result.status, 0, `${command} unexpectedly succeeded`);
+  return JSON.parse(result.stderr.trim()) as Record<string, any>;
 }

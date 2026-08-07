@@ -93,6 +93,7 @@ interface SourcePackResult {
   readonly packageName: typeof SDK_PACKAGE_NAME;
   readonly version: string;
   readonly sourceSha: string;
+  readonly sourceDirty: boolean;
   readonly sha256: string;
   readonly byteLength: number;
 }
@@ -184,6 +185,9 @@ export function updateProject(root: string, explicitSource?: string): { readonly
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "framework source SDK packaging failed");
     }
     const metadata = parseSourcePackResult(packed.stdout);
+    if (metadata.sourceDirty) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
+    }
     const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
     writeSdkDependency(projectRoot, lock);
     runNpmInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
@@ -547,13 +551,17 @@ function runNpmInstall(root: string, artifactPath: string): void {
 function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
   const packageLock = readJson(packageLockPath, DIAGNOSTIC_CODES.INSTALL_FAILED);
   const packages = isRecord(packageLock.packages) ? packageLock.packages : {};
+  const rootPackage = isRecord(packages[""]) ? packages[""] : undefined;
   const sdkPackage = isRecord(packages[`node_modules/${SDK_PACKAGE_NAME}`])
     ? packages[`node_modules/${SDK_PACKAGE_NAME}`]
     : undefined;
-  if (sdkPackage === undefined) {
+  if (rootPackage === undefined || sdkPackage === undefined) {
     throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
   }
   const relativeArtifact = relative(root, artifactPath).split(sep).join("/");
+  const rootDependencies = isRecord(rootPackage.dependencies) ? { ...rootPackage.dependencies } : {};
+  rootDependencies[SDK_PACKAGE_NAME] = `file:${relativeArtifact}`;
+  rootPackage.dependencies = rootDependencies;
   sdkPackage.resolved = `file:${relativeArtifact}`;
   sdkPackage.integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
   writeFileSync(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`, "utf8");
@@ -595,6 +603,7 @@ function parseSourcePackResult(stdout: string): SourcePackResult {
     || typeof value.artifactPath !== "string"
     || typeof value.version !== "string"
     || typeof value.sourceSha !== "string"
+    || typeof value.sourceDirty !== "boolean"
     || typeof value.sha256 !== "string"
     || typeof value.byteLength !== "number"
   ) {
@@ -605,6 +614,7 @@ function parseSourcePackResult(stdout: string): SourcePackResult {
     packageName: SDK_PACKAGE_NAME,
     version: value.version,
     sourceSha: value.sourceSha,
+    sourceDirty: value.sourceDirty,
     sha256: value.sha256,
     byteLength: value.byteLength,
   };

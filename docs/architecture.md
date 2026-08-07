@@ -40,8 +40,9 @@ work from a copied local artifact without a registry or a framework checkout.
 The package-source seam is the artifact reference in
 `.tsx-lvgl/framework.lock.json`. The lock records package version, source Git
 SHA, artifact SHA-256 and byte length. `sync` installs that exact artifact;
-`update` is the explicit source-to-artifact operation. `dev` and `build` only
-verify the lock and never resolve a newer source. The package remains private,
+`update` is the explicit source-to-artifact operation and rejects a dirty source
+checkout. `dev` and `build` only verify the lock and never resolve a newer
+source. The package remains private,
 so `npm pack` is a deliberate local distribution action and `npm publish` is
 not part of the workflow.
 

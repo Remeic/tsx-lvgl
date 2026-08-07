@@ -58,8 +58,9 @@ The committed `.tsx-lvgl/framework.lock.json` is the provenance pin:
 ```
 
 `sync` installs that exact artifact. `update` explicitly repackages a
-machine-configured source checkout and replaces the pin. `dev` and `build`
-verify the pin and do not silently upgrade it. A generated consumer `AGENTS.md`
+machine-configured source checkout and replaces the pin; dirty source checkouts
+are rejected so the SHA-only provenance cannot hide uncommitted changes.
+`dev` and `build` verify the pin and do not silently upgrade it. A generated consumer `AGENTS.md`
 defines ownership, safe operations and the distinction between headless/build
 evidence and physical-device proof. Verdaccio is intentionally not part of the
 seam; an npm-compatible registry can replace the artifact source later without
