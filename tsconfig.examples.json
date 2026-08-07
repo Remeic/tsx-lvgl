@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "examples/apps",
+    "outDir": "examples-dist",
+    "composite": true,
+    "tsBuildInfoFile": "examples-dist/tsconfig.tsbuildinfo",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@tsx-lvgl/core"
+  },
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/sensors" },
+    { "path": "packages/runtime" }
+  ],
+  "include": ["examples/apps/**/*.tsx"]
+}

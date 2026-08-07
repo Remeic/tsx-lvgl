@@ -4,6 +4,9 @@
     { "path": "packages/core" },
     { "path": "packages/sensors" },
     { "path": "packages/runtime" },
-    { "path": "tsconfig.tests.json" }
+    { "path": "packages/bundler" },
+    { "path": "packages/device" },
+    { "path": "tsconfig.tests.json" },
+    { "path": "tsconfig.examples.json" }
   ]
 }
