@@ -96,6 +96,89 @@ M1 resets application state on a committed reload. State migration is a later
 feature. Transport authentication/signatures, persistent last-known-good
 storage and QuickJS module loading are separate gates.
 
+## Bundle producer
+
+`@tsx-lvgl/bundler` converts one TSX entry into one deterministic JavaScript
+bundle plus a manifest:
+
+- Transform: TypeScript compiler API, `jsx: react-jsx` with import source
+  `@tsx-lvgl/core`, `module: CommonJS`, `target: ES2020`, LF newlines,
+  comments removed. The bundle's `export default` is the root component.
+- Output is ASCII-only: every code unit >= 0x80 is escaped as `\uXXXX`, so
+  `byteLength === code.length` and the device decodes bytes to a string
+  without `TextDecoder`.
+- Determinism by construction: no timestamps, no absolute paths, no
+  environment-dependent output. Repeated builds are byte-identical.
+- The bundler computes `sha256` (lowercase hex) and `byteLength` into the
+  manifest. `validateRuntimeBundle` stays shape-only; byte verification is
+  the transport's job.
+- Bounds: `RUNTIME_BUNDLE_MAX_BYTES = 262144` (256 KiB), exported from
+  `@tsx-lvgl/runtime` and mirrored by one C `#define`. Rationale: QuickJS
+  heap limit is 1 MiB; the staged copy lives in PSRAM; the MVP app is a few
+  KiB, so 256 KiB bounds staging and parse cost with wide headroom.
+- Identity: `boardId = "waveshare.esp32s3.touch-amoled-1.8"`,
+  `protocolVersion = 1`, `engine = "quickjs-ng"`, `format = "js"`.
+- Dev reload is not authenticated. The sha256 check is integrity only;
+  production OTA/signatures remain out of scope and this transport must not
+  be presented as secure.
+
+## Device kernel
+
+The compiled `core + sensors + runtime + device` packages form a "kernel"
+bundle baked into firmware (`EMBED_FILES`); the reconciler runs inside
+QuickJS on the device. Only the app bundle hot-reloads; kernel changes ride
+the guarded firmware path. C exposes a `__native` object (contract:
+`packages/device/src/native.ts`) — low-level LVGL ops, timers, sync sensor
+read, click dispatch, log. The kernel wires it to the runtime seams and
+tracks `lastGeneration` in RAM (baked-in app = generation 1; rejected or
+rolled-back reloads do not consume a generation). On the host the identical
+engine adapter (`createProgramEngine`) evaluates bundles in Node; the
+manifest `engine` name asserts bundle-format compatibility, not interpreter
+identity. QuickJS-specific behavior stays a board-gate concern.
+
+## Bundle transport v1 (dev only)
+
+Line-oriented ASCII over the USB Serial/JTAG console, `\n`-terminated.
+Staging is RAM only (`RUNTIME_BUNDLE_MAX_BYTES` in PSRAM); the transport
+never touches flash and never calls a firmware flashing operation. Bundle A
+stays live until the kernel commits B.
+
+Host to device:
+
+- `TSXB BEGIN <base64(manifest JSON)>`
+- `TSXB DATA <seq> <base64 payload, <= 384 chars>` — `seq` starts at 1,
+  strictly increments.
+- `TSXB END <chunkCount>`
+- `TSXB ABORT`
+
+Device to host:
+
+- `TSXB RDY maxBytes=<n> protocol=<v> board=<id> lastGeneration=<g>` —
+  reply to `BEGIN`.
+- `TSXB ACK <seq>` — per accepted chunk.
+- `TSXB OK bundle=<id> generation=<g> epoch=<e>` — committed.
+- `TSXB ERR <reason>` — terminal for this attempt. `reason` is one of the
+  nine `RuntimeBundleRejection` values or `frame`, `base64`, `sequence`,
+  `overflow`, `sha256`, `timeout`, `busy`, `malformed-manifest`,
+  `non-ascii`, `evaluate-rolled-back`.
+
+Rules:
+
+- Timeouts: device discards staging after 2000 ms without a valid frame
+  mid-transfer; host waits 1000 ms per `ACK` and 5000 ms for `OK`/`ERR`
+  after `END` (evaluation budget).
+- After `END`, device checks staged length == `manifest.byteLength` and
+  mbedTLS sha256 == `manifest.sha256`, then hands off to the kernel at the
+  owner-task quiescent point (between pumps, under the display lock).
+- Any `ERR`, host-detected protocol error, missing `ACK`, or timeout: host sends
+  best-effort `TSXB ABORT` and exits non-zero; device frees staging and bundle A
+  keeps running. A device-reported `ERR` is terminal already, so its redundant
+  `ABORT` is accepted as a no-op.
+- Sequence gap or duplicate → `ERR sequence`. Payload overflow past
+  `maxBytes` → `ERR overflow`. A transfer while one is active → `ERR busy`.
+- Non-`TSXB` lines in either direction are noise (device logs interleave on
+  the same console) and must be ignored, never treated as protocol errors.
+
 ## M1 tracer bullet
 
 The deterministic host path proves the slice diagrammed in
@@ -104,10 +187,11 @@ The deterministic host path proves the slice diagrammed in
 `Runtime.reloadBundle` covers the bundle-to-engine seam with a fake evaluator;
 the real QuickJS-NG adapter remains a board-host gate.
 
-A physical runtime-port probe on the ESP32-S3 board (not committed in this
-change) proves only QuickJS-NG, direct LVGL calls, timer delivery,
-sensor-shaped data and touch callback feasibility on the target. It is not
-reconciler or hot-reload evidence.
+The committed physical runtime-port probe under
+`examples/esp-idf/runtime_port_probe` proves only QuickJS-NG, direct LVGL
+calls, timer delivery, sensor-shaped data and touch callback feasibility on
+the target. Board captures and other transient physical evidence are not
+committed; the probe is not reconciler or hot-reload evidence.
 
 ## Validation ladder
 

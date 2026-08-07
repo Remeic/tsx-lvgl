@@ -19,6 +19,8 @@ import {
 } from "@tsx-lvgl/sensors";
 import { strict as assert } from "node:assert";
 
+import { advanceTimers } from "./time.js";
+
 export interface FakeInstance extends RuntimeHostInstance {
   readonly id: number;
   props: Readonly<Record<string, unknown>>;
@@ -170,13 +172,7 @@ export class ManualScheduler implements RuntimeScheduler {
   }
 
   advance(milliseconds: number): void {
-    for (const timer of this.timers.values()) {
-      timer.elapsedMs += milliseconds;
-      while (timer.elapsedMs >= timer.periodMs) {
-        timer.elapsedMs -= timer.periodMs;
-        timer.callback();
-      }
-    }
+    advanceTimers(this.timers.values(), milliseconds);
   }
 
   flush(): void {

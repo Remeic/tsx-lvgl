@@ -31,6 +31,30 @@ class ThrowingDisposeHost extends FakeHost {
   }
 }
 
+class PartiallySwitchingHost extends FakeHost {
+  throwOnNextReplace = false;
+
+  override replaceRoot(next: RuntimeHostInstance | null, previous: RuntimeHostInstance | null): void {
+    super.replaceRoot(next, previous);
+    if (this.throwOnNextReplace) {
+      this.throwOnNextReplace = false;
+      throw new Error("root replace failed after native switch");
+    }
+  }
+}
+
+class RestoreThrowingHost extends FakeHost {
+  private replaceCalls = 0;
+
+  override replaceRoot(next: RuntimeHostInstance | null, previous: RuntimeHostInstance | null): void {
+    this.replaceCalls += 1;
+    super.replaceRoot(next, previous);
+    if (this.replaceCalls === 2 || this.replaceCalls === 3) {
+      throw new Error("root restore failed");
+    }
+  }
+}
+
 test("runtime exposes lifecycle seams and rejects invalid ownership transitions", () => {
   const { host, scheduler, runtime, errors } = createHarness();
 
@@ -356,6 +380,41 @@ test("reload swaps the root transactionally and fences stale callbacks on rollba
   assert.equal(rolledBack.epoch, 2);
   assert.equal(host.text(), "new");
   assert.match(String(rolledBack.error), /broken bundle/);
+});
+
+test("reload restores the previous root when host replacement throws after switching", () => {
+  const host = new PartiallySwitchingHost();
+  const scheduler = new ManualScheduler();
+  const runtime = new Runtime({ host, scheduler });
+
+  runtime.mount(<Screen><Text text="stable" /></Screen>);
+  const previousRoot = host.roots[0];
+  assert.ok(previousRoot);
+  host.throwOnNextReplace = true;
+
+  const result = runtime.reload(<Screen><Text text="candidate" /></Screen>);
+
+  assert.equal(result.status, "rolled_back");
+  assert.match(String(result.error), /root replace failed/);
+  assert.deepEqual(host.roots, [previousRoot]);
+  assert.equal(host.text(), "stable");
+  runtime.unmount();
+});
+
+test("reload reports a failed previous-root restore without leaking the candidate", () => {
+  const host = new RestoreThrowingHost();
+  const scheduler = new ManualScheduler();
+  const errors: unknown[] = [];
+  const runtime = new Runtime({ host, scheduler, onError: (error) => errors.push(error) });
+
+  runtime.mount(<Screen><Text text="stable" /></Screen>);
+  const result = runtime.reload(<Screen><Text text="candidate" /></Screen>);
+
+  assert.equal(result.status, "rolled_back");
+  assert.match(String(result.error), /root restore failed/);
+  assert.deepEqual(errors, [new Error("root restore failed")]);
+  assert.equal(host.created.filter((instance) => instance.props.text === "candidate").every((instance) => instance.disposed), true);
+  runtime.unmount();
 });
 
 test("effect activation failure restores the previous root and disposes the candidate", () => {

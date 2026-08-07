@@ -1,0 +1,214 @@
+/**
+ * The MVP-promise test: a real TSX app, compiled through the real
+ * `compileTsxBundle`, mounted and hot-reloaded through a real `createKernel`
+ * — over the `NativeBindings` fakes from `tests/support/fake-native.ts`. No
+ * mocking of the bundler or the kernel themselves.
+ */
+import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { BOARD_ID, PROTOCOL_VERSION, compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
+import { createKernel } from "@tsx-lvgl/device";
+import {
+  RUNTIME_BUNDLE_MAX_BYTES,
+  validateRuntimeBundle,
+  type RuntimeBundle,
+} from "@tsx-lvgl/runtime";
+import { motionSchema } from "@tsx-lvgl/sensors";
+import { makeFakeNative } from "./support/fake-native.js";
+
+// Compiled test files live at test-dist/tests/e2e-host.test.js; two hops up
+// from there is the repo root regardless of the cwd `node --test` runs from.
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, "..", "..");
+const shakeFaceSource = readFileSync(join(repoRoot, "examples/apps/ShakeFace.tsx"), "utf8");
+const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
+
+const calmMotion = { accelerationMps2: [0, 0, 9.80665] as const, angularVelocityDps: [0, 0, 0] as const };
+const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
+
+function compileShakeFace(generation: number): BundleOutput {
+  return compileTsxBundle({
+    fileName: "ShakeFace.tsx",
+    source: shakeFaceSource,
+    bundleId: "shakeface",
+    boardId: BOARD_ID,
+    generation,
+  });
+}
+
+function compileShakeFaceB(generation: number): BundleOutput {
+  return compileTsxBundle({
+    fileName: "shakeface-b.tsx",
+    source: shakeFaceBSource,
+    bundleId: "shakeface",
+    boardId: BOARD_ID,
+    generation,
+  });
+}
+
+function toBundle(output: BundleOutput): RuntimeBundle {
+  return { manifest: output.manifest, source: output.bytes };
+}
+
+/** A fresh kernel over a fresh fake native, with a calm sensor reading already scripted. */
+function startedKernel() {
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 0, value: calmMotion });
+  kernel.start(toBundle(compileShakeFace(1)));
+  return { fake, kernel };
+}
+
+function buttonId(fake: ReturnType<typeof makeFakeNative>): number {
+  const [id] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(id, "expected a live button widget");
+  return id;
+}
+
+test("bundle A compiles, validates, and mounts: eyes, happy mouth, status, and button render", () => {
+  const output = compileShakeFace(1);
+  const validation = validateRuntimeBundle(
+    { manifest: output.manifest, source: output.bytes },
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      engine: "quickjs-ng",
+      boardId: BOARD_ID,
+      maxBytes: RUNTIME_BUNDLE_MAX_BYTES,
+      lastGeneration: 0,
+    },
+  );
+  assert.equal(validation.ok, true);
+
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 0, value: calmMotion });
+  kernel.start(toBundle(output));
+
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
+  const id = buttonId(fake);
+  assert.equal(fake.lvgl.textOf(id), "switch: sad");
+});
+
+test("a shake flips the mouth, a second shake within the cooldown is ignored, and one after cooldown flips back", async () => {
+  const { fake, kernel } = startedKernel();
+  await Promise.resolve();
+  await Promise.resolve();
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
+
+  // First shake: flips to sad. The state flip is one render cycle behind the
+  // sample update (useEffect -> setState is its own deferred render task), so
+  // pump twice: once to accept the sample, once to flush the resulting toggle.
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 80, value: shakeMotion });
+  fake.timers.advance(80);
+  kernel.pump();
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
+
+  // Second shake 80ms later (well within the 700ms cooldown): ignored.
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 160, value: shakeMotion });
+  fake.timers.advance(80);
+  kernel.pump();
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
+
+  // A shake at t=860ms (>= 80 + 700ms cooldown): accepted, flips back to happy.
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 860, value: shakeMotion });
+  fake.timers.advance(80);
+  kernel.pump();
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
+});
+
+test("clicking the button flips the mood manually", () => {
+  const { fake, kernel } = startedKernel();
+  const id = buttonId(fake);
+
+  fake.dispatchClick(id);
+  kernel.pump();
+
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
+  assert.equal(fake.lvgl.textOf(id), "switch: happy");
+});
+
+test("an unavailable IMU reading reports the Italian unavailable status", async () => {
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  fake.sensors.script(motionSchema.id, { status: "unavailable", sampledAtMs: 0 });
+  kernel.start(toBundle(compileShakeFace(1)));
+
+  await Promise.resolve();
+  await Promise.resolve();
+  kernel.pump();
+
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "IMU non disponibile"]);
+});
+
+test("a hot reload to variant B commits, swaps the tree, and disposes the old instances", () => {
+  const { fake, kernel } = startedKernel();
+  const oldIds = [...fake.lvgl.liveIdsOfKind("text"), ...fake.lvgl.liveIdsOfKind("button")];
+  assert.ok(oldIds.length > 0);
+
+  const bundleB = compileShakeFaceB(2);
+  const result = kernel.stageReload(JSON.stringify(bundleB.manifest), bundleB.code);
+
+  assert.equal(result, "committed 2");
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "^----^", "B: felice - scuotimi"]);
+  const id = buttonId(fake);
+  assert.equal(fake.lvgl.textOf(id), "switch: sad");
+  for (const oldId of oldIds) assert.equal(fake.lvgl.isAlive(oldId), false, `instance ${oldId} must be disposed`);
+});
+
+test("a byte-corrupted reload is rejected and the mounted tree is untouched", () => {
+  const { fake, kernel } = startedKernel();
+  const before = fake.lvgl.liveTexts();
+
+  const bundleB = compileShakeFaceB(2);
+  const truncated = bundleB.code.slice(0, Math.floor(bundleB.code.length / 2));
+  const result = kernel.stageReload(JSON.stringify(bundleB.manifest), truncated);
+
+  assert.equal(result, "rejected byte-length-mismatch");
+  assert.deepEqual(fake.lvgl.liveTexts(), before);
+});
+
+test("a throwing candidate rolls back and the previous app stays mounted and interactive", () => {
+  const { fake, kernel } = startedKernel();
+  const before = fake.lvgl.liveTexts();
+
+  const throwingSource = 'export default function Boom() {\n  throw new Error("boom");\n}\n';
+  const throwingBundle = compileTsxBundle({
+    fileName: "Boom.tsx",
+    source: throwingSource,
+    bundleId: "shakeface",
+    boardId: BOARD_ID,
+    generation: 2,
+  });
+  const result = kernel.stageReload(JSON.stringify(throwingBundle.manifest), throwingBundle.code);
+
+  assert.equal(result, "rolled_back");
+  assert.deepEqual(fake.lvgl.liveTexts(), before);
+
+  // Still interactive: the click handler still fires...
+  const id = buttonId(fake);
+  fake.dispatchClick(id);
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
+
+  // ...and the sensor's native timer still advances and re-renders.
+  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 800, value: shakeMotion });
+  fake.timers.advance(80);
+  kernel.pump();
+  kernel.pump();
+  assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
+});
+
+test("compiling ShakeFace twice is byte-for-byte and manifest-for-manifest deterministic", () => {
+  const first = compileShakeFace(1);
+  const second = compileShakeFace(1);
+  assert.deepEqual([...first.bytes], [...second.bytes]);
+  assert.deepEqual(first.manifest, second.manifest);
+});

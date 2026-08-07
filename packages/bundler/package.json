@@ -1,0 +1,16 @@
+{
+  "name": "@tsx-lvgl/bundler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@tsx-lvgl/runtime": "0.1.0",
+    "typescript": "5.9.2"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  }
+}
