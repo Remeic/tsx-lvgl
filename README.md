@@ -50,13 +50,36 @@ host operations, event/timer disposal, typed sensor validation, reload epochs
 and rollback. The real QuickJS-NG/LVGL/touch probe remains a separate hardware
 feasibility gate; passing host tests does not prove board readiness.
 
+## Dev loop (bundle hot reload)
+
+Edit a TSX app, rebuild its bundle, push it to a running dev firmware — no
+reflash:
+
+```bash
+node scripts/bundle-app.mjs --entry examples/apps/ShakeFace.tsx --out build/bundles --generation 2
+tools/push-bundle --port /dev/cu.usbmodemXXX \
+  --bundle build/bundles/shakeface.g2.js \
+  --manifest build/bundles/shakeface.g2.manifest.json
+```
+
+A committed bundle swaps the UI transactionally; a malformed, oversized or
+throwing bundle is rejected/rolled back and the running app stays live. The
+same path runs on the host without hardware: `tools/run-host --entry
+examples/apps/ShakeFace.tsx --shake`. Protocol and guarantees:
+[Feature 0010](docs/feature-specs/0010-runtime-tsx-hot-reload.md). The dev
+transport is integrity-checked but unauthenticated; it is not OTA and never
+flashes firmware.
+
 ## Project shape
 
 ```text
 packages/core       immutable VNodes and TSX vocabulary
-packages/runtime    reconciler, hooks, host seam and reload transaction
+packages/runtime    reconciler, hooks, engine seam and reload transaction
 packages/sensors    versioned typed capabilities and samples
-examples/esp-idf    board host and QuickJS-NG feasibility probe
+packages/bundler    deterministic TSX->JS bundle + manifest, transport framing
+packages/device     kernel glue: LVGL host over the native ABI, scheduler, sensors
+examples/apps       internal dev apps (ShakeFace)
+examples/esp-idf    board host: QuickJS-NG kernel + TSXB bundle transport
 docs/               architecture, feature and recovery evidence
 ```
 
@@ -75,9 +98,9 @@ npm test
 npm run build
 ```
 
-A physical runtime-port probe on the ESP32-S3 board (not committed in this
-change) is a separate feasibility gate, not physical proof. Do not flash
-directly. Read
+The committed runtime-port probe under `examples/esp-idf/runtime_port_probe`
+is a separate feasibility harness, not physical proof; board captures and
+other transient evidence are not committed. Do not flash directly. Read
 [the recovery protocol](docs/recovery.md) and use the guarded app-only board
 workflow only after the external identity, security and recovery gates pass.
 
