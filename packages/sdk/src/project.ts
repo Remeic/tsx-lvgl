@@ -149,7 +149,7 @@ export function createProject(target: string, artifactArgument?: string): { read
   try {
     const lock = installArtifactIntoProject(root, artifactPath);
     writeSdkDependency(root, lock);
-    runNpmInstall(root);
+    runNpmInstall(root, resolveArtifactPath(root, lock));
     verifyInstalledSdk(root, lock);
     return { root, lock };
   } finally {
@@ -161,7 +161,7 @@ export function syncProject(root: string): { readonly lock: FrameworkLock } {
   const project = readProjectFiles(root);
   verifyArtifact(project);
   writeSdkDependency(project.root, project.lock);
-  runNpmInstall(project.root);
+  runNpmInstall(project.root, project.artifactPath);
   verifyInstalledSdk(project.root, project.lock);
   return { lock: project.lock };
 }
@@ -186,7 +186,7 @@ export function updateProject(root: string, explicitSource?: string): { readonly
     const metadata = parseSourcePackResult(packed.stdout);
     const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
     writeSdkDependency(projectRoot, lock);
-    runNpmInstall(projectRoot);
+    runNpmInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
     verifyInstalledSdk(projectRoot, lock);
     return { lock };
   } finally {
@@ -523,16 +523,39 @@ function writeSdkDependency(root: string, lock: FrameworkLock): void {
   );
 }
 
-function runNpmInstall(root: string): void {
+function runNpmInstall(root: string, artifactPath: string): void {
+  const packageLockPath = join(root, "package-lock.json");
+  const hasPackageLock = existsSync(packageLockPath);
+  const installedSdkRoot = join(root, "node_modules", "@tsx-lvgl", "sdk");
+  // npm keys a file dependency by its path and version. Remove the installed
+  // package before sync/update so a same-version artifact with a new digest is
+  // not incorrectly treated as already satisfied.
+  rmSync(installedSdkRoot, { recursive: true, force: true });
   const npmExecPath = process.env.npm_execpath;
   const command = npmExecPath === undefined ? "npm" : process.execPath;
-  const args = npmExecPath === undefined
-    ? ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"]
-    : [npmExecPath, "install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"];
+  const baseArgs = ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"];
+  if (hasPackageLock) baseArgs.push("--package-lock=false");
+  const args = npmExecPath === undefined ? baseArgs : [npmExecPath, ...baseArgs];
   const result = spawnSync(command, args, { cwd: root, encoding: "utf8", stdio: "pipe" });
   if (result.status !== 0) {
     throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "npm could not install the locked local SDK artifact");
   }
+  if (hasPackageLock) synchronizePackageLock(packageLockPath, root, artifactPath);
+}
+
+function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
+  const packageLock = readJson(packageLockPath, DIAGNOSTIC_CODES.INSTALL_FAILED);
+  const packages = isRecord(packageLock.packages) ? packageLock.packages : {};
+  const sdkPackage = isRecord(packages[`node_modules/${SDK_PACKAGE_NAME}`])
+    ? packages[`node_modules/${SDK_PACKAGE_NAME}`]
+    : undefined;
+  if (sdkPackage === undefined) {
+    throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
+  }
+  const relativeArtifact = relative(root, artifactPath).split(sep).join("/");
+  sdkPackage.resolved = `file:${relativeArtifact}`;
+  sdkPackage.integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
+  writeFileSync(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`, "utf8");
 }
 
 function resolveFrameworkSource(explicitSource?: string): string {
