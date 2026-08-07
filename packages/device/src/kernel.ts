@@ -42,6 +42,15 @@ function parseManifestJson(manifestJson: string): ManifestParseResult {
 
 function resolveModule(specifier: string): Record<string, unknown> {
   switch (specifier) {
+    case "@tsx-lvgl/sdk":
+      return {
+        ...coreModule,
+        ...runtimeModule,
+        ...sensorsModule,
+        useMotion: () => runtimeModule.useSensor(sensorsModule.motionSchema),
+      } as unknown as Record<string, unknown>;
+    case "@tsx-lvgl/sdk/jsx-runtime":
+      return jsxRuntimeModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/core":
       return coreModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/core/jsx-runtime":

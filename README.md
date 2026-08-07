@@ -78,11 +78,10 @@ the M1 host evidence.
 
 ## Write an app
 
-The supported M1 component model is intentionally small and explicit:
+The supported application facade is intentionally small and explicit:
 
 ```tsx
-import { Button, Screen, Text, type VNode } from "@tsx-lvgl/core";
-import { useState } from "@tsx-lvgl/runtime";
+import { Button, Screen, Text, useState, type VNode } from "@tsx-lvgl/sdk";
 
 export default function Counter(): VNode {
   const [count, setCount] = useState(0);
@@ -99,16 +98,49 @@ export default function Counter(): VNode {
 }
 ```
 
-The same runtime also exposes `useEffect`, `useInterval` and `useSensor`.
-Sensor code consumes a schema and validated sample rather than a raw native
-pointer, so stale callbacks and samples from an old reload epoch cannot update
-the current app.
+The facade also exposes `useEffect`, `useInterval`, `useMotion` and the small
+typed UI vocabulary. Sensor code consumes validated samples rather than a raw
+native pointer, so stale callbacks and samples from an old reload epoch cannot
+update the current app. Applications do not import the core, runtime, sensors,
+bundler or device workspaces directly.
 
 Every app bundle must export a default component or VNode. A committed M1
 reload starts a new application state and reload epoch; state migration is not
 part of the current contract.
 
-## Developer workflow
+## Consumer application workflow
+
+The supported local distribution boundary is a standard npm-pack artifact. A
+machine bootstrap builds one artifact from a framework checkout and installs it
+into an application; the application then works without a registry and without
+the framework checkout:
+
+```bash
+npm run build
+npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
+tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
+cd my-app
+npm run doctor -- --json
+npm run dev
+npm run check
+npm run build
+```
+
+The generated `.tsx-lvgl/framework.lock.json` records the framework source SHA,
+artifact version, SHA-256 and byte length. `sync` installs that exact artifact;
+`update` is the explicit command that repackages a machine-configured source
+checkout. `dev` and `build` verify the lock and never upgrade it. A source path
+may be supplied through `TSX_LVGL_SOURCE` or the machine-only
+`~/.config/tsx-lvgl/config.json`; it is never written to application config.
+The generated `AGENTS.md` records the same ownership and safety rules.
+
+The CLI emits stable diagnostic codes and supports JSON output on all commands
+that produce a result. The public `@tsx-lvgl/sdk` package and its `tsx-lvgl`
+binary are private and protected from accidental publication; the package
+source seam can later be replaced by an npm-compatible registry without
+changing application imports or commands.
+
+## Framework development workflow
 
 ### 1. Run the host gates
 
@@ -132,7 +164,7 @@ The host runner exercises the same bundle, runtime and host contracts without
 requiring a board:
 
 ```bash
-./tools/run-host --entry examples/apps/ShakeFace.tsx --shake
+./tools/run-host --entry tests/fixtures/shakeface-a.tsx --shake
 ```
 
 ### 2. Build and try a bundle
@@ -141,7 +173,7 @@ Build a new generation of an app bundle:
 
 ```bash
 node scripts/bundle-app.mjs \
-  --entry examples/apps/ShakeFace.tsx \
+  --entry tests/fixtures/shakeface-a.tsx \
   --out build/bundles \
   --bundle-id shakeface \
   --generation 2
@@ -236,12 +268,14 @@ and required evidence.
 ## Project shape
 
 ```text
-packages/core       immutable VNodes and the supported TSX vocabulary
+packages/sdk        stable application facade, CLI and consumer contract
+packages/core       immutable VNodes and the internal TSX vocabulary
 packages/runtime    reconciliation, hooks, engine seam and reload transaction
 packages/sensors    versioned typed capabilities and samples
 packages/bundler    deterministic TSX-to-JS bundles, manifests and transport
 packages/device     QuickJS/LVGL kernel composition and native host boundary
-examples/apps       internal development apps, including ShakeFace
+examples/apps       tiny hello-screen, counter and sensor-readout examples
+tests/fixtures       internal end-to-end hot-reload fixture (not a framework example)
 examples/esp-idf    ESP-IDF runtime-port probe and embedded kernel artifacts
 docs/                architecture, feature contracts, development and recovery
 ```

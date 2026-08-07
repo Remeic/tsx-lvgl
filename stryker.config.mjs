@@ -3,14 +3,23 @@ const config = {
   testRunner: "command",
   commandRunner: {
     // Single source of truth for "the tests"; only the build differs from CI.
-    command: "npx tsc -b --noCheck --pretty false && npm run test:fast",
+    command: "npx tsc -b --noCheck --pretty false && npm run test:mutation",
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
   buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --noCheck --pretty false",
   inPlace: false,
   symlinkNodeModules: false,
-  mutate: ["packages/*/src/**/*.ts"],
+  // Keep mutation evidence focused on the deterministic framework packages.
+  // The consumer facade and CLI are exercised through the external contract test;
+  // its npm-install sandbox stays outside this mutation run.
+  mutate: [
+    "packages/core/src/**/*.ts",
+    "packages/sensors/src/**/*.ts",
+    "packages/runtime/src/**/*.ts",
+    "packages/bundler/src/**/*.ts",
+    "packages/device/src/**/*.ts",
+  ],
   // The ESP-IDF probe is validated by its own firmware gate. Its generated
   // managed_components tree is not part of the host mutation project.
   ignorePatterns: [

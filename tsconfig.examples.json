@@ -6,12 +6,13 @@
     "composite": true,
     "tsBuildInfoFile": "examples-dist/tsconfig.tsbuildinfo",
     "jsx": "react-jsx",
-    "jsxImportSource": "@tsx-lvgl/core"
+    "jsxImportSource": "@tsx-lvgl/sdk"
   },
   "references": [
     { "path": "packages/core" },
     { "path": "packages/sensors" },
-    { "path": "packages/runtime" }
+    { "path": "packages/runtime" },
+    { "path": "packages/sdk" }
   ],
   "include": ["examples/apps/**/*.tsx"]
 }

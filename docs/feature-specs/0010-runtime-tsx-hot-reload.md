@@ -31,6 +31,40 @@ passes them to a replaceable `RuntimeEngine` before entering the VNode reload
 transaction. The retired generated-C compiler is not part of this product
 path.
 
+## Consumer package boundary
+
+Applications use `@tsx-lvgl/sdk` and the `tsx-lvgl` CLI. The facade owns the
+public tags, hooks and high-level sensor helper; applications do not import
+the internal package graph. A framework checkout produces a standard npm-pack
+tarball whose `dist/vendor` directory contains the compiled core, sensors,
+runtime, bundler, device adapter and TypeScript compiler needed by the CLI.
+The artifact is copied into the application and referenced by a relative
+`.tsx-lvgl/artifacts/` path, so no registry or source checkout is required.
+
+The committed `.tsx-lvgl/framework.lock.json` is the provenance pin:
+
+```json
+{
+  "formatVersion": 1,
+  "package": "@tsx-lvgl/sdk",
+  "version": "0.1.0",
+  "sourceSha": "<40 lowercase hex characters>",
+  "artifact": {
+    "file": ".tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
+    "sha256": "<64 lowercase hex characters>",
+    "byteLength": 12345
+  }
+}
+```
+
+`sync` installs that exact artifact. `update` explicitly repackages a
+machine-configured source checkout and replaces the pin. `dev` and `build`
+verify the pin and do not silently upgrade it. A generated consumer `AGENTS.md`
+defines ownership, safe operations and the distinction between headless/build
+evidence and physical-device proof. Verdaccio is intentionally not part of the
+seam; an npm-compatible registry can replace the artifact source later without
+changing application imports or normal commands.
+
 ## VNode contract
 
 Every render produces an immutable VNode:
