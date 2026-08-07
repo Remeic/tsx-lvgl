@@ -68,6 +68,7 @@ function main() {
   try {
     const stagingDist = resolve(stagingRoot, "dist");
     cpSync(resolve(SDK_ROOT, "dist"), stagingDist, { recursive: true });
+    removeBuildInfo(stagingDist);
     cpSync(resolve(SDK_ROOT, "README.md"), resolve(stagingRoot, "README.md"));
     for (const name of PACKAGE_NAMES) copyInternalDist(name, stagingDist);
     copyTypeScript(stagingDist);
@@ -123,7 +124,14 @@ function main() {
 function copyInternalDist(name, stagingDist) {
   const sourceDist = resolve(ROOT, "packages", name, "dist");
   if (!existsSync(sourceDist)) throw new Error(`missing ${name}/dist; run npm run build first`);
-  cpSync(sourceDist, resolve(stagingDist, "vendor", name), { recursive: true });
+  const destination = resolve(stagingDist, "vendor", name);
+  cpSync(sourceDist, destination, { recursive: true });
+  removeBuildInfo(destination);
+}
+
+function removeBuildInfo(root) {
+  const buildInfo = resolve(root, "tsconfig.tsbuildinfo");
+  if (existsSync(buildInfo)) rmSync(buildInfo, { force: true });
 }
 
 function copyTypeScript(stagingDist) {
