@@ -2,9 +2,8 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
-    { "path": "packages/react" },
-    { "path": "packages/lvgl-emitter" },
-    { "path": "packages/compiler" },
+    { "path": "packages/sensors" },
+    { "path": "packages/runtime" },
     { "path": "tsconfig.tests.json" }
   ]
 }

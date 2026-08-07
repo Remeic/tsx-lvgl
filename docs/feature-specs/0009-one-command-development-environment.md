@@ -14,7 +14,7 @@ Provide one pinned container-based development environment. A contributor instal
 flowchart LR
     Clone[Clone repository] --> Docker[One Docker prerequisite]
     Docker --> Dev[Pinned dev container]
-    Dev --> Host[Node tests + mutation + C compile]
+    Dev --> Host[Node tests + mutation]
     Dev --> QEMU[ESP-IDF + QEMU tests]
     Host --> BoardBridge[Explicit host USB bridge]
     QEMU --> BoardBridge
@@ -24,7 +24,7 @@ flowchart LR
 ## Acceptance criteria
 
 - [x] `.devcontainer` or an equivalent pinned container image contains Node, ESP-IDF, QEMU, CMake/Ninja, Python tools and simulator dependencies.
-- [x] `./tools/dev test`, `./tools/dev mutation` and `./tools/dev c-compile` work from a fresh checkout after Docker Desktop installation.
+- [x] `./tools/dev test` and `./tools/dev mutation` work from a fresh checkout after Docker Desktop installation.
 - [ ] `./tools/dev qemu` is enabled and validated after the ESP-IDF application from issue #8 exists.
 - [x] Tool versions and the built image ID are recorded; the base image uses an immutable digest and no implicit `latest` tag is used.
 - [x] Host-only development remains possible as an optional fast path, not a second source of truth.
@@ -33,4 +33,4 @@ flowchart LR
 
 ## Test plan
 
-The blocking container job starts from a fresh GitHub checkout and invokes `./tools/dev test` and `./tools/dev c-compile` without host Node/ESP-IDF installation; its later steps run the simulator, ESP-IDF V1 and parity commands and record the image ID, tool versions and command output. The dedicated macOS/host mutation job alone invokes `npm run mutation` after `npm ci` and uploads its SHA-bound reports. The QEMU command remains gated on issue #8; Apple Silicon build evidence and physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.
+The blocking container job starts from a fresh GitHub checkout, invokes `./tools/dev test` and `./tools/dev mutation` without host Node/ESP-IDF installation, and records the image ID, tool versions and command output. The QEMU command remains gated on issue #8; Apple Silicon build evidence and physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.

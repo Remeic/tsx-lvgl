@@ -13,7 +13,7 @@ Make the repository server-side workflow match the documented contribution contr
 ```mermaid
 flowchart LR
     Issue[GitHub issue + AC] --> PR[Pull request]
-    PR --> Checks[Host + mutation + C checks]
+    PR --> Checks[Host + mutation + runtime-board checks]
     Checks --> Evidence[SHA-bound artifacts]
     Evidence --> Protected[Protected main]
     Protected --> Release[Reviewable milestone]

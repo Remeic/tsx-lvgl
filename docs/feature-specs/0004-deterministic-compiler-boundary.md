@@ -1,5 +1,9 @@
 # Feature 0004 — deterministic compiler boundary
 
+> Superseded by Feature 0010. Retained as historical evidence; deterministic
+> runtime bundle evaluation now owns the active boundary.
+> Its acceptance checklist is historical and is not an active release gate.
+
 ## Problem
 
 The compiler executes an arbitrary component function. A component that reads time, randomness, environment or mutable state can produce different artifacts for the same source and configuration. The compiler can compare repeated evaluations within one invocation, but it cannot prove purity of an opaque JavaScript function across separate invocations.

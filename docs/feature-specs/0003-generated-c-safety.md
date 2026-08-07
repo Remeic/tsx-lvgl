@@ -1,5 +1,9 @@
 # Feature 0003 — generated C safety and compile gate
 
+> Superseded by Feature 0010. Retained as historical evidence; its generated-C
+> safety gate is not a runtime-product gate.
+> Its acceptance checklist is historical and is not an active release gate.
+
 ## Problem
 
 Author-controlled labels and actions are interpolated into generated C. A malformed comment payload or raw control character can corrupt the artifact, hide a compiler error, or inject executable C.
