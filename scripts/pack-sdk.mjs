@@ -64,6 +64,7 @@ function main() {
   if (sdkPackage.private !== true) throw new Error("@tsx-lvgl/sdk must remain private; npm pack is the only distribution path");
   if (sdkPackage.name !== "@tsx-lvgl/sdk") throw new Error("unexpected SDK package name");
 
+  buildSdk();
   const stagingRoot = mkdtempSync(join(tmpdir(), "tsx-lvgl-sdk-pack-"));
   try {
     const stagingDist = resolve(stagingRoot, "dist");
@@ -119,6 +120,15 @@ function main() {
   } finally {
     rmSync(stagingRoot, { recursive: true, force: true });
   }
+}
+
+function buildSdk() {
+  const tscPath = resolve(ROOT, "node_modules/typescript/bin/tsc");
+  if (!existsSync(tscPath)) throw new Error("missing root node_modules/typescript; run npm ci first");
+  run(process.execPath, [tscPath, "-b", resolve(SDK_ROOT, "tsconfig.json"), "--force", "--pretty", "false"], {
+    cwd: ROOT,
+    stdio: "pipe",
+  });
 }
 
 function copyInternalDist(name, stagingDist) {

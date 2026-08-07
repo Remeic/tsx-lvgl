@@ -4,30 +4,20 @@ export {
   Screen,
   Text,
   View,
-  createVNode,
-  isVNode,
-  normalizeChildren,
   type Component,
-  type ElementType,
-  type Key,
   type VNode,
   type VNodeChild,
-  type VNodeType,
-  type WidgetProps,
 } from "@tsx-lvgl/core";
 
 export {
   useEffect,
   useInterval,
-  useSensor,
   useState,
   type StateSetter,
 } from "@tsx-lvgl/runtime";
 
 export {
-  isMotionSample,
   isShake,
-  motionSchema,
   type MotionSample,
   type SensorSample,
   type SensorStatus,

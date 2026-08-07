@@ -1,6 +1,13 @@
 import * as coreModule from "@tsx-lvgl/core";
 import * as jsxRuntimeModule from "@tsx-lvgl/core/jsx-runtime";
 import {
+  Button,
+  Fragment,
+  Screen,
+  Text,
+  View,
+} from "@tsx-lvgl/core";
+import {
   PROTOCOL_VERSION,
   RUNTIME_BUNDLE_MAX_BYTES,
   Runtime,
@@ -12,8 +19,15 @@ import {
   type RuntimeBundlePolicy,
 } from "@tsx-lvgl/runtime";
 import * as runtimeModule from "@tsx-lvgl/runtime";
+import {
+  useEffect,
+  useInterval,
+  useSensor,
+  useState,
+} from "@tsx-lvgl/runtime";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
 import * as sensorsModule from "@tsx-lvgl/sensors";
+import { isShake, motionSchema } from "@tsx-lvgl/sensors";
 import { createClickRegistry, createLvglHost } from "./lvgl-host.js";
 import { createDeviceScheduler } from "./scheduler.js";
 import { createNativeMotionSensor } from "./sensors.js";
@@ -44,11 +58,17 @@ function resolveModule(specifier: string): Record<string, unknown> {
   switch (specifier) {
     case "@tsx-lvgl/sdk":
       return {
-        ...coreModule,
-        ...runtimeModule,
-        ...sensorsModule,
-        useMotion: () => runtimeModule.useSensor(sensorsModule.motionSchema),
-      } as unknown as Record<string, unknown>;
+        Button,
+        Fragment,
+        Screen,
+        Text,
+        View,
+        useEffect,
+        useInterval,
+        useMotion: () => useSensor(motionSchema),
+        useState,
+        isShake,
+      };
     case "@tsx-lvgl/sdk/jsx-runtime":
       return jsxRuntimeModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/core":
