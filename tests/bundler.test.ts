@@ -46,6 +46,23 @@ test("compileTsxBundle produces an exact golden code string", () => {
   assert.equal(output.code, goldenCode);
 });
 
+test("compileTsxBundle uses the configured public JSX runtime source", () => {
+  const output = compileTsxBundle({
+    fileName: "App.tsx",
+    source: `import { Screen, Text } from "@tsx-lvgl/sdk";
+export default function App() {
+  return <Screen><Text text="sdk" /></Screen>;
+}
+`,
+    bundleId: "app",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  assert.match(output.code, /require\("@tsx-lvgl\/sdk\/jsx-runtime"\)/);
+  assert.doesNotMatch(output.code, /@tsx-lvgl\/core\/jsx-runtime/);
+});
+
 test("compileTsxBundle is deterministic across repeated builds", () => {
   const input = {
     fileName: "App.tsx",

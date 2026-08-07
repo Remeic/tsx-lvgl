@@ -102,6 +102,7 @@ async function run() {
       bundleId: options.bundleId,
       boardId: options.boardId,
       generation: options.generation,
+      jsxImportSource: "@tsx-lvgl/sdk",
     });
   } catch (error) {
     console.error(`bundle-app: ${error instanceof Error ? error.message : String(error)}`);

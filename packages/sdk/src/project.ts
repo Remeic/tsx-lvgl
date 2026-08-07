@@ -473,6 +473,7 @@ function compileProject(project: Project): BundleOutput {
       bundleId: project.config.bundleId,
       boardId: project.config.boardId,
       generation: project.config.generation,
+      jsxImportSource: SDK_PACKAGE_NAME,
     });
   } catch (error) {
     throw new CliError(DIAGNOSTIC_CODES.BUNDLE_FAILED, error instanceof Error ? error.message : String(error));

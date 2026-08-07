@@ -13,6 +13,8 @@ export interface BundleInput {
   readonly bundleId: string;
   readonly boardId: string;
   readonly generation: number;
+  /** JSX runtime module used by the bundle; internal callers default to core. */
+  readonly jsxImportSource?: string;
 }
 
 export interface BundleOutput {
@@ -63,7 +65,7 @@ export function compileTsxBundle(input: BundleInput): BundleOutput {
     reportDiagnostics: true,
     compilerOptions: {
       jsx: ts.JsxEmit.ReactJSX,
-      jsxImportSource: "@tsx-lvgl/core",
+      jsxImportSource: input.jsxImportSource ?? "@tsx-lvgl/core",
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2020,
       newLine: ts.NewLineKind.LineFeed,

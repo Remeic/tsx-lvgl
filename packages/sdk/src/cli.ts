@@ -121,8 +121,8 @@ async function main(): Promise<void> {
       case "build": {
         const result = buildProject(process.cwd());
         emitSuccess(parsed.json, "BUILD_OK", {
-          code: result.codePath,
-          manifest: result.manifestPath,
+          codePath: result.codePath,
+          manifestPath: result.manifestPath,
           bytes: result.bundle.manifest.byteLength,
           sha256: result.bundle.manifest.sha256,
         });

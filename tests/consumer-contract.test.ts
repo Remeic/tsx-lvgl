@@ -64,6 +64,11 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   const build = runJson(process.execPath, [cliPath, "build", "--json"], appRoot);
   assert.equal(build.code, "BUILD_OK");
   assert.equal(typeof build.sha256, "string");
+  const consumerBundle = readFileSync(join(appRoot, String(build.codePath)), "utf8");
+  assert.match(consumerBundle, /@tsx-lvgl\/sdk\/jsx-runtime/);
+  for (const internalSpecifier of ["@tsx-lvgl/core", "@tsx-lvgl/runtime", "@tsx-lvgl/sensors", "@tsx-lvgl/bundler", "@tsx-lvgl/device"]) {
+    assert.equal(consumerBundle.includes(internalSpecifier), false, `consumer bundle must not emit ${internalSpecifier}`);
+  }
   const dev = runJson(process.execPath, [cliPath, "dev", "--json"], appRoot);
   assert.equal(dev.code, "DEV_OK");
   assert.deepEqual(dev.texts, ["Hello TSX-LVGL"]);
