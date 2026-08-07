@@ -6,6 +6,16 @@ image_name="tsx-lvgl-dev:local"
 command_name="${1:-shell}"
 shift || true
 
+# Linked worktrees can point at Git metadata outside the repository mount. Pass
+# only a read-only provenance snapshot; never expose the shared .git directory.
+validation_git_sha="$(GIT_OPTIONAL_LOCKS=0 git -C "${repo_root}" rev-parse --verify HEAD)"
+validation_git_status="$(GIT_OPTIONAL_LOCKS=0 git -C "${repo_root}" status --porcelain)"
+if [[ -n "${validation_git_status}" ]]; then
+  validation_git_state="dirty"
+else
+  validation_git_state="clean"
+fi
+
 # Always ask Docker to reconcile the local tag with the pinned Dockerfile. The
 # build cache keeps this cheap while avoiding stale tools after a Dockerfile edit.
 docker build --file "${repo_root}/.devcontainer/Dockerfile" --tag "${image_name}" "${repo_root}"
@@ -39,6 +49,8 @@ fi
 docker run "${docker_run_args[@]}" \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp/tsx-lvgl-home \
+  --env "TSX_LVGL_VALIDATION_GIT_SHA=${validation_git_sha}" \
+  --env "TSX_LVGL_VALIDATION_GIT_STATE=${validation_git_state}" \
   --volume "${repo_root}:/workspace" \
   --workdir /workspace \
   "${image_name}" bash -lc "${bootstrap_command}; ${inner_command}"

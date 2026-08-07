@@ -52,3 +52,44 @@ The default branch is intended to be protected: changes land through a pull requ
 ## Testing expectations
 
 Use [the layered testing strategy](docs/feature-specs/0002-testing-and-mutation-strategy.md) to choose evidence. Do not claim hardware confidence from host tests alone, and do not use code coverage as a substitute for mutation or behavior evidence.
+
+### Local validation fallback
+
+Use the repository-pinned Node 24.19.0 and npm 11.17.0 toolchain. The public
+commands remove and re-emit `test-dist/` before discovering tests, so ignored
+output left by a branch switch cannot enter current evidence. They do not remove
+package `dist/` outputs.
+
+- `npm run check:fast` builds and runs the current tests for normal iteration.
+- `npm test` builds and runs the current tests with the required coverage thresholds.
+- `npm run mutation` prepares current test output once, then runs mutation testing.
+- `npm run check:full` runs coverage and exactly one mutation pass. It is the slow pre-PR check.
+- `npm run validation:context` prints deterministic JSON with the exact Git SHA,
+  dirty state, provenance source, Node version and npm version.
+
+Inside `./tools/dev`, the wrapper passes only the host SHA and dirty state into
+the container. This supports linked worktrees without mounting shared Git
+metadata; `gitSource: "environment"` identifies that validated host snapshot.
+
+When hosted GitHub Actions cannot start, run the local ladder and attach its
+exact-SHA evidence. A hosted-CI failure with zero executed steps is evidence
+that the hosted infrastructure was unavailable; it is not evidence of a
+product test failure. It also does not make local evidence equivalent to a
+hosted run.
+
+Use this template in a pull request or agent report:
+
+```text
+Validation context: <paste the complete `npm run validation:context` JSON>
+npm run check:fast: PASS | FAIL | NOT RUN
+npm test: PASS | FAIL | NOT RUN
+npm run check:full: PASS | FAIL | NOT RUN
+Hosted CI: PASS | FAIL after test execution | UNAVAILABLE (zero steps)
+Simulator evidence: PASS | FAIL | NOT RUN
+Physical board evidence: PASS | FAIL | NOT RUN
+Recovery evidence: PASS | FAIL | NOT RUN
+```
+
+The local check commands above are host-software evidence only. Record
+simulator, physical display/touch/power/reset, and recovery results separately;
+none can be inferred from build, coverage, or mutation success.
