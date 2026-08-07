@@ -106,15 +106,29 @@ export class Runtime implements RuntimeContext {
   private commit(root: VNode): ReloadResult {
     const previous = this.activeSession;
     const candidate = new Session(this, root, this.currentEpoch + 1);
+    let rootSwapStarted = false;
+
+    const restorePreviousRoot = (): void => {
+      if (!rootSwapStarted) return;
+      try {
+        this.options.host.replaceRoot(previous?.rootHost ?? null, candidate.rootHost);
+      } catch (restoreError) {
+        this.reportError(restoreError);
+      }
+    };
 
     try {
       candidate.build();
+      /* replaceRoot is allowed to fail after a native side effect. Mark the
+       * transaction before calling it so the outer rollback still attempts to
+       * restore the old root in that case. */
+      rootSwapStarted = true;
       this.options.host.replaceRoot(candidate.rootHost, previous?.rootHost ?? null);
       candidate.attach();
       try {
         candidate.flushEffects();
       } catch (error) {
-        this.options.host.replaceRoot(previous?.rootHost ?? null, candidate.rootHost);
+        restorePreviousRoot();
         candidate.detach();
         candidate.dispose();
         return { status: "rolled_back", epoch: this.currentEpoch, error };
@@ -129,6 +143,7 @@ export class Runtime implements RuntimeContext {
       }
       return { status: "committed", epoch: candidate.epoch };
     } catch (error) {
+      restorePreviousRoot();
       candidate.dispose();
       return { status: "rolled_back", epoch: this.currentEpoch, error };
     }
