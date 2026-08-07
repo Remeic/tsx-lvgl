@@ -1,5 +1,11 @@
 import type { VNode } from "@tsx-lvgl/core";
 
+/** Wire-protocol version for bundle manifests; single source of truth. */
+export const PROTOCOL_VERSION = 1;
+
+/** Mirrored by RUNTIME_BUNDLE_MAX_BYTES in the ESP-IDF host. */
+export const RUNTIME_BUNDLE_MAX_BYTES = 262144;
+
 export type RuntimeEngineName = "quickjs-ng" | "moddable-xs";
 
 export interface RuntimeBundleManifest {

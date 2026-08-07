@@ -22,6 +22,8 @@ export {
 } from "./hooks.js";
 
 export {
+  PROTOCOL_VERSION,
+  RUNTIME_BUNDLE_MAX_BYTES,
   validateRuntimeBundle,
   type RuntimeBundle,
   type RuntimeBundleManifest,
@@ -31,3 +33,9 @@ export {
   type RuntimeEngine,
   type RuntimeEngineName,
 } from "./bundle.js";
+
+export {
+  createProgramEngine,
+  decodeAsciiSource,
+  type ModuleResolver,
+} from "./engine.js";
