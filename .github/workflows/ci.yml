@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   host:
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -19,10 +19,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run test:c
 
   mutation:
-    runs-on: macos-14
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -40,7 +39,7 @@ jobs:
 
   container:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -64,26 +63,12 @@ jobs:
             '
           } | tee container-toolchain.txt
 
-      - name: Run public fresh-clone C command
+      - name: Run public fresh-clone mutation command
         run: |
           set -o pipefail
           {
-            echo '$ ./tools/dev c-compile'
-            ./tools/dev c-compile
-          } 2>&1 | tee -a container-command-ladder.txt
-
-      - name: Run pinned simulator and ESP-IDF integration commands
-        run: |
-          set -o pipefail
-          mkdir -p build/simulator-container/evidence
-          git rev-parse HEAD > build/simulator-container/evidence/commit.txt
-          {
-            echo '$ ./tools/dev simulator'
-            ./tools/dev simulator
-            echo '$ ./tools/dev esp-idf-v1'
-            ./tools/dev esp-idf-v1
-            echo '$ ./tools/dev parity'
-            ./tools/dev parity
+            echo '$ ./tools/dev mutation'
+            ./tools/dev mutation
           } 2>&1 | tee -a container-command-ladder.txt
 
       - if: always()
@@ -93,9 +78,4 @@ jobs:
           path: |
             container-toolchain.txt
             container-command-ladder.txt
-            build/simulator-container/evidence/counter-before.ppm
-            build/simulator-container/evidence/counter-after.ppm
-            build/simulator-container/evidence/commit.txt
-            build/simulator-container/generated/ui.c
-            apps/esp-idf-v1/build/tsx-lvgl-generated/ui.c
           if-no-files-found: error

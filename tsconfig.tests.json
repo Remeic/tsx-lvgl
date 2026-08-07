@@ -11,8 +11,8 @@
   },
   "references": [
     { "path": "packages/core" },
-    { "path": "packages/react" },
-    { "path": "packages/compiler" }
+    { "path": "packages/sensors" },
+    { "path": "packages/runtime" }
   ],
-  "include": ["tests/**/*.ts", "tests/**/*.tsx", "examples/**/*.tsx"]
+  "include": ["tests/**/*.ts", "tests/**/*.tsx"]
 }

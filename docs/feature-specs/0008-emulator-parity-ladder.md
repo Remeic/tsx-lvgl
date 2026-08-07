@@ -1,5 +1,9 @@
 # Feature 0008 — emulator parity ladder
 
+> Superseded by Feature 0010. Retained as historical evidence; the active
+> ladder validates the runtime host and bundle rather than generated UI C.
+> Its acceptance checklist is historical and is not an active release gate.
+
 ## Problem
 
 Host tests and generated-C syntax checks are fast, but they do not exercise the ESP-IDF boot image, firmware memory map, UART behavior or ESP32-S3 peripheral integration. A physical board is slower and cannot cover every failure path.

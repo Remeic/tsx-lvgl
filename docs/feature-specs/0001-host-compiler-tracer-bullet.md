@@ -1,5 +1,9 @@
 # Feature 0001 — host-side compiler tracer bullet
 
+> Superseded by Feature 0010. Retained as historical evidence; generated-C UI
+> is no longer an active product path.
+> Its acceptance checklist is historical and is not an active release gate.
+
 ## Problem
 
 Before the ESP32 arrives, we need a small vertical slice that proves the repository's authoring, compiler and generated-output seams without depending on physical hardware.

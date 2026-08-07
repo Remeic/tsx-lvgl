@@ -1,0 +1,16 @@
+{
+  "name": "@tsx-lvgl/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@tsx-lvgl/core": "0.1.0",
+    "@tsx-lvgl/sensors": "0.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  }
+}

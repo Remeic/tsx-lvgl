@@ -1,58 +1,41 @@
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
-const sharedConfig = {
+const config = {
   testRunner: "command",
   commandRunner: {
-    command: "npm test",
+    // Single source of truth for "the tests"; only the build differs from CI.
+    command: "npx tsc -b --noCheck --pretty false && npm run test:fast",
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
-  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund && npm run build",
+  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --noCheck --pretty false",
   inPlace: false,
   symlinkNodeModules: false,
-  checkers: ["typescript"],
+  mutate: ["packages/*/src/**/*.ts"],
+  // The ESP-IDF probe is validated by its own firmware gate. Its generated
+  // managed_components tree is not part of the host mutation project.
+  ignorePatterns: [
+    "examples/esp-idf/*/build/**",
+    "examples/esp-idf/*/managed_components/**",
+  ],
+  checkers: [],
+  // Mutations can intentionally produce transient TypeScript-invalid types;
+  // the normal npm build remains the strict type gate. The mutation runner
+  // emits JavaScript with noCheck so every executable mutant reaches tests.
+  disableTypeChecks: true,
   tsconfigFile: "tsconfig.json",
   coverageAnalysis: "off",
   reporters: ["clear-text", "html", "json", "progress"],
-  // The compiler mutation set is intentionally explicit. Keep generated
-  // ESP-IDF/LVGL sources out of Stryker's project reader so ignored vendor
-  // HTML/C files do not create parser warnings or unstable scan time.
-  ignorePatterns: [
-    "build/**",
-    "apps/**/build/**",
-    "managed_components/**",
-    "apps/**/managed_components/**",
-    "examples/**/build/**",
-    "examples/**/managed_components/**",
-  ],
   thresholds: {
-    // Preserve origin/main's strict legacy gate. The MVP config overrides this
-    // policy explicitly for the independent source-entry slice.
     high: 100,
     low: 100,
+    // A surviving or timed-out mutant lowers the score and must fail CI.
     break: 100,
   },
   timeoutMS: 5000,
-  // Preserve origin/main's serial legacy run for reproducible resource use.
-  // The MVP config overrides this with its independently bounded concurrency.
+  // A single mutation worker keeps TypeScript incremental diagnostics stable
+  // across clean runs; the extra wall time is preferable to drifting evidence.
   concurrency: 1,
   cleanTempDir: true,
 };
-
-export function createMutationConfig(mutate, reportDirectory) {
-  return {
-    ...sharedConfig,
-    mutate,
-    htmlReporter: { fileName: `${reportDirectory}/mutation.html` },
-    jsonReporter: { fileName: `${reportDirectory}/mutation.json` },
-  };
-}
-
-const config = createMutationConfig(
-  [
-    "packages/core/src/**/*.ts",
-    "packages/lvgl-emitter/src/**/*.ts",
-  ],
-  "reports/mutation/legacy",
-);
 
 export default config;

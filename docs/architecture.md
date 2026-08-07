@@ -1,87 +1,114 @@
-# Architecture decision
+# Runtime-first architecture
 
-Status: accepted for the first implementation slice.
+Status: M1 tracer bullet accepted on 2026-08-06. QuickJS-NG is the first
+measured engine candidate, not yet the final engine selection.
 
 ## Core decision
 
-TSX-LVGL runs TypeScript/TSX on the development machine and emits native LVGL 9 C. The ESP32 receives no JavaScript runtime, React Fiber tree or dynamic module loader.
+TSX-LVGL is a runtime product:
 
-This preserves the useful part of the React idea—composition, declarative trees and typed props—without pretending that arbitrary browser React semantics can be compiled to a deterministic microcontroller firmware.
-
-## Modules and interfaces
-
-### `core`
-
-Public interface: the legacy static TSX vocabulary and its exact prop types.
-
-The interface must remain smaller than raw LVGL. It contains only capabilities that can be validated, generated and tested consistently.
-
-### `compiler`
-
-Deep public interface:
-
-```ts
-compileProject(config: CompileConfig): BuildArtifacts
+```text
+TSX → JavaScript bundle → replaceable JS engine → immutable VNodes
+    → runtime reconciler → host adapter → LVGL
 ```
 
-The interface includes diagnostics, deterministic output rules and asset/compiler-version metadata. TypeScript analysis, component evaluation and the semantic IR stay inside the implementation. The IR is an internal seam, not a public format in v0.
+The application bundle runs on the device and can be replaced without a
+firmware reflash. Native C is limited to the ESP-IDF task/transport boundary,
+LVGL host adapter, board drivers and typed sensor adapters. UI is not emitted
+as generated C. Git history is the source rollback for this migration; the
+guarded board recovery procedure and known-good artifacts remain operational
+controls, not an alternate UI architecture.
 
-### `lvgl-emitter`
+Only the known-good generated-C firmware artifact remains as guarded recovery
+custody until the replacement runtime passes its simulator, firmware, board
+and recovery gates. The compiler/emitter product implementation is deleted;
+the recovery artifact is not part of the runtime design and receives no new
+product features.
 
-Adapter for the legacy core tree at the IR-to-firmware seam. It lowers
-validated legacy nodes to readable LVGL 9 C and knows LVGL; it does not know
-Waveshare pins, USB or board revision. Source-entry compilation uses a
-compiler-private native target emitter after the parser has produced the same
-opaque, typed internal program; neither native program nor native emitter is a
-package-root API.
+## Deep modules and seams
 
-The first host tracer bullet remains available through the legacy `UiNode`
-path. The React MVP keeps its semantic program private to the compiler target
-seam; neither package root exports `NativeProgram`, `NativeNode`, or action
-constructors.
+### `@tsx-lvgl/core`
 
-### `boards`
+Owns the small TSX vocabulary and immutable VNode model. The widget vocabulary
+is declared once — an `elementTypes` array and a `WidgetProps` map — and
+`Screen`/`View`/`Text`/`Button` are exported string constants, so `<Text
+text="x"/>` creates an element VNode directly with no wrapper component. JSX
+creates element, component or fragment VNodes; it never invokes a function
+component. `VNode` is a discriminated union on `kind`. Keys, component type
+references, props and children are part of the VNode identity contract. Core
+has no LVGL, ESP-IDF, filesystem or transport dependency.
 
-Board adapter seam for display initialization, touch input, LVGL tick, flush, power and optional peripherals. The V1 applications use the pinned Waveshare SH8601/FT3168 BSP 1.1.4. `apps/esp-idf-v1` consumes the React MVP counter artifact for SDL/ESP parity; `examples/esp-idf/tsx_lvgl_v1` remains the legacy-core tracer bullet used by the guarded app-only reload workflow. These are intentionally separate targets, and the compiler never imports a board adapter.
+### `@tsx-lvgl/runtime`
 
-### `simulator`
+Owns component identity, keyed reconciliation, state/effect hooks, scheduler
+handoff, event replacement, sensor subscription ownership, reload epochs and
+transactional root replacement. It is split into deep modules: `host.ts`
+(LVGL seam + scheduler + runtime context), `hooks.ts`, `fiber.ts` (reconciler),
+`session.ts` (one reload epoch), `runtime.ts` (root-swap transaction) and
+`bundle.ts` (bounded bundle validation plus the replaceable engine evaluator
+seam). Its public host seam is intentionally small: create, ordered insert,
+patch, remove, dispose and root replacement. The host implementation owns LVGL
+thread affinity and native handle lifetime.
 
-The simulator compiles the exact generated C and native runtime against LVGL SDL. It is not a second renderer. This makes screenshot tests meaningful: a passing simulator build and a passing embedded build share the same UI artifact.
+### `@tsx-lvgl/sensors`
 
-## v0 language contract
+Owns versioned schemas and samples, and the whole fencing policy through
+`subscribeSensor()`. A sample carries schema version, unit at the schema,
+status, sequence, timestamp and reload epoch. `SensorContext` exposes
+`isCancelled()` rather than an `AbortSignal`, because QuickJS-NG ships the ES
+core and not the web platform. The runtime accepts only validated, monotonic
+samples for the active epoch; old callbacks are cancelled and ignored.
 
-Implemented MVP: `Screen`, `View`, `Text` and `Button`, fragments,
-zero-argument static function composition, integer-only `useState`, native
-event callbacks, minimal flex layout, deterministic LVGL C, LVGL 9.5.0 SDL
-coverage and a V1 ESP-IDF integration target. The legacy static tree remains
-available for compatibility tests.
+### Board and simulator composition roots
 
-Deferred: `Image`, `Stack`, arbitrary styles, scalar values other than bounded
-integers, derived values, visibility/enabled bindings, props, lists and dynamic
-tree expansion.
+The simulator and ESP-IDF host select concrete scheduler, host and sensor
+adapters. They must satisfy the same contracts. QuickJS-NG lifecycle, job
+pumping, memory limits and serialized ownership are explicit host concerns;
+LVGL mutation occurs only through the owner task or its documented lock.
 
-Also rejected: arbitrary React imports, effects/context/suspense, runtime-created
-component types, DOM/CSS compatibility, hot reload, and an unrestricted
-native-widget escape hatch.
+## First vertical slice
 
-Every addition needs compiler diagnostics, generated-C coverage, native-host coverage and SDL coverage before it becomes part of the public interface.
+The implemented tracer bullet is:
 
-Known follow-up: `packages/compiler/src/source.ts` still combines source collection,
-validation, lowering, diagnostics and identity allocation. Splitting those
-responsibilities is maintainability debt for a later bounded change; this MVP
-does not expand the monolith further.
+```text
+component VNode → Runtime → Screen/Text/Button host instances
+              → button event → state update
+              → deterministic interval → typed sensor sample
+              → reload epoch → root swap or rollback
+```
 
-## Quality gates
+Deterministic tests cover lazy VNodes, immutable inputs, keyed state
+preservation, host patching, event/timer cleanup, sensor validation and stale
+epoch rejection. The real QuickJS-NG/LVGL/touch probe remains a separate
+physical feasibility artifact; it does not prove the reconciler or hot reload.
 
-- identical source and config produce byte-identical generated artifacts;
-- generated C compiles with warnings treated as errors;
-- host tests cover signal updates, events, cleanup and object-count stability;
-- SDL screenshots cover layout and visual regressions;
-- ESP-IDF builds use pinned versions and record firmware-size headroom;
-- custom firmware is not flashed before the board's factory state is backed up and restorable.
+`Runtime.reloadBundle` validates staged bytes, checks the evaluator identity,
+and only then asks the selected engine to produce the candidate VNode root.
+This is the host-test seam; QuickJS-NG execution and LVGL binding ownership
+remain board-host evidence.
 
-The legacy host compiler evaluates a root component twice and rejects divergent
-artifacts within one invocation. The source-entry compiler instead parses the
-bounded TSX subset, so hook order, component-instance paths and native update
-targets are deterministic by construction. Both paths still require pinned
-tool/environment inputs for reproducible builds.
+## Reload contract
+
+Bundles are staged into bounded storage and checked for protocol, engine,
+board, generation, hash shape and byte length before evaluation. A candidate
+root is built without replacing the active root. The host then performs one
+root replacement, candidate effects are activated, and only after success are
+the old epoch, timers, event handlers and sensor contexts disposed. Evaluation
+or activation failure restores the previous root and keeps its epoch.
+
+State migration is intentionally out of scope for M1: every committed bundle
+starts a new epoch. Transport authentication, signature policy, byte hashing,
+QuickJS module loading and persistent last-known-good storage remain M2/M3
+work.
+
+## Evidence gates
+
+- TypeScript build and deterministic package tests are necessary M1 evidence.
+- Real LVGL simulator tests, ESP-IDF/QEMU builds and QuickJS memory/timing
+  measurements are separate gates.
+- Physical board evidence must include display, touch, repeated reload and
+  recovery observations; no simulator or firmware build can pass that gate.
+- The transient FT3168/I2C warm-reset failure is still open; see
+  [the diagnosis note](diagnostics/ft3168-i2c-reset.md) for status and required evidence.
+- Guarded app-only flashing, operation logs, identity/eFuse checks and recovery
+  custody remain unchanged in `docs/recovery.md` and the board tools.

@@ -1,5 +1,8 @@
 # Feature 0005 — internal semantic IR and LVGL emitter seam
 
+Status: superseded by docs/architecture.md (runtime-first). Kept as design
+history; the compiler/emitter path it describes is deleted.
+
 ## Problem
 
 The current tracer bullet exposes the semantic node shape and lowers LVGL directly inside the compiler. That makes the public vocabulary and target backend evolve as one coupled switch, contrary to the intended emitter boundary.

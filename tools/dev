@@ -22,23 +22,11 @@ case "${command_name}" in
   mutation)
     inner_command="npm run mutation"
     ;;
-  c-compile)
-    inner_command="npm run test:c"
-    ;;
-  simulator)
-    inner_command="TSX_LVGL_SIMULATOR_BUILD_DIR=build/simulator-container npm run simulator:test"
-    ;;
-  esp-idf-v1)
-    inner_command="npm run esp-idf:v1:build"
-    ;;
-  parity)
-    inner_command="npm run generated:parity"
-    ;;
   qemu)
     inner_command="${*:-idf.py qemu monitor}"
     ;;
   *)
-    echo "usage: $0 [shell|test|mutation|c-compile|simulator|esp-idf-v1|parity|qemu]" >&2
+    echo "usage: $0 [shell|test|mutation|qemu]" >&2
     exit 2
     ;;
 esac
@@ -51,7 +39,6 @@ fi
 docker run "${docker_run_args[@]}" \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp/tsx-lvgl-home \
-  --env IDF_TARGET=esp32s3 \
   --volume "${repo_root}:/workspace" \
   --workdir /workspace \
   "${image_name}" bash -lc "${bootstrap_command}; ${inner_command}"

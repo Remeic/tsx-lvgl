@@ -1,45 +1,42 @@
 import {
-  element,
-  normalizeChildren,
-  type Child,
+  createVNode,
+  Fragment as FragmentType,
+  type Component,
   type ElementType,
-  type FragmentProps,
-  type TsxLvglComponent,
-  type UiNode,
+  type Key,
+  type VNode,
+  type VNodeChild,
+  type VNodeType,
+  type WidgetProps,
 } from "./index.js";
 
 export namespace JSX {
-  export type Element = UiNode;
+  export type Element = VNode;
 
   export interface ElementChildrenAttribute {
     children: {};
   }
 
-  export interface IntrinsicElements {
-    Screen: { children?: Child };
-    View: { children?: Child };
-    Text: { text: string | number };
-    Button: { label: string; action: string };
+  export interface IntrinsicAttributes {
+    key?: Key;
   }
+
+  /** Derived from the single vocabulary declaration in `@tsx-lvgl/core`. */
+  export type IntrinsicElements = WidgetProps;
 }
 
-export function Fragment(props: FragmentProps): UiNode {
-  return element("Fragment", {}, [props.children]);
-}
+export const Fragment = FragmentType;
 
 export function jsx(
-  type: ElementType | TsxLvglComponent,
+  type: VNodeType,
   props: Readonly<Record<string, unknown>> | null,
-): UiNode {
-  const input = props ?? {};
-  const { children, ...elementProps } = input;
-  const childList: Child[] = Array.isArray(children) ? [...children] : [children as Child];
-
-  if (typeof type === "function") {
-    return type({ ...elementProps, children: normalizeChildren(childList) });
-  }
-
-  return element(type, elementProps, childList);
+  key: Key = null,
+): VNode {
+  if (props === null) return createVNode(type, null, undefined, key);
+  const { children, ...elementProps } = props;
+  return createVNode(type, elementProps, [children as VNodeChild], key);
 }
 
 export const jsxs = jsx;
+
+export type { Component, ElementType };

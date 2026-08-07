@@ -1,7 +1,11 @@
 # TSX-LVGL ESP32-S3 V1 tracer bullet
 
-This is the first ESP-IDF application that consumes the generated TSX-LVGL C
-artifact on the delivered Waveshare V1 board.
+This is frozen legacy firmware: the committed `main/tsx_generated_ui.c` from
+the retired generated-C path. It is kept only so the guarded board
+reload/recovery workflow keeps a known-good app to build and flash; it is not
+the runtime product path and receives no new features. See
+[docs/architecture.md](../../../docs/architecture.md) for the current
+runtime-first architecture.
 
 The target is intentionally pinned to the V1 BSP `1.1.4`, whose board adapter
 uses the SH8601 display and FT3168 touch controller. Do not change this to the
@@ -12,17 +16,16 @@ The application also matches the recorded unit configuration: ESP32-S3,
 component graph into `dependencies.lock`; that file is reviewed and committed
 after a successful build so later images use the same dependency set.
 
-## Generate and build only
+## Build only
 
 From the repository root:
 
 ```bash
-npm run generate:board
-./tools/dev qemu "cd examples/esp-idf/tsx_lvgl_v1 && idf.py set-target esp32s3 && idf.py build"
+npm run board:build
 ```
 
-The command above builds the application inside the pinned development
-container. It does not connect to USB and does not flash a device.
+This builds the committed firmware inside the pinned development container.
+It does not regenerate C and does not connect to USB or flash a device.
 
 ## Physical flashing gate
 
