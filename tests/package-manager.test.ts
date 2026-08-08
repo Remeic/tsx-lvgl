@@ -37,10 +37,10 @@ test("package manager selection honors package.json, invocation and lockfile sea
     assert.deepEqual(bun, { name: "bun", command: "/opt/bun/bin/bun", prefixArgs: [] });
 
     writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}).name, "pnpm");
+    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "pnpm");
     rmSync(join(root, "pnpm-lock.yaml"));
     writeFileSync(join(root, "package-lock.json"), "{}\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}).name, "npm");
+    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "npm");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -52,7 +52,7 @@ test("package manager selection rejects ambiguous and unsupported configuration"
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     writeFileSync(join(root, "yarn.lock"), "\n");
     assert.throws(
-      () => packageManager.resolvePackageManager(root, {}),
+      () => packageManager.resolvePackageManager(root, {}, {}),
       (error: { code?: string }) => error.code === "PACKAGE_MANAGER_AMBIGUOUS",
     );
     assert.throws(
