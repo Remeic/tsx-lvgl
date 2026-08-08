@@ -21,6 +21,7 @@ const config = {
     "packages/bundler/src/**/*.ts",
     "packages/device/src/**/*.ts",
     "packages/sdk/src/index.ts",
+    "packages/sdk/src/package-manager.ts",
   ],
   // The ESP-IDF probe is validated by its own firmware gate. Its generated
   // managed_components tree is not part of the host mutation project.

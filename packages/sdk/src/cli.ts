@@ -45,6 +45,10 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index]!;
+    // npm strips the conventional script-argument delimiter, while pnpm may
+    // forward it and Bun accepts it before the forwarded arguments. Treat the
+    // delimiter consistently so JSON diagnostics are package-manager neutral.
+    if (argument === "--") continue;
     if (argument === "--json") {
       json = true;
       continue;

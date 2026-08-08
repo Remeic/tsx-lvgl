@@ -120,11 +120,15 @@ npm run build
 npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
 tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
 cd my-app
-npm run doctor -- --json
-npm run dev
-npm run check
-npm run build
+<package-manager> run doctor -- --json
+<package-manager> run dev
+<package-manager> run check
+<package-manager> run build
 ```
+
+The application commands use the package manager declared in the app's
+`package.json`, selected by its lockfile or inherited from the invoking package
+manager. The framework checkout commands above remain npm workspace commands.
 
 The generated `.tsx-lvgl/framework.lock.json` records the framework source SHA,
 artifact version, SHA-256 and byte length. `sync` installs that exact artifact;

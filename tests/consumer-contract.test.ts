@@ -53,7 +53,7 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   const selfSeeded = runJson(process.execPath, [cliPath, "create", selfSeededRoot, "--json"], sandbox);
   assert.equal(selfSeeded.code, "CREATE_OK");
 
-  const sync = runJson(process.execPath, [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"], appRoot);
+  const sync = runJson(process.execPath, [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--", "--json"], appRoot);
   assert.equal(sync.code, "SYNC_OK");
   const update = runJson(process.execPath, [cliPath, "update", "--source", repoRoot, "--json"], appRoot);
   assert.equal(update.code, "UPDATE_OK");

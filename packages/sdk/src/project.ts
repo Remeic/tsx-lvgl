@@ -23,6 +23,7 @@ import {
   SDK_PACKAGE_NAME,
 } from "./metadata.js";
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
+import { buildInstallInvocation, resolvePackageManager } from "./package-manager.js";
 import ts from "typescript";
 
 export interface ProjectConfig {
@@ -150,7 +151,7 @@ export function createProject(target: string, artifactArgument?: string): { read
   try {
     const lock = installArtifactIntoProject(root, artifactPath);
     writeSdkDependency(root, lock);
-    runNpmInstall(root, resolveArtifactPath(root, lock));
+    runPackageManagerInstall(root, resolveArtifactPath(root, lock));
     verifyInstalledSdk(root, lock);
     return { root, lock };
   } finally {
@@ -162,7 +163,7 @@ export function syncProject(root: string): { readonly lock: FrameworkLock } {
   const project = readProjectFiles(root);
   verifyArtifact(project);
   writeSdkDependency(project.root, project.lock);
-  runNpmInstall(project.root, project.artifactPath);
+  runPackageManagerInstall(project.root, project.artifactPath);
   verifyInstalledSdk(project.root, project.lock);
   return { lock: project.lock };
 }
@@ -190,7 +191,7 @@ export function updateProject(root: string, explicitSource?: string): { readonly
     }
     const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
     writeSdkDependency(projectRoot, lock);
-    runNpmInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
+    runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
     verifyInstalledSdk(projectRoot, lock);
     return { lock };
   } finally {
@@ -528,24 +529,32 @@ function writeSdkDependency(root: string, lock: FrameworkLock): void {
   );
 }
 
-function runNpmInstall(root: string, artifactPath: string): void {
+function runPackageManagerInstall(root: string, artifactPath: string): void {
+  const packageJson = readJson(join(root, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
+  const packageManager = resolvePackageManager(root, packageJson);
   const packageLockPath = join(root, "package-lock.json");
   const hasPackageLock = existsSync(packageLockPath);
   const installedSdkRoot = join(root, "node_modules", "@tsx-lvgl", "sdk");
-  // npm keys a file dependency by its path and version. Remove the installed
-  // package before sync/update so a same-version artifact with a new digest is
-  // not incorrectly treated as already satisfied.
+  // Remove the installed package before sync/update so a same-version artifact
+  // with a new digest is not incorrectly treated as already satisfied by any
+  // supported package manager.
   rmSync(installedSdkRoot, { recursive: true, force: true });
-  const npmExecPath = process.env.npm_execpath;
-  const command = npmExecPath === undefined ? "npm" : process.execPath;
-  const baseArgs = ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"];
-  if (hasPackageLock) baseArgs.push("--package-lock=false");
-  const args = npmExecPath === undefined ? baseArgs : [npmExecPath, ...baseArgs];
-  const result = spawnSync(command, args, { cwd: root, encoding: "utf8", stdio: "pipe" });
-  if (result.status !== 0) {
-    throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "npm could not install the locked local SDK artifact");
+  const invocation = buildInstallInvocation(packageManager, hasPackageLock);
+  const result = spawnSync(invocation.command, invocation.args, { cwd: root, encoding: "utf8", stdio: "pipe" });
+  const errorCode = result.error !== undefined && "code" in result.error ? result.error.code : undefined;
+  if (errorCode === "ENOENT") {
+    throw new CliError(
+      DIAGNOSTIC_CODES.PACKAGE_MANAGER_NOT_FOUND,
+      `package manager is not installed: ${packageManager.name}`,
+    );
   }
-  if (hasPackageLock) synchronizePackageLock(packageLockPath, root, artifactPath);
+  if (result.status !== 0) {
+    throw new CliError(
+      DIAGNOSTIC_CODES.INSTALL_FAILED,
+      `${packageManager.name} could not install the locked local SDK artifact`,
+    );
+  }
+  if (packageManager.name === "npm" && hasPackageLock) synchronizePackageLock(packageLockPath, root, artifactPath);
 }
 
 function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
@@ -717,14 +726,15 @@ function consumerAgentsTemplate(): string {
     "## Commands",
     "",
     `- ${tick}tsx-lvgl create <directory> --artifact <sdk.tgz>${tick} — scaffold a new app during bootstrap.`,
-    `- ${tick}npm run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
-    `- ${tick}npm run update${tick} — explicitly package a configured framework checkout and update the pin.`,
-    `- ${tick}npm run dev${tick} — run one deterministic headless kernel check.`,
-    `- ${tick}npm run check${tick} — typecheck the app through the SDK facade.`,
-    `- ${tick}npm run build${tick} — typecheck and emit the deterministic JavaScript bundle.`,
-    `- ${tick}npm run doctor${tick} — inspect lock, artifact, installation, portability and engine diagnostics; add ${tick}-- --json${tick} for machine output.`,
+    `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, yarn or bun) to run these scripts. For example: ${tick}<package-manager> run sync${tick}.`,
+    `- ${tick}<package-manager> run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
+    `- ${tick}<package-manager> run update${tick} — explicitly package a configured framework checkout and update the pin.`,
+    `- ${tick}<package-manager> run dev${tick} — run one deterministic headless kernel check.`,
+    `- ${tick}<package-manager> run check${tick} — typecheck the app through the SDK facade.`,
+    `- ${tick}<package-manager> run build${tick} — typecheck and emit the deterministic JavaScript bundle.`,
+    `- ${tick}<package-manager> run doctor${tick} — inspect lock, artifact, installation, portability and engine diagnostics; append ${tick}-- --json${tick} for machine output.`,
     "",
-    `The source checkout path, when needed for ${tick}update${tick}, is machine configuration only (${tick}TSX_LVGL_SOURCE${tick} or ${tick}~/.config/tsx-lvgl/config.json${tick}). It must never appear in app source, ${tick}package.json${tick}, ${tick}package-lock.json${tick}, or the committed lock. Updates are explicit; ${tick}dev${tick} and ${tick}build${tick} never upgrade the framework.`,
+    `The source checkout path, when needed for ${tick}update${tick}, is machine configuration only (${tick}TSX_LVGL_SOURCE${tick} or ${tick}~/.config/tsx-lvgl/config.json${tick}). It must never appear in app source, ${tick}package.json${tick}, the package-manager lockfile, or the committed framework lock. Updates are explicit; ${tick}dev${tick} and ${tick}build${tick} never upgrade the framework.`,
     "",
     "Safe operations stop at the host/package seam. A successful check, build or headless dev run is not simulator evidence and none of those results proves physical display, touch, reset, flashing or recovery readiness. Hardware work remains a separately authorized, guarded operation.",
     "",

@@ -8,4 +8,7 @@ Applications import UI tags and hooks from `@tsx-lvgl/sdk` and use the
 `tsx-lvgl` command for `create`, `sync`, `update`, `dev`, `check`, `build` and
 `doctor`. The package bundles the framework implementation needed by those
 commands, so the application does not depend on a framework checkout or a
-registry.
+registry. The CLI uses the package manager declared in the app's
+`package.json`, the invoking package-manager environment, or its lockfile
+(npm, pnpm, yarn or bun); application source and portable framework metadata do
+not hardcode npm-specific install behavior.
