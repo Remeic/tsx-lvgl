@@ -44,7 +44,7 @@ flowchart TD
 
 Stryker mutates the deterministic `core`, `runtime`, `sensors`, `bundler`, `device`, SDK facade and package-manager seam sources, where tests can kill mutants quickly. The SDK CLI and npm-pack/install workflow run once through the dedicated consumer-contract gate after Stryker rather than once per mutant. We do not mutate vendor drivers, native probe code, hardware timing or the physical board: those require build, simulator, serial and hardware evidence instead.
 
-The host test files run with one test worker because the consumer-contract gate invokes the SDK packer, which rebuilds generated package output while the package-manager unit tests inspect that output. Serializing this boundary keeps the evidence deterministic without changing application runtime concurrency.
+The scripts keep the consumer-contract gate and package-manager unit tests as explicit sequential stages because the consumer gate invokes the SDK packer, which rebuilds generated package output while the package-manager tests inspect that output. Isolating this boundary keeps the evidence deterministic without changing application runtime concurrency.
 
 The configuration uses Stryker's command runner because the repository uses Node's built-in test runner. The normal `npm run typecheck` is the strict TypeScript gate. The mutation command uses `--noCheck` and evaluates every executable mutant against `test:fast`; transient mutant type errors are not substituted for behavioral kills. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
