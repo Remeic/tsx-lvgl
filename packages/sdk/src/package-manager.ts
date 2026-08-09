@@ -25,7 +25,7 @@ export interface InstallInvocation {
   readonly args: readonly string[];
 }
 
-const PACKAGE_MANAGER_NAMES: readonly PackageManagerName[] = ["npm", "pnpm", "yarn", "bun"];
+const YARN_BERRY_MARKERS = [".yarnrc.yml", ".pnp.cjs", ".pnp.js", "node_modules/.yarn-state.yml"] as const;
 
 export async function resolvePackageManager(
   root: string,
@@ -47,6 +47,10 @@ export async function resolvePackageManager(
     return toSupportedSelection(root, configured, configuredValue);
   }
 
+  if (YARN_BERRY_MARKERS.some((marker) => existsSync(join(root, marker)))) {
+    throw unsupportedYarnBerry();
+  }
+
   const invoked = context.userAgent === undefined ? getUserAgent() : context.userAgent;
   if (invoked !== null) {
     return toSupportedSelection(root, { name: invoked as DetectResult["name"], agent: invoked as DetectResult["agent"] }, invoked);
@@ -59,9 +63,9 @@ export async function resolvePackageManager(
       `multiple package-manager lockfiles found: ${lockManagers.join(", ")}`,
     );
   }
-  if (lockManagers.length === 1) {
-    const name = lockManagers[0]!;
-    return toSupportedSelection(root, { name, agent: name }, name);
+  const detectedByLockfile = await detectLockfileManager(root);
+  if (detectedByLockfile !== null) {
+    return toSupportedSelection(root, detectedByLockfile, detectedByLockfile.agent);
   }
 
   return { name: "npm", agent: "npm" };
@@ -96,10 +100,20 @@ async function detectConfiguredManager(
   });
 }
 
-function detectLockfileManagers(root: string): readonly PackageManagerName[] {
-  return PACKAGE_MANAGER_NAMES.filter((name) =>
-    Object.entries(LOCKS).some(([file, manager]) => manager === name && existsSync(join(root, file))),
-  );
+async function detectLockfileManager(root: string): Promise<DetectResult | null> {
+  return detect({
+    cwd: root,
+    stopDir: root,
+    strategies: ["lockfile"],
+  });
+}
+
+function detectLockfileManagers(root: string): readonly string[] {
+  return [...new Set(
+    Object.entries(LOCKS)
+      .filter(([file]) => existsSync(join(root, file)))
+      .map(([, manager]) => manager),
+  )].sort();
 }
 
 function toSupportedSelection(
@@ -107,11 +121,8 @@ function toSupportedSelection(
   result: DetectResult,
   source: string,
 ): PackageManagerSelection {
-  if (result.agent === "yarn@berry" || (result.agent === "yarn" && existsSync(join(root, ".yarnrc.yml")))) {
-    throw new CliError(
-      DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
-      "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
-    );
+  if (result.agent === "yarn@berry" || (result.agent === "yarn" && YARN_BERRY_MARKERS.some((marker) => existsSync(join(root, marker))))) {
+    throw unsupportedYarnBerry();
   }
   switch (result.agent) {
     case "npm":
@@ -126,4 +137,11 @@ function toSupportedSelection(
     default:
       throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, `unsupported package manager: ${source}`);
   }
+}
+
+function unsupportedYarnBerry(): CliError {
+  return new CliError(
+    DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
+    "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
+  );
 }

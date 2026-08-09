@@ -1,16 +1,19 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
@@ -163,6 +166,46 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   assert.equal(readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8"), frameworkLockBeforeFailedSync);
   assert.equal(existsSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json")), true);
   rmSync(join(appRoot, "yarn.lock"), { force: true });
+
+  const nodePackageLockPath = join(appRoot, "node_modules/.package-lock.json");
+  const sdkBinPath = join(appRoot, "node_modules/.bin/tsx-lvgl");
+  const nodePackageLockBeforeFailedInstall = readFileSync(nodePackageLockPath);
+  const sdkBinTargetBeforeFailedInstall = readlinkSync(sdkBinPath);
+  const provenanceBeforeFailedInstall = readFileSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json"));
+  const fakeBinRoot = join(sandbox, "fake-package-manager-bin");
+  mkdirSync(fakeBinRoot, { recursive: true });
+  const fakeNpmPath = join(fakeBinRoot, "npm");
+  writeFileSync(fakeNpmPath, `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync("package-lock.json", "mutated by failed install\\n");
+fs.writeFileSync("node_modules/.package-lock.json", "mutated by failed install\\n");
+fs.rmSync("node_modules/.bin/tsx-lvgl", { force: true });
+fs.writeFileSync("node_modules/.bin/tsx-lvgl", "mutated by failed install\\n");
+fs.mkdirSync("node_modules/@tsx-lvgl/sdk", { recursive: true });
+fs.writeFileSync("node_modules/@tsx-lvgl/sdk/provenance.json", "mutated by failed install\\n");
+process.exit(17);
+`);
+  chmodSync(fakeNpmPath, 0o755);
+  const failedInstall = runFailure(
+    process.execPath,
+    [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"],
+    appRoot,
+    {
+      PATH: `${fakeBinRoot}${delimiter}${process.env.PATH ?? ""}`,
+      npm_config_user_agent: undefined,
+      npm_execpath: undefined,
+    },
+  );
+  assert.equal(failedInstall.code, "INSTALL_FAILED");
+  assert.equal(readFileSync(join(appRoot, "package.json"), "utf8"), packageBeforeFailedSync);
+  assert.equal(readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8"), frameworkLockBeforeFailedSync);
+  assert.deepEqual(readFileSync(nodePackageLockPath), nodePackageLockBeforeFailedInstall);
+  assert.equal(lstatSync(sdkBinPath).isSymbolicLink(), true);
+  assert.equal(readlinkSync(sdkBinPath), sdkBinTargetBeforeFailedInstall);
+  assert.deepEqual(
+    readFileSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json")),
+    provenanceBeforeFailedInstall,
+  );
 
   const parseFailure = runFailure(
     process.execPath,

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
@@ -78,6 +78,22 @@ test("package manager selection delegates package fields, invocation and lockfil
     rmSync(join(root, "bun.lockb"));
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "npm");
+    rmSync(join(root, "package-lock.json"));
+    writeFileSync(join(root, "deno.lock"), "{}\n");
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, {}, { userAgent: null }),
+      (error: { code?: string; message?: string }) =>
+        error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+        && error.message === "unsupported package manager: deno",
+    );
+    rmSync(join(root, "deno.lock"));
+    writeFileSync(join(root, "rush.json"), "{}\n");
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, {}, { userAgent: null }),
+      (error: { code?: string; message?: string }) =>
+        error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+        && error.message === "unsupported package manager: pnpm-rush",
+    );
   } finally {
     if (originalUserAgent === undefined) delete process.env.npm_config_user_agent;
     else process.env.npm_config_user_agent = originalUserAgent;
@@ -134,6 +150,19 @@ test("package manager selection preserves stable diagnostics around the detector
         error.code === "PACKAGE_MANAGER_UNSUPPORTED"
         && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
     );
+    rmSync(join(root, ".yarnrc.yml"));
+    for (const marker of [".pnp.cjs", ".pnp.js", "node_modules/.yarn-state.yml"]) {
+      const markerPath = join(root, marker);
+      mkdirSync(dirname(markerPath), { recursive: true });
+      writeFileSync(markerPath, "\n");
+      await assert.rejects(
+        packageManager.resolvePackageManager(root, {}, { userAgent: "npm" }),
+        (error: { code?: string; message?: string }) =>
+          error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+          && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
+      );
+      rmSync(markerPath);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

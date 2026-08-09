@@ -544,43 +544,86 @@ interface FileSnapshot {
   readonly bytes?: Buffer;
 }
 
+interface PathBackup {
+  readonly path: string;
+  readonly backupPath: string;
+}
+
 async function withProjectInstallTransaction<T>(root: string, action: () => Promise<T>): Promise<T> {
   const rollbackRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-install-rollback-"));
   const snapshotPaths = [
     "package.json",
     "package-lock.json",
+    "npm-shrinkwrap.json",
     "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "yarn.lock",
     "bun.lock",
     "bun.lockb",
     ".tsx-lvgl/framework.lock.json",
+    "node_modules/.package-lock.json",
+    "node_modules/.modules.yaml",
+    "node_modules/.pnpm/lock.yaml",
+    "node_modules/.yarn-state.yml",
+    "node_modules/.yarn_integrity",
   ].map((path) => join(root, path));
   const fileSnapshots = snapshotPaths.map(snapshotFile);
   const artifactsRoot = join(root, ".tsx-lvgl", "artifacts");
   const artifactSnapshots = snapshotDirectoryFiles(artifactsRoot);
-  const installedSdkRoot = join(root, "node_modules", "@tsx-lvgl", "sdk");
-  const installedSdkBackup = join(rollbackRoot, "installed-sdk");
-  const hadInstalledSdk = existsSync(installedSdkRoot);
-
-  if (hadInstalledSdk) {
-    mkdirSync(dirname(installedSdkBackup), { recursive: true });
-    renameSync(installedSdkRoot, installedSdkBackup);
-  }
+  const installBackups = backupInstallPaths(root, rollbackRoot);
 
   try {
     const result = await action();
     rmSync(rollbackRoot, { recursive: true, force: true });
     return result;
   } catch (error) {
-    rmSync(installedSdkRoot, { recursive: true, force: true });
-    if (hadInstalledSdk) {
-      mkdirSync(dirname(installedSdkRoot), { recursive: true });
-      renameSync(installedSdkBackup, installedSdkRoot);
-    }
+    removeInstalledSdkPaths(root);
+    restorePathBackups(installBackups);
     restoreFiles(fileSnapshots);
     restoreDirectoryFiles(artifactsRoot, artifactSnapshots);
     rmSync(rollbackRoot, { recursive: true, force: true });
     throw error;
+  }
+}
+
+function removeInstalledSdkPaths(root: string): void {
+  rmSync(join(root, "node_modules", "@tsx-lvgl", "sdk"), { recursive: true, force: true });
+  rmSync(join(root, "node_modules", ".bin", "tsx-lvgl"), { recursive: true, force: true });
+  const pnpmRoot = join(root, "node_modules", ".pnpm");
+  if (existsSync(pnpmRoot)) {
+    for (const entry of readdirSync(pnpmRoot)) {
+      if (entry.includes("@tsx-lvgl+sdk@")) {
+        rmSync(join(pnpmRoot, entry), { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+function backupInstallPaths(root: string, rollbackRoot: string): readonly PathBackup[] {
+  const pnpmRoot = join(root, "node_modules", ".pnpm");
+  const pnpmSdkPaths = existsSync(pnpmRoot)
+    ? readdirSync(pnpmRoot)
+      .filter((entry) => entry.includes("@tsx-lvgl+sdk@"))
+      .map((entry) => join(pnpmRoot, entry))
+    : [];
+  const paths = [
+    join(root, "node_modules", "@tsx-lvgl", "sdk"),
+    join(root, "node_modules", ".bin", "tsx-lvgl"),
+    ...pnpmSdkPaths,
+  ];
+  return paths.flatMap((path, index) => {
+    if (!existsSync(path)) return [];
+    const backupPath = join(rollbackRoot, `install-path-${index}`);
+    renameSync(path, backupPath);
+    return [{ path, backupPath }];
+  });
+}
+
+function restorePathBackups(backups: readonly PathBackup[]): void {
+  for (const backup of backups) {
+    rmSync(backup.path, { recursive: true, force: true });
+    mkdirSync(dirname(backup.path), { recursive: true });
+    renameSync(backup.backupPath, backup.path);
   }
 }
 
