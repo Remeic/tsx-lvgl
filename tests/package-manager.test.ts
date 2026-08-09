@@ -1,8 +1,7 @@
 import { strict as assert } from "node:assert";
-import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 
 type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
@@ -12,8 +11,7 @@ interface Selection {
   readonly agent: SupportedAgent;
 }
 
-const require = createRequire(import.meta.url);
-const packageManager = require(resolve(process.cwd(), "packages/sdk/dist/package-manager.js")) as {
+const packageManager = await import(new URL("../../packages/sdk/dist/package-manager.js", import.meta.url).href) as {
   buildInstallInvocation: (
     selection: Selection,
     hasNpmLock: boolean,
@@ -28,6 +26,7 @@ const packageManager = require(resolve(process.cwd(), "packages/sdk/dist/package
 
 test("package manager selection delegates package fields, invocation and lockfiles to the detector", async () => {
   const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-package-manager-"));
+  const originalUserAgent = process.env.npm_config_user_agent;
   try {
     writeFileSync(join(root, "package.json"), "{}\n");
     assert.deepEqual(
@@ -39,12 +38,21 @@ test("package manager selection delegates package fields, invocation and lockfil
       { name: "pnpm", agent: "pnpm@6" },
     );
     assert.deepEqual(
+      await packageManager.resolvePackageManager(root, { packageManager: "npm@11.0.0" }, { userAgent: null }),
+      { name: "npm", agent: "npm" },
+    );
+    assert.deepEqual(
       await packageManager.resolvePackageManager(root, {}, { userAgent: "yarn" }),
       { name: "yarn", agent: "yarn" },
     );
     assert.deepEqual(
       await packageManager.resolvePackageManager(root, {}, { userAgent: "bun" }),
       { name: "bun", agent: "bun" },
+    );
+    process.env.npm_config_user_agent = "pnpm/10.0.0 npm/? node/v24.19.0";
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, {}),
+      { name: "pnpm", agent: "pnpm" },
     );
     assert.deepEqual(
       await packageManager.resolvePackageManager(root, {}, { userAgent: null }),
@@ -56,6 +64,12 @@ test("package manager selection delegates package fields, invocation and lockfil
     rmSync(join(root, "pnpm-lock.yaml"));
     writeFileSync(join(root, "yarn.lock"), "\n");
     assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "yarn");
+    writeFileSync(join(root, ".yarnrc.yml"), "nodeLinker: pnp\n");
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, {}, { userAgent: null }),
+      (error: { code?: string }) => error.code === "PACKAGE_MANAGER_UNSUPPORTED",
+    );
+    rmSync(join(root, ".yarnrc.yml"));
     rmSync(join(root, "yarn.lock"));
     writeFileSync(join(root, "bun.lock"), "\n");
     writeFileSync(join(root, "bun.lockb"), "\n");
@@ -65,6 +79,8 @@ test("package manager selection delegates package fields, invocation and lockfil
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "npm");
   } finally {
+    if (originalUserAgent === undefined) delete process.env.npm_config_user_agent;
+    else process.env.npm_config_user_agent = originalUserAgent;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -81,14 +97,14 @@ test("package manager selection preserves stable diagnostics around the detector
         error.code === "PACKAGE_MANAGER_AMBIGUOUS"
         && error.message === "multiple package-manager lockfiles found: npm, yarn",
     );
-    for (const value of [null, 42, "", " ", "deno@2"]) {
+    for (const value of [null, 42, "", " ", "deno@2", "unknown-pm@1"]) {
       await assert.rejects(
         packageManager.resolvePackageManager(root, { packageManager: value }, { userAgent: null }),
         (error: { code?: string; message?: string }) =>
           error.code === "PACKAGE_MANAGER_UNSUPPORTED"
           && (
-            value === "deno@2"
-              ? error.message === "unsupported package manager: deno@2"
+            value === "deno@2" || value === "unknown-pm@1"
+              ? error.message === `unsupported package manager: ${value}`
               : error.message === "packageManager must name npm, pnpm, yarn or bun"
           ),
       );
@@ -108,6 +124,10 @@ test("package manager selection preserves stable diagnostics around the detector
     rmSync(join(root, "package-lock.json"));
     rmSync(join(root, "yarn.lock"));
     writeFileSync(join(root, ".yarnrc.yml"), "nodeLinker: pnp\n");
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, { packageManager: "npm@11.0.0" }, { userAgent: null }),
+      { name: "npm", agent: "npm" },
+    );
     await assert.rejects(
       packageManager.resolvePackageManager(root, { packageManager: "yarn" }, { userAgent: null }),
       (error: { code?: string; message?: string }) =>
@@ -144,8 +164,15 @@ test("install invocation comes from the detector and adds only TSX-LVGL safety f
     { command: "yarn", args: ["install", "--ignore-scripts"] },
   );
   assert.deepEqual(
+    packageManager.buildInstallInvocation({ name: "yarn", agent: "yarn" }, false, "/tmp/ignored-bun-cache"),
+    { command: "yarn", args: ["install", "--ignore-scripts"] },
+  );
+  assert.deepEqual(
     packageManager.buildInstallInvocation({ name: "bun", agent: "bun" }, false, "/tmp/tsx-lvgl-bun-cache"),
     { command: "bun", args: ["install", "--ignore-scripts", "--cache-dir", "/tmp/tsx-lvgl-bun-cache"] },
   );
-  assert.equal(existsSync(resolve(process.cwd(), "packages/sdk/dist/package-manager.js")), true);
+  assert.deepEqual(
+    packageManager.buildInstallInvocation({ name: "bun", agent: "bun" }, false),
+    { command: "bun", args: ["install", "--ignore-scripts"] },
+  );
 });
