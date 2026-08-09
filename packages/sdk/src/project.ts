@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -612,11 +613,20 @@ function backupInstallPaths(root: string, rollbackRoot: string): readonly PathBa
     ...pnpmSdkPaths,
   ];
   return paths.flatMap((path, index) => {
-    if (!existsSync(path)) return [];
+    if (!pathExistsWithoutFollowingSymlinks(path)) return [];
     const backupPath = join(rollbackRoot, `install-path-${index}`);
     renameSync(path, backupPath);
     return [{ path, backupPath }];
   });
+}
+
+function pathExistsWithoutFollowingSymlinks(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function restorePathBackups(backups: readonly PathBackup[]): void {
