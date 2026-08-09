@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -150,18 +151,18 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
 
   const packageBeforeFailedSync = readFileSync(join(appRoot, "package.json"), "utf8");
   const frameworkLockBeforeFailedSync = readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8");
-  const packageWithUnsupportedManager = JSON.parse(packageBeforeFailedSync) as Record<string, unknown>;
-  packageWithUnsupportedManager.packageManager = "deno@2";
-  writeFileSync(join(appRoot, "package.json"), `${JSON.stringify(packageWithUnsupportedManager, null, 2)}\n`);
+  writeFileSync(join(appRoot, "yarn.lock"), "\n");
   const failedSync = runFailure(
     process.execPath,
     [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"],
     appRoot,
+    { npm_config_user_agent: undefined, npm_execpath: undefined },
   );
-  assert.equal(failedSync.code, "PACKAGE_MANAGER_UNSUPPORTED");
+  assert.equal(failedSync.code, "PACKAGE_MANAGER_AMBIGUOUS");
   assert.equal(readFileSync(join(appRoot, "package.json"), "utf8"), packageBeforeFailedSync);
   assert.equal(readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8"), frameworkLockBeforeFailedSync);
   assert.equal(existsSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json")), true);
+  rmSync(join(appRoot, "yarn.lock"), { force: true });
 
   const parseFailure = runFailure(
     process.execPath,
@@ -231,8 +232,18 @@ function runJson(command: string, args: readonly string[], cwd: string): Record<
   return JSON.parse(stdout) as Record<string, any>;
 }
 
-function runFailure(command: string, args: readonly string[], cwd: string): Record<string, any> {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: "pipe" });
+function runFailure(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  environment?: Readonly<Record<string, string | undefined>>,
+): Record<string, any> {
+  const env = { ...process.env };
+  for (const [key, value] of Object.entries(environment ?? {})) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: "pipe", env });
   assert.notEqual(result.status, 0, `${command} unexpectedly succeeded`);
   return JSON.parse(result.stderr.trim()) as Record<string, any>;
 }
