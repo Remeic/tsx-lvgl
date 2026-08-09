@@ -214,6 +214,41 @@ process.exit(17);
     provenanceBeforeFailedInstall,
   );
 
+  const pnpmStoreEntry = join(
+    appRoot,
+    "node_modules/.pnpm/@tsx-lvgl+sdk@file+.tsx-lvgl+artifacts+tsx-lvgl-sdk-0.1.0.tgz",
+  );
+  const pnpmStoreSentinel = join(pnpmStoreEntry, "rollback-sentinel.txt");
+  mkdirSync(pnpmStoreEntry, { recursive: true });
+  writeFileSync(pnpmStoreSentinel, "original pnpm store entry\n");
+  const fakePnpmPath = join(fakeBinRoot, "pnpm");
+  writeFileSync(fakePnpmPath, `#!/usr/bin/env node
+const fs = require("node:fs");
+const entry = "node_modules/.pnpm/@tsx-lvgl+sdk@file+.tsx-lvgl+artifacts+tsx-lvgl-sdk-0.1.0.tgz";
+fs.mkdirSync(entry, { recursive: true });
+fs.writeFileSync(entry + "/rollback-sentinel.txt", "mutated by failed pnpm install\\n");
+fs.writeFileSync("pnpm-lock.yaml", "mutated by failed pnpm install\\n");
+process.exit(17);
+`);
+  chmodSync(fakePnpmPath, 0o755);
+  const failedPnpmInstall = runFailure(
+    process.execPath,
+    [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"],
+    appRoot,
+    {
+      PATH: `${fakeBinRoot}${delimiter}${process.env.PATH ?? ""}`,
+      npm_config_user_agent: "pnpm/11.18.0 node/v24.19.0",
+      npm_execpath: "/opt/pnpm/bin/pnpm.cjs",
+    },
+  );
+  assert.equal(failedPnpmInstall.code, "INSTALL_FAILED");
+  assert.equal(readFileSync(pnpmStoreSentinel, "utf8"), "original pnpm store entry\n");
+  assert.equal(existsSync(join(appRoot, "pnpm-lock.yaml")), false);
+  assert.deepEqual(
+    readFileSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json")),
+    provenanceBeforeFailedInstall,
+  );
+
   const parseFailure = runFailure(
     process.execPath,
     [cliPath, "check", "--unknown-option", "--json"],
