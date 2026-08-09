@@ -18,17 +18,17 @@ const managerDefinitions: readonly PackageManagerCase[] = [
   {
     name: "pnpm",
     command: "pnpm",
-    args: (appRoot: string, sourceRoot: string) => ["--dir", appRoot, "run", "update", "--", "--source", sourceRoot, "--json"],
+    args: (_appRoot: string, sourceRoot: string) => ["run", "update", "--", "--source", sourceRoot, "--json"],
   },
   {
     name: "yarn",
     command: "yarn",
-    args: (appRoot: string, sourceRoot: string) => ["--cwd", appRoot, "run", "update", "--", "--source", sourceRoot, "--json"],
+    args: (_appRoot: string, sourceRoot: string) => ["run", "update", "--", "--source", sourceRoot, "--json"],
   },
   {
     name: "bun",
     command: "bun",
-    args: (appRoot: string, sourceRoot: string) => ["run", "--cwd", appRoot, "update", "--", "--source", sourceRoot, "--json"],
+    args: (_appRoot: string, sourceRoot: string) => ["run", "update", "--", "--source", sourceRoot, "--json"],
   },
 ];
 
@@ -71,7 +71,7 @@ test(
       const appRoot = join(sandbox, `${manager.name}-app`);
       runJson(process.execPath, [cliPath, "create", appRoot, "--artifact", String(metadata.artifactPath), "--json"], sandbox);
       const result = spawnSync(manager.command, manager.args(appRoot, repoRoot), {
-        cwd: repoRoot,
+        cwd: appRoot,
         encoding: "utf8",
         stdio: "pipe",
       });
@@ -84,11 +84,11 @@ test(
 );
 
 function isAvailable(command: string): boolean {
-  return spawnSync(command, ["--version"], { encoding: "utf8", stdio: "ignore" }).status === 0;
+  return spawnSync(command, ["--version"], { cwd: tmpdir(), encoding: "utf8", stdio: "ignore" }).status === 0;
 }
 
 function isClassicYarn(): boolean {
-  const result = spawnSync("yarn", ["--version"], { encoding: "utf8", stdio: "pipe" });
+  const result = spawnSync("yarn", ["--version"], { cwd: tmpdir(), encoding: "utf8", stdio: "pipe" });
   if (result.status !== 0) return false;
   return Number.parseInt(result.stdout.trim().split(".")[0] ?? "0", 10) === 1;
 }
