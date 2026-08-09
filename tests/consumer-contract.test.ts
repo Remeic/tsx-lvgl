@@ -171,7 +171,11 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   const nodePackageLockPath = join(appRoot, "node_modules/.package-lock.json");
   const sdkBinPath = join(appRoot, "node_modules/.bin/tsx-lvgl");
   mkdirSync(dirname(sdkBinPath), { recursive: true });
-  symlinkSync("../@tsx-lvgl/sdk/dist/cli.js", sdkBinPath);
+  try {
+    lstatSync(sdkBinPath);
+  } catch {
+    symlinkSync("../@tsx-lvgl/sdk/dist/cli.js", sdkBinPath);
+  }
   const nodePackageLockBeforeFailedInstall = readFileSync(nodePackageLockPath);
   const sdkBinTargetBeforeFailedInstall = readlinkSync(sdkBinPath);
   const provenanceBeforeFailedInstall = readFileSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json"));
