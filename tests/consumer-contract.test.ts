@@ -59,10 +59,16 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   assert.equal(update.code, "UPDATE_OK");
   assert.equal(update.sourceSha, metadata.sourceSha);
   const updatedPackageLock = JSON.parse(readFileSync(join(appRoot, "package-lock.json"), "utf8")) as {
+    name?: string;
+    version?: string;
     packages: Record<string, { dependencies?: Record<string, string>; resolved?: string }>;
   };
   const updatedRootPackage = updatedPackageLock.packages[""]!;
-  const updatedSdkPackage = updatedPackageLock.packages["node_modules/@tsx-lvgl/sdk"]!;
+  const updatedSdkPackage = updatedPackageLock.packages["node_modules/@tsx-lvgl/sdk"]! as {
+    version?: string;
+    resolved?: string;
+    integrity?: string;
+  };
   assert.equal(
     updatedRootPackage.dependencies?.["@tsx-lvgl/sdk"],
     "file:.tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
@@ -71,6 +77,33 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
     updatedSdkPackage.resolved,
     "file:.tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
   );
+
+  const v1Lock = {
+    name: updatedPackageLock.name,
+    version: updatedPackageLock.version,
+    lockfileVersion: 1,
+    requires: true,
+    dependencies: {
+      "@tsx-lvgl/sdk": {
+        version: updatedSdkPackage.version,
+        resolved: updatedSdkPackage.resolved,
+        integrity: updatedSdkPackage.integrity,
+      },
+    },
+  };
+  writeFileSync(join(appRoot, "package-lock.json"), `${JSON.stringify(v1Lock, null, 2)}\n`);
+  const v1Sync = runJson(process.execPath, [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"], appRoot);
+  assert.equal(v1Sync.code, "SYNC_OK");
+  const synchronizedV1Lock = JSON.parse(readFileSync(join(appRoot, "package-lock.json"), "utf8")) as {
+    lockfileVersion: number;
+    dependencies: Record<string, { resolved?: string }>;
+  };
+  assert.equal(synchronizedV1Lock.lockfileVersion, 1);
+  assert.equal(
+    synchronizedV1Lock.dependencies["@tsx-lvgl/sdk"]?.resolved,
+    "file:.tsx-lvgl/artifacts/tsx-lvgl-sdk-0.1.0.tgz",
+  );
+
   const dirtySource = join(sandbox, "dirty-framework");
   mkdirSync(join(dirtySource, "scripts"), { recursive: true });
   writeFileSync(join(dirtySource, "package.json"), "{\"private\":true}\n");
@@ -89,6 +122,54 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
     appRoot,
   );
   assert.equal(dirtyUpdate.code, "SOURCE_DIRTY");
+
+  const dirtyExtractRoot = join(sandbox, "dirty-artifact-extract");
+  mkdirSync(dirtyExtractRoot, { recursive: true });
+  run("tar", ["-xzf", artifactPath, "-C", dirtyExtractRoot], sandbox);
+  const dirtyProvenancePath = join(dirtyExtractRoot, "package/provenance.json");
+  const dirtyProvenance = JSON.parse(readFileSync(dirtyProvenancePath, "utf8")) as Record<string, unknown>;
+  dirtyProvenance.sourceDirty = true;
+  writeFileSync(dirtyProvenancePath, `${JSON.stringify(dirtyProvenance, null, 2)}\n`);
+  const dirtyPackRoot = join(sandbox, "dirty-artifact-pack");
+  mkdirSync(dirtyPackRoot, { recursive: true });
+  const dirtyPacked = JSON.parse(run("npm", [
+    "pack",
+    join(dirtyExtractRoot, "package"),
+    "--ignore-scripts",
+    "--json",
+    "--pack-destination",
+    dirtyPackRoot,
+  ], sandbox)) as Array<{ filename: string }>;
+  const dirtyArtifact = join(dirtyPackRoot, dirtyPacked[0]!.filename);
+  const dirtyCreate = runFailure(
+    process.execPath,
+    [cliPath, "create", join(sandbox, "dirty-artifact-app"), "--artifact", dirtyArtifact, "--json"],
+    sandbox,
+  );
+  assert.equal(dirtyCreate.code, "SOURCE_DIRTY");
+
+  const packageBeforeFailedSync = readFileSync(join(appRoot, "package.json"), "utf8");
+  const frameworkLockBeforeFailedSync = readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8");
+  const packageWithUnsupportedManager = JSON.parse(packageBeforeFailedSync) as Record<string, unknown>;
+  packageWithUnsupportedManager.packageManager = "deno@2";
+  writeFileSync(join(appRoot, "package.json"), `${JSON.stringify(packageWithUnsupportedManager, null, 2)}\n`);
+  const failedSync = runFailure(
+    process.execPath,
+    [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--json"],
+    appRoot,
+  );
+  assert.equal(failedSync.code, "PACKAGE_MANAGER_UNSUPPORTED");
+  assert.equal(readFileSync(join(appRoot, "package.json"), "utf8"), packageBeforeFailedSync);
+  assert.equal(readFileSync(join(appRoot, ".tsx-lvgl/framework.lock.json"), "utf8"), frameworkLockBeforeFailedSync);
+  assert.equal(existsSync(join(appRoot, "node_modules/@tsx-lvgl/sdk/provenance.json")), true);
+
+  const parseFailure = runFailure(
+    process.execPath,
+    [cliPath, "check", "--unknown-option", "--json"],
+    appRoot,
+  );
+  assert.equal(parseFailure.code, "UNSUPPORTED_COMMAND");
+
   const check = runJson(process.execPath, [cliPath, "check", "--json"], appRoot);
   assert.equal(check.code, "CHECK_OK");
   assert.deepEqual(check.files, ["src/App.tsx"]);

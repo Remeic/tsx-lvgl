@@ -42,7 +42,7 @@ The package-source seam is the artifact reference in
 SHA, artifact SHA-256 and byte length. `sync` installs that exact artifact;
 `update` is the explicit source-to-artifact operation and rejects a dirty source
 checkout. The CLI delegates installation to the consumer's declared or
-detected package manager (npm, pnpm, yarn or bun), so package-manager choice is
+detected package manager (npm, pnpm, Yarn Classic v1 or bun), so package-manager choice is
 not part of the application source contract. `dev` and `build` only verify the
 lock and never resolve a newer source. The package remains private,
 so `npm pack` is a deliberate local distribution action and `npm publish` is

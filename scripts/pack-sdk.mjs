@@ -90,13 +90,11 @@ function main() {
     writeFileSync(resolve(stagingRoot, "package.json"), `${JSON.stringify(portablePackage, null, 2)}\n`, "utf8");
     writeFileSync(resolve(stagingRoot, "provenance.json"), `${JSON.stringify(provenance, null, 2)}\n`, "utf8");
 
-    const npmExecPath = process.env.npm_execpath;
-    const command = npmExecPath === undefined ? "npm" : process.execPath;
-    const args = npmExecPath === undefined
-      ? ["pack", stagingRoot, "--ignore-scripts", "--json", "--pack-destination", options.out]
-      : [npmExecPath, "pack", stagingRoot, "--ignore-scripts", "--json", "--pack-destination", options.out];
+    // The artifact boundary is intentionally npm-pack-compatible even when a
+    // consumer invokes this script through pnpm, Yarn or Bun.
+    const args = ["pack", stagingRoot, "--ignore-scripts", "--json", "--pack-destination", options.out];
     mkdirSync(options.out, { recursive: true });
-    const packed = run(command, args, { cwd: ROOT, stdio: "pipe" });
+    const packed = run("npm", args, { cwd: ROOT, stdio: "pipe" });
     const npmMetadata = JSON.parse(packed.stdout).at(-1);
     const artifactPath = resolve(options.out, npmMetadata.filename);
     const bytes = readFileSync(artifactPath);

@@ -10,5 +10,5 @@ Applications import UI tags and hooks from `@tsx-lvgl/sdk` and use the
 commands, so the application does not depend on a framework checkout or a
 registry. The CLI uses the package manager declared in the app's
 `package.json`, the invoking package-manager environment, or its lockfile
-(npm, pnpm, yarn or bun); application source and portable framework metadata do
+(npm, pnpm, Yarn Classic v1 or bun); application source and portable framework metadata do
 not hardcode npm-specific install behavior.

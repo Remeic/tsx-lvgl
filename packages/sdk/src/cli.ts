@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   try {
     parsed = parseArgs(process.argv.slice(2));
   } catch (error) {
-    emitFailure(asCliError(error), false);
+    emitFailure(asCliError(error), process.argv.slice(2).includes("--json"));
     process.exitCode = 2;
     return;
   }

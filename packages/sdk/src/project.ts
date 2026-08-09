@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -86,7 +87,7 @@ interface PackProvenance {
   readonly packageName: typeof SDK_PACKAGE_NAME;
   readonly version: string;
   readonly sourceSha: string;
-  readonly sourceDirty?: boolean;
+  readonly sourceDirty: false;
 }
 
 interface SourcePackResult {
@@ -149,11 +150,13 @@ export function createProject(target: string, artifactArgument?: string): { read
   const generatedArtifact = artifactArgument === undefined;
   const artifactPath = generatedArtifact ? packInstalledSdk() : resolve(artifactArgument);
   try {
-    const lock = installArtifactIntoProject(root, artifactPath);
-    writeSdkDependency(root, lock);
-    runPackageManagerInstall(root, resolveArtifactPath(root, lock));
-    verifyInstalledSdk(root, lock);
-    return { root, lock };
+    return withProjectInstallTransaction(root, () => {
+      const lock = installArtifactIntoProject(root, artifactPath);
+      writeSdkDependency(root, lock);
+      runPackageManagerInstall(root, resolveArtifactPath(root, lock));
+      verifyInstalledSdk(root, lock);
+      return { root, lock };
+    });
   } finally {
     if (generatedArtifact) rmSync(dirname(artifactPath), { recursive: true, force: true });
   }
@@ -162,10 +165,12 @@ export function createProject(target: string, artifactArgument?: string): { read
 export function syncProject(root: string): { readonly lock: FrameworkLock } {
   const project = readProjectFiles(root);
   verifyArtifact(project);
-  writeSdkDependency(project.root, project.lock);
-  runPackageManagerInstall(project.root, project.artifactPath);
-  verifyInstalledSdk(project.root, project.lock);
-  return { lock: project.lock };
+  return withProjectInstallTransaction(project.root, () => {
+    writeSdkDependency(project.root, project.lock);
+    runPackageManagerInstall(project.root, project.artifactPath);
+    verifyInstalledSdk(project.root, project.lock);
+    return { lock: project.lock };
+  });
 }
 
 export function updateProject(root: string, explicitSource?: string): { readonly lock: FrameworkLock } {
@@ -189,11 +194,13 @@ export function updateProject(root: string, explicitSource?: string): { readonly
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
-    const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
-    writeSdkDependency(projectRoot, lock);
-    runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
-    verifyInstalledSdk(projectRoot, lock);
-    return { lock };
+    return withProjectInstallTransaction(projectRoot, () => {
+      const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
+      writeSdkDependency(projectRoot, lock);
+      runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
+      verifyInstalledSdk(projectRoot, lock);
+      return { lock };
+    });
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -425,7 +432,12 @@ function verifyInstalledSdk(root: string, lock: FrameworkLock): void {
   if (packageValue.name !== SDK_PACKAGE_NAME || packageValue.version !== lock.version) {
     throw new CliError(DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED, "installed SDK package identity does not match the lock");
   }
-  if (provenance.packageName !== SDK_PACKAGE_NAME || provenance.version !== lock.version || provenance.sourceSha !== lock.sourceSha) {
+  if (
+    provenance.packageName !== SDK_PACKAGE_NAME
+    || provenance.version !== lock.version
+    || provenance.sourceSha !== lock.sourceSha
+    || provenance.sourceDirty !== false
+  ) {
     throw new CliError(DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED, "installed SDK provenance does not match the lock");
   }
 }
@@ -492,8 +504,16 @@ function installArtifactIntoProject(root: string, artifactPath: string, metadata
     packageName: metadata.packageName,
     version: metadata.version,
     sourceSha: metadata.sourceSha,
+    sourceDirty: false as const,
   };
-  if (provenance.packageName !== SDK_PACKAGE_NAME || !/^[0-9a-f]{40}$/.test(provenance.sourceSha)) {
+  if (
+    provenance.sourceDirty !== false
+    || provenance.packageName !== SDK_PACKAGE_NAME
+    || !/^[0-9a-f]{40}$/.test(provenance.sourceSha)
+  ) {
+    if (provenance.sourceDirty !== false) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "SDK artifact was packed from a dirty framework checkout");
+    }
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
   }
   const artifactFile = `tsx-lvgl-sdk-${provenance.version}.tgz`;
@@ -515,6 +535,85 @@ function installArtifactIntoProject(root: string, artifactPath: string, metadata
   };
 }
 
+interface FileSnapshot {
+  readonly path: string;
+  readonly existed: boolean;
+  readonly bytes?: Buffer;
+}
+
+function withProjectInstallTransaction<T>(root: string, action: () => T): T {
+  const rollbackRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-install-rollback-"));
+  const snapshotPaths = [
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    ".tsx-lvgl/framework.lock.json",
+  ].map((path) => join(root, path));
+  const fileSnapshots = snapshotPaths.map(snapshotFile);
+  const artifactsRoot = join(root, ".tsx-lvgl", "artifacts");
+  const artifactSnapshots = snapshotDirectoryFiles(artifactsRoot);
+  const installedSdkRoot = join(root, "node_modules", "@tsx-lvgl", "sdk");
+  const installedSdkBackup = join(rollbackRoot, "installed-sdk");
+  const hadInstalledSdk = existsSync(installedSdkRoot);
+
+  if (hadInstalledSdk) {
+    mkdirSync(dirname(installedSdkBackup), { recursive: true });
+    renameSync(installedSdkRoot, installedSdkBackup);
+  }
+
+  try {
+    const result = action();
+    rmSync(rollbackRoot, { recursive: true, force: true });
+    return result;
+  } catch (error) {
+    rmSync(installedSdkRoot, { recursive: true, force: true });
+    if (hadInstalledSdk) {
+      mkdirSync(dirname(installedSdkRoot), { recursive: true });
+      renameSync(installedSdkBackup, installedSdkRoot);
+    }
+    restoreFiles(fileSnapshots);
+    restoreDirectoryFiles(artifactsRoot, artifactSnapshots);
+    rmSync(rollbackRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function snapshotFile(path: string): FileSnapshot {
+  return existsSync(path)
+    ? { path, existed: true, bytes: readFileSync(path) }
+    : { path, existed: false };
+}
+
+function snapshotDirectoryFiles(root: string): readonly FileSnapshot[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => snapshotFile(join(root, entry.name)));
+}
+
+function restoreFiles(snapshots: readonly FileSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    rmSync(snapshot.path, { force: true });
+    if (snapshot.existed && snapshot.bytes !== undefined) {
+      mkdirSync(dirname(snapshot.path), { recursive: true });
+      writeFileSync(snapshot.path, snapshot.bytes);
+    }
+  }
+}
+
+function restoreDirectoryFiles(root: string, snapshots: readonly FileSnapshot[]): void {
+  rmSync(root, { recursive: true, force: true });
+  for (const snapshot of snapshots) {
+    if (snapshot.existed && snapshot.bytes !== undefined) {
+      mkdirSync(dirname(snapshot.path), { recursive: true });
+      writeFileSync(snapshot.path, snapshot.bytes);
+    }
+  }
+}
+
 function writeSdkDependency(root: string, lock: FrameworkLock): void {
   const packagePath = join(root, "package.json");
   const value = readJson(packagePath, DIAGNOSTIC_CODES.PACKAGE_INVALID);
@@ -534,11 +633,6 @@ function runPackageManagerInstall(root: string, artifactPath: string): void {
   const packageManager = resolvePackageManager(root, packageJson);
   const packageLockPath = join(root, "package-lock.json");
   const hasPackageLock = existsSync(packageLockPath);
-  const installedSdkRoot = join(root, "node_modules", "@tsx-lvgl", "sdk");
-  // Remove the installed package before sync/update so a same-version artifact
-  // with a new digest is not incorrectly treated as already satisfied by any
-  // supported package manager.
-  rmSync(installedSdkRoot, { recursive: true, force: true });
   const invocation = buildInstallInvocation(packageManager, hasPackageLock);
   const result = spawnSync(invocation.command, invocation.args, { cwd: root, encoding: "utf8", stdio: "pipe" });
   const errorCode = result.error !== undefined && "code" in result.error ? result.error.code : undefined;
@@ -559,20 +653,31 @@ function runPackageManagerInstall(root: string, artifactPath: string): void {
 
 function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
   const packageLock = readJson(packageLockPath, DIAGNOSTIC_CODES.INSTALL_FAILED);
-  const packages = isRecord(packageLock.packages) ? packageLock.packages : {};
-  const rootPackage = isRecord(packages[""]) ? packages[""] : undefined;
-  const sdkPackage = isRecord(packages[`node_modules/${SDK_PACKAGE_NAME}`])
-    ? packages[`node_modules/${SDK_PACKAGE_NAME}`]
-    : undefined;
-  if (rootPackage === undefined || sdkPackage === undefined) {
-    throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
-  }
   const relativeArtifact = relative(root, artifactPath).split(sep).join("/");
-  const rootDependencies = isRecord(rootPackage.dependencies) ? { ...rootPackage.dependencies } : {};
-  rootDependencies[SDK_PACKAGE_NAME] = `file:${relativeArtifact}`;
-  rootPackage.dependencies = rootDependencies;
-  sdkPackage.resolved = `file:${relativeArtifact}`;
-  sdkPackage.integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
+  const integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
+  const packages = isRecord(packageLock.packages) ? packageLock.packages : undefined;
+  if (packages !== undefined) {
+    const rootPackage = isRecord(packages[""]) ? packages[""] : undefined;
+    const sdkPackage = isRecord(packages[`node_modules/${SDK_PACKAGE_NAME}`])
+      ? packages[`node_modules/${SDK_PACKAGE_NAME}`]
+      : undefined;
+    if (rootPackage === undefined || sdkPackage === undefined) {
+      throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
+    }
+    const rootDependencies = isRecord(rootPackage.dependencies) ? { ...rootPackage.dependencies } : {};
+    rootDependencies[SDK_PACKAGE_NAME] = `file:${relativeArtifact}`;
+    rootPackage.dependencies = rootDependencies;
+    sdkPackage.resolved = `file:${relativeArtifact}`;
+    sdkPackage.integrity = integrity;
+  } else {
+    const dependencies = isRecord(packageLock.dependencies) ? packageLock.dependencies : {};
+    const sdkPackage = isRecord(dependencies[SDK_PACKAGE_NAME]) ? dependencies[SDK_PACKAGE_NAME] : undefined;
+    if (sdkPackage === undefined) {
+      throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
+    }
+    sdkPackage.resolved = `file:${relativeArtifact}`;
+    sdkPackage.integrity = integrity;
+  }
   writeFileSync(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`, "utf8");
 }
 
@@ -636,12 +741,8 @@ function packInstalledSdk(): string {
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "create needs --artifact when the CLI is not running from a packed SDK");
   }
   const outputRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-create-"));
-  const npmExecPath = process.env.npm_execpath;
-  const command = npmExecPath === undefined ? "npm" : process.execPath;
-  const args = npmExecPath === undefined
-    ? ["pack", sdkRoot, "--ignore-scripts", "--json", "--pack-destination", outputRoot]
-    : [npmExecPath, "pack", sdkRoot, "--ignore-scripts", "--json", "--pack-destination", outputRoot];
-  const result = spawnSync(command, args, { cwd: sdkRoot, encoding: "utf8", stdio: "pipe" });
+  const args = ["pack", sdkRoot, "--ignore-scripts", "--json", "--pack-destination", outputRoot];
+  const result = spawnSync("npm", args, { cwd: sdkRoot, encoding: "utf8", stdio: "pipe" });
   if (result.status !== 0) {
     rmSync(outputRoot, { recursive: true, force: true });
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "the installed SDK could not be repacked");
@@ -660,6 +761,7 @@ function packInstalledSdk(): string {
 }
 
 function readPackProvenance(artifactPath: string): PackProvenance {
+  let dirtyArtifact = false;
   try {
     const archive = gunzipSync(readFileSync(artifactPath));
     let offset = 0;
@@ -676,19 +778,27 @@ function readPackProvenance(artifactPath: string): PackProvenance {
           || value.packageName !== SDK_PACKAGE_NAME
           || typeof value.version !== "string"
           || typeof value.sourceSha !== "string"
+          || typeof value.sourceDirty !== "boolean"
         ) throw new Error("invalid provenance");
+        if (value.sourceDirty === true) {
+          dirtyArtifact = true;
+          break;
+        }
         return {
           formatVersion: 1,
           packageName: SDK_PACKAGE_NAME,
           version: value.version,
           sourceSha: value.sourceSha,
-          ...(typeof value.sourceDirty === "boolean" ? { sourceDirty: value.sourceDirty } : {}),
+          sourceDirty: false,
         };
       }
       offset = dataStart + Math.ceil(size / 512) * 512;
     }
   } catch {
     // The stable external error below intentionally does not expose archive internals.
+  }
+  if (dirtyArtifact) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "SDK artifact was packed from a dirty framework checkout");
   }
   throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact does not contain valid provenance");
 }
@@ -726,7 +836,7 @@ function consumerAgentsTemplate(): string {
     "## Commands",
     "",
     `- ${tick}tsx-lvgl create <directory> --artifact <sdk.tgz>${tick} — scaffold a new app during bootstrap.`,
-    `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, yarn or bun) to run these scripts. For example: ${tick}<package-manager> run sync${tick}.`,
+    `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, Yarn Classic v1 or bun) to run these scripts. Yarn Berry requires an explicit node_modules linker. For example: ${tick}<package-manager> run sync${tick}.`,
     `- ${tick}<package-manager> run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
     `- ${tick}<package-manager> run update${tick} — explicitly package a configured framework checkout and update the pin.`,
     `- ${tick}<package-manager> run dev${tick} — run one deterministic headless kernel check.`,

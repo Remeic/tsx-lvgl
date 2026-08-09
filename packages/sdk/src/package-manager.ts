@@ -46,7 +46,40 @@ function managerFromPackageField(value: unknown): PackageManagerName | undefined
   if (manager === undefined) {
     throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, `unsupported package manager: ${value}`);
   }
+  if (manager === "yarn" && yarnMajorFromPackageField(value) !== undefined && yarnMajorFromPackageField(value)! >= 2) {
+    throw unsupportedYarn();
+  }
   return manager;
+}
+
+function yarnMajorFromPackageField(value: string): number | undefined {
+  const match = /^yarn@(\d+)(?:\.|$)/i.exec(value.trim());
+  return match === null ? undefined : Number.parseInt(match[1]!, 10);
+}
+
+function yarnMajorFromToken(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const match = /(?:^|\s)yarn\/(\d+)(?:\.|\s|$)/i.exec(value.trim());
+  return match === null ? undefined : Number.parseInt(match[1]!, 10);
+}
+
+function unsupportedYarn(): CliError {
+  return new CliError(
+    DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
+    "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+  );
+}
+
+function assertSupportedYarn(
+  root: string,
+  manager: PackageManagerName,
+  ...tokens: readonly (string | undefined)[]
+): void {
+  if (manager !== "yarn") return;
+  if (tokens.some((token) => yarnMajorFromToken(token) !== undefined && yarnMajorFromToken(token)! >= 2)) {
+    throw unsupportedYarn();
+  }
+  if (existsSync(join(root, ".yarnrc.yml"))) throw unsupportedYarn();
 }
 
 function commandFor(name: PackageManagerName, environment: Environment): PackageManagerSelection {
@@ -63,11 +96,17 @@ export function resolvePackageManager(
   environment: Environment = process.env,
 ): PackageManagerSelection {
   const configured = managerFromPackageField(packageJson.packageManager);
-  if (configured !== undefined) return commandFor(configured, environment);
+  if (configured !== undefined) {
+    assertSupportedYarn(root, configured, environment.npm_config_user_agent, environment.npm_execpath);
+    return commandFor(configured, environment);
+  }
 
   const invoked = managerFromOptionalToken(environment.npm_config_user_agent)
     ?? managerFromOptionalToken(environment.npm_execpath);
-  if (invoked !== undefined) return commandFor(invoked, environment);
+  if (invoked !== undefined) {
+    assertSupportedYarn(root, invoked, environment.npm_config_user_agent, environment.npm_execpath);
+    return commandFor(invoked, environment);
+  }
 
   const lockFiles: Array<{ readonly name: PackageManagerName; readonly file: string }> = [
     { name: "pnpm", file: "pnpm-lock.yaml" },
@@ -86,6 +125,7 @@ export function resolvePackageManager(
       `multiple package-manager lockfiles found: ${detected.join(", ")}`,
     );
   }
+  assertSupportedYarn(root, detected[0] ?? "npm");
   return commandFor(detected[0] ?? "npm", environment);
 }
 
@@ -101,6 +141,9 @@ export function buildInstallInvocation(
       break;
     case "pnpm":
       args.push("--offline", "--no-frozen-lockfile");
+      break;
+    case "yarn":
+    case "bun":
       break;
   }
   return { command: selection.command, args };

@@ -108,9 +108,30 @@ test("package manager selection rejects ambiguous and unsupported configuration"
             value === "deno@2"
               ? error.message === "unsupported package manager: deno@2"
               : error.message === "packageManager must name npm, pnpm, yarn or bun"
-          ),
+        ),
       );
     }
+    assert.throws(
+      () => packageManager.resolvePackageManager(root, { packageManager: "yarn@4.5.0" }, {}),
+      (error: { code?: string; message?: string }) =>
+        error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+    );
+    assert.throws(
+      () => packageManager.resolvePackageManager(root, {}, { npm_config_user_agent: "yarn/4.5.0 node/v24.19.0" }),
+      (error: { code?: string; message?: string }) =>
+        error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+    );
+    rmSync(join(root, "package-lock.json"));
+    rmSync(join(root, "yarn.lock"));
+    writeFileSync(join(root, ".yarnrc.yml"), "nodeLinker: pnp\n");
+    assert.throws(
+      () => packageManager.resolvePackageManager(root, { packageManager: "yarn" }, {}),
+      (error: { code?: string; message?: string }) =>
+        error.code === "PACKAGE_MANAGER_UNSUPPORTED"
+        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
