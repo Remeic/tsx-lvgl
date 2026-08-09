@@ -72,6 +72,7 @@ function main() {
     removeBuildInfo(stagingDist);
     cpSync(resolve(SDK_ROOT, "README.md"), resolve(stagingRoot, "README.md"));
     for (const name of PACKAGE_NAMES) copyInternalDist(name, stagingDist);
+    copyPackageManagerDetector(stagingDist);
     copyTypeScript(stagingDist);
     rewriteInternalImports(stagingDist);
 
@@ -148,6 +149,16 @@ function copyTypeScript(stagingDist) {
   cpSync(sourceRoot, resolve(stagingDist, "vendor/typescript"), { recursive: true });
 }
 
+function copyPackageManagerDetector(stagingDist) {
+  const sourceRoot = resolve(ROOT, "node_modules/package-manager-detector");
+  if (!existsSync(resolve(sourceRoot, "dist"))) {
+    throw new Error("missing package-manager-detector; run npm ci first");
+  }
+  const destination = resolve(stagingDist, "vendor/package-manager-detector");
+  cpSync(resolve(sourceRoot, "dist"), resolve(destination, "dist"), { recursive: true });
+  cpSync(resolve(sourceRoot, "LICENSE"), resolve(destination, "LICENSE"));
+}
+
 function rewriteInternalImports(stagingDist) {
   const replacements = {
     "@tsx-lvgl/core/jsx-runtime": ["core", "jsx-runtime.js"],
@@ -156,6 +167,9 @@ function rewriteInternalImports(stagingDist) {
     "@tsx-lvgl/sensors": ["sensors", "index.js"],
     "@tsx-lvgl/bundler": ["bundler", "index.js"],
     "@tsx-lvgl/device": ["device", "index.js"],
+    "package-manager-detector/detect": ["package-manager-detector", "dist", "detect.mjs"],
+    "package-manager-detector/commands": ["package-manager-detector", "dist", "commands.mjs"],
+    "package-manager-detector/constants": ["package-manager-detector", "dist", "constants.mjs"],
     typescript: ["typescript", "lib", "typescript.js"],
   };
 

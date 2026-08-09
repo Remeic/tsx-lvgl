@@ -1,14 +1,23 @@
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
+
+import type { DetectResult, DetectStrategy } from "package-manager-detector";
+import { resolveCommand } from "package-manager-detector/commands";
+import { LOCKS } from "package-manager-detector/constants";
+import { detect, getUserAgent } from "package-manager-detector/detect";
 
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+type SupportedAgent = "npm" | "pnpm" | "pnpm@6" | "yarn" | "bun";
 
 export interface PackageManagerSelection {
   readonly name: PackageManagerName;
-  readonly command: string;
-  readonly prefixArgs: readonly string[];
+  readonly agent: SupportedAgent;
+}
+
+export interface PackageManagerDetectionContext {
+  readonly userAgent?: string | null;
 }
 
 export interface InstallInvocation {
@@ -16,135 +25,129 @@ export interface InstallInvocation {
   readonly args: readonly string[];
 }
 
-type Environment = Readonly<Record<string, string | undefined>>;
-
 const PACKAGE_MANAGER_NAMES: readonly PackageManagerName[] = ["npm", "pnpm", "yarn", "bun"];
 
-function managerFromToken(value: string): PackageManagerName | undefined {
-  const normalized = value.trim().toLowerCase();
-  const firstToken = normalized.split(/\s/)[0]!;
-  const candidates = [firstToken.split("/")[0]!, basename(normalized)];
-  for (const name of PACKAGE_MANAGER_NAMES) {
-    if (candidates.some((candidate) => candidate === name || candidate.startsWith(`${name}-`) || candidate.startsWith(`${name}.`))) {
-      return name;
-    }
-  }
-  return undefined;
-}
-
-function managerFromOptionalToken(value: string | undefined): PackageManagerName | undefined {
-  return value === undefined ? undefined : managerFromToken(value);
-}
-
-function managerFromPackageField(value: unknown): PackageManagerName | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, "packageManager must name npm, pnpm, yarn or bun");
-  }
-  const name = value.split("@", 1)[0]!;
-  const manager = managerFromToken(name);
-  if (manager === undefined) {
-    throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, `unsupported package manager: ${value}`);
-  }
-  if (manager === "yarn" && yarnMajorFromPackageField(value) !== undefined && yarnMajorFromPackageField(value)! >= 2) {
-    throw unsupportedYarn();
-  }
-  return manager;
-}
-
-function yarnMajorFromPackageField(value: string): number | undefined {
-  const match = /^yarn@(\d+)(?:\.|$)/i.exec(value.trim());
-  return match === null ? undefined : Number.parseInt(match[1]!, 10);
-}
-
-function yarnMajorFromToken(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const match = /(?:^|\s)yarn\/(\d+)(?:\.|\s|$)/i.exec(value.trim());
-  return match === null ? undefined : Number.parseInt(match[1]!, 10);
-}
-
-function unsupportedYarn(): CliError {
-  return new CliError(
-    DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
-    "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
-  );
-}
-
-function assertSupportedYarn(
-  root: string,
-  manager: PackageManagerName,
-  ...tokens: readonly (string | undefined)[]
-): void {
-  if (manager !== "yarn") return;
-  if (tokens.some((token) => yarnMajorFromToken(token) !== undefined && yarnMajorFromToken(token)! >= 2)) {
-    throw unsupportedYarn();
-  }
-  if (existsSync(join(root, ".yarnrc.yml"))) throw unsupportedYarn();
-}
-
-function commandFor(name: PackageManagerName, environment: Environment): PackageManagerSelection {
-  const execPath = environment.npm_execpath;
-  if (execPath === undefined) return { name, command: name, prefixArgs: [] };
-  if (managerFromToken(execPath) !== name) return { name, command: name, prefixArgs: [] };
-  if (name === "bun") return { name, command: execPath, prefixArgs: [] };
-  return { name, command: process.execPath, prefixArgs: [execPath] };
-}
-
-export function resolvePackageManager(
+export async function resolvePackageManager(
   root: string,
   packageJson: Readonly<Record<string, unknown>>,
-  environment: Environment = process.env,
-): PackageManagerSelection {
-  const configured = managerFromPackageField(packageJson.packageManager);
-  if (configured !== undefined) {
-    assertSupportedYarn(root, configured, environment.npm_config_user_agent, environment.npm_execpath);
-    return commandFor(configured, environment);
+  context: PackageManagerDetectionContext = {},
+): Promise<PackageManagerSelection> {
+  const configuredValue = packageJson.packageManager;
+  if (configuredValue !== undefined) {
+    if (typeof configuredValue !== "string" || configuredValue.trim().length === 0) {
+      throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, "packageManager must name npm, pnpm, yarn or bun");
+    }
+    const configured = await detectAtRoot(root, packageJson, ["packageManager-field"]);
+    if (configured.result === null) {
+      throw new CliError(
+        DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
+        `unsupported package manager: ${configured.unknown ?? configuredValue}`,
+      );
+    }
+    return toSupportedSelection(root, configured.result, configuredValue);
   }
 
-  const invoked = managerFromOptionalToken(environment.npm_config_user_agent)
-    ?? managerFromOptionalToken(environment.npm_execpath);
-  if (invoked !== undefined) {
-    assertSupportedYarn(root, invoked, environment.npm_config_user_agent, environment.npm_execpath);
-    return commandFor(invoked, environment);
+  const invoked = context.userAgent === undefined ? getUserAgent() : context.userAgent;
+  if (invoked !== null) {
+    return toSupportedSelection(root, { name: invoked as DetectResult["name"], agent: invoked as DetectResult["agent"] }, invoked);
   }
 
-  const lockFiles: Array<{ readonly name: PackageManagerName; readonly file: string }> = [
-    { name: "pnpm", file: "pnpm-lock.yaml" },
-    { name: "yarn", file: "yarn.lock" },
-    { name: "bun", file: "bun.lock" },
-    { name: "bun", file: "bun.lockb" },
-    { name: "npm", file: "package-lock.json" },
-  ];
-  const detected = lockFiles
-    .filter(({ file }) => existsSync(join(root, file)))
-    .map(({ name }) => name)
-    .filter((name, index, names) => names.indexOf(name) === index);
-  if (detected.length > 1) {
+  const lockManagers = detectLockfileManagers(root);
+  if (lockManagers.length > 1) {
     throw new CliError(
       DIAGNOSTIC_CODES.PACKAGE_MANAGER_AMBIGUOUS,
-      `multiple package-manager lockfiles found: ${detected.join(", ")}`,
+      `multiple package-manager lockfiles found: ${lockManagers.join(", ")}`,
     );
   }
-  assertSupportedYarn(root, detected[0] ?? "npm");
-  return commandFor(detected[0] ?? "npm", environment);
+  if (lockManagers.length === 1) {
+    const detected = await detectAtRoot(root, packageJson, ["lockfile"]);
+    if (detected.result !== null) return toSupportedSelection(root, detected.result, lockManagers[0]!);
+    const name = lockManagers[0]!;
+    return { name, agent: name };
+  }
+
+  return { name: "npm", agent: "npm" };
 }
 
 export function buildInstallInvocation(
   selection: PackageManagerSelection,
   hasNpmLock: boolean,
+  bunCacheDirectory?: string,
 ): InstallInvocation {
-  const args = [...selection.prefixArgs, "install", "--ignore-scripts"];
+  const flags = ["--ignore-scripts"];
   switch (selection.name) {
     case "npm":
-      args.push("--no-audit", "--no-fund", "--offline");
-      if (hasNpmLock) args.push("--package-lock=false");
+      flags.push("--no-audit", "--no-fund", "--offline");
+      if (hasNpmLock) flags.push("--package-lock=false");
       break;
     case "pnpm":
-      args.push("--offline", "--no-frozen-lockfile");
+      flags.push("--offline", "--no-frozen-lockfile");
       break;
     case "yarn":
+      break;
     case "bun":
+      if (bunCacheDirectory !== undefined) flags.push("--cache-dir", bunCacheDirectory);
       break;
   }
-  return { command: selection.command, args };
+  const invocation = resolveCommand(selection.agent, "install", flags);
+  if (invocation === null) {
+    throw new CliError(
+      DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
+      `package manager cannot install dependencies: ${selection.name}`,
+    );
+  }
+  return invocation;
+}
+
+async function detectAtRoot(
+  root: string,
+  packageJson: Readonly<Record<string, unknown>>,
+  strategies: readonly DetectStrategy[],
+): Promise<{ readonly result: DetectResult | null; readonly unknown?: string }> {
+  let unknown: string | undefined;
+  const result = await detect({
+    cwd: root,
+    stopDir: root,
+    strategies: [...strategies],
+    packageJsonParser: () => packageJson,
+    onUnknown: (value) => {
+      unknown = value;
+      return null;
+    },
+  });
+  return { result, ...(unknown === undefined ? {} : { unknown }) };
+}
+
+function detectLockfileManagers(root: string): readonly PackageManagerName[] {
+  return PACKAGE_MANAGER_NAMES.filter((name) =>
+    Object.entries(LOCKS).some(([file, manager]) => manager === name && existsSync(join(root, file))),
+  );
+}
+
+function toSupportedSelection(
+  root: string,
+  result: DetectResult,
+  source: string,
+): PackageManagerSelection {
+  if (!isSupportedName(result.name)) {
+    throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, `unsupported package manager: ${source}`);
+  }
+  if (result.agent === "yarn@berry" || (result.name === "yarn" && existsSync(join(root, ".yarnrc.yml")))) {
+    throw new CliError(
+      DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED,
+      "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
+    );
+  }
+  if (!isSupportedAgent(result.agent)) {
+    throw new CliError(DIAGNOSTIC_CODES.PACKAGE_MANAGER_UNSUPPORTED, `unsupported package manager: ${source}`);
+  }
+  return { name: result.name, agent: result.agent };
+}
+
+function isSupportedName(name: string): name is PackageManagerName {
+  return PACKAGE_MANAGER_NAMES.some((candidate) => candidate === name);
+}
+
+function isSupportedAgent(agent: string): agent is SupportedAgent {
+  return agent === "npm" || agent === "pnpm" || agent === "pnpm@6" || agent === "yarn" || agent === "bun";
 }

@@ -130,7 +130,7 @@ The application commands use the package manager declared in the app's
 `package.json`, selected by its lockfile or inherited from the invoking package
 manager. The framework checkout commands above remain npm workspace commands.
 Yarn support is limited to Yarn Classic v1 because the consumer contract expects
-`node_modules`; Yarn Berry requires an explicit `node-modules` linker configuration.
+`node_modules`; Yarn Berry/PnP is not supported by this CLI.
 
 The generated `.tsx-lvgl/framework.lock.json` records the framework source SHA,
 artifact version, SHA-256 and byte length. `sync` installs that exact artifact;

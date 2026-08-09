@@ -99,7 +99,7 @@ async function main(): Promise<void> {
       case "create": {
         const target = parsed.positional[0];
         if (target === undefined) throw usageError("create requires a target directory");
-        const result = createProject(target, parsed.artifact);
+        const result = await createProject(target, parsed.artifact);
         emitSuccess(parsed.json, "CREATE_OK", {
           project: basename(result.root),
           artifact: result.lock.artifact.file,
@@ -108,12 +108,12 @@ async function main(): Promise<void> {
         return;
       }
       case "sync": {
-        const result = syncProject(process.cwd());
+        const result = await syncProject(process.cwd());
         emitSuccess(parsed.json, "SYNC_OK", { version: result.lock.version, sourceSha: result.lock.sourceSha });
         return;
       }
       case "update": {
-        const result = updateProject(process.cwd(), parsed.source);
+        const result = await updateProject(process.cwd(), parsed.source);
         emitSuccess(parsed.json, "UPDATE_OK", { version: result.lock.version, sourceSha: result.lock.sourceSha });
         return;
       }

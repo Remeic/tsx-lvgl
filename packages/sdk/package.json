@@ -30,6 +30,7 @@
     "@tsx-lvgl/device": "0.1.0",
     "@tsx-lvgl/runtime": "0.1.0",
     "@tsx-lvgl/sensors": "0.1.0",
+    "package-manager-detector": "1.8.0",
     "typescript": "5.9.2"
   },
   "bundledDependencies": [
@@ -38,6 +39,7 @@
     "@tsx-lvgl/device",
     "@tsx-lvgl/runtime",
     "@tsx-lvgl/sensors",
+    "package-manager-detector",
     "typescript"
   ]
 }

@@ -48,6 +48,11 @@ lock and never resolve a newer source. The package remains private,
 so `npm pack` is a deliberate local distribution action and `npm publish` is
 not part of the workflow.
 
+Package-manager discovery and base command grammar delegate to the pinned,
+zero-dependency `package-manager-detector` library. The SDK adapter owns only
+product policy: supported-manager filtering, ambiguous-lock diagnostics,
+offline/script-safety flags and Bun's fresh cache for same-version artifacts.
+
 ### `@tsx-lvgl/core`
 
 Owns the small TSX vocabulary and immutable VNode model. The widget vocabulary

@@ -5,161 +5,147 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 
+type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+type SupportedAgent = "npm" | "pnpm" | "pnpm@6" | "yarn" | "bun";
+interface Selection {
+  readonly name: PackageManagerName;
+  readonly agent: SupportedAgent;
+}
+
 const require = createRequire(import.meta.url);
 const packageManager = require(resolve(process.cwd(), "packages/sdk/dist/package-manager.js")) as {
-  buildInstallInvocation: (selection: {
-    name: "npm" | "pnpm" | "yarn" | "bun";
-    command: string;
-    prefixArgs: readonly string[];
-  }, hasNpmLock: boolean) => { command: string; args: readonly string[] };
+  buildInstallInvocation: (
+    selection: Selection,
+    hasNpmLock: boolean,
+    bunCacheDirectory?: string,
+  ) => { command: string; args: readonly string[] };
   resolvePackageManager: (
     root: string,
     packageJson: Readonly<Record<string, unknown>>,
-    environment?: Readonly<Record<string, string | undefined>>,
-  ) => { name: "npm" | "pnpm" | "yarn" | "bun"; command: string; prefixArgs: readonly string[] };
+    context?: { readonly userAgent?: string | null },
+  ) => Promise<Selection>;
 };
 
-test("package manager selection honors package.json, invocation and lockfile seams", () => {
+test("package manager selection delegates package fields, invocation and lockfiles to the detector", async () => {
   const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-package-manager-"));
   try {
+    writeFileSync(join(root, "package.json"), "{}\n");
     assert.deepEqual(
-      packageManager.resolvePackageManager(root, { packageManager: "pnpm@10.0.0" }, {}),
-      { name: "pnpm", command: "pnpm", prefixArgs: [] },
+      await packageManager.resolvePackageManager(root, { packageManager: "pnpm@10.0.0" }, { userAgent: null }),
+      { name: "pnpm", agent: "pnpm" },
     );
-    const yarn = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_config_user_agent: "  yarn/1.22.22 node/v24.19.0  ", npm_execpath: "/opt/yarn/bin/yarn.js" },
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, { packageManager: "pnpm@6.35.1" }, { userAgent: null }),
+      { name: "pnpm", agent: "pnpm@6" },
     );
-    assert.deepEqual(yarn, { name: "yarn", command: process.execPath, prefixArgs: ["/opt/yarn/bin/yarn.js"] });
-    const pnpmFromAgentOnly = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_config_user_agent: "pnpm/10.0.0" },
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, {}, { userAgent: "yarn" }),
+      { name: "yarn", agent: "yarn" },
     );
-    assert.deepEqual(pnpmFromAgentOnly, { name: "pnpm", command: "pnpm", prefixArgs: [] });
-    const pnpmFromWhitespaceAgentOnly = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_config_user_agent: "  pnpm/10.0.0  " },
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, {}, { userAgent: "bun" }),
+      { name: "bun", agent: "bun" },
     );
-    assert.deepEqual(pnpmFromWhitespaceAgentOnly, { name: "pnpm", command: "pnpm", prefixArgs: [] });
-    const bun = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_config_user_agent: "bun/1.3.14 npm/? node/v24.3.0", npm_execpath: "/opt/bun/bin/bun" },
+    assert.deepEqual(
+      await packageManager.resolvePackageManager(root, {}, { userAgent: null }),
+      { name: "npm", agent: "npm" },
     );
-    assert.deepEqual(bun, { name: "bun", command: "/opt/bun/bin/bun", prefixArgs: [] });
-    const pnpmFromExecPath = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_execpath: "/opt/pnpm/bin/pnpm.cjs" },
-    );
-    assert.deepEqual(pnpmFromExecPath, { name: "pnpm", command: process.execPath, prefixArgs: ["/opt/pnpm/bin/pnpm.cjs"] });
-    const npmFromExecPath = packageManager.resolvePackageManager(
-      root,
-      {},
-      { npm_execpath: "/opt/npm/bin/npm-cli.js" },
-    );
-    assert.deepEqual(npmFromExecPath, { name: "npm", command: process.execPath, prefixArgs: ["/opt/npm/bin/npm-cli.js"] });
-    const configuredWithForeignExecPath = packageManager.resolvePackageManager(
-      root,
-      { packageManager: "pnpm@10.0.0" },
-      { npm_execpath: "/opt/npm/bin/npm-cli.js" },
-    );
-    assert.deepEqual(configuredWithForeignExecPath, { name: "pnpm", command: "pnpm", prefixArgs: [] });
 
-    assert.deepEqual(packageManager.resolvePackageManager(root, {}, {}), { name: "npm", command: "npm", prefixArgs: [] });
     writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "pnpm");
+    assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "pnpm");
     rmSync(join(root, "pnpm-lock.yaml"));
     writeFileSync(join(root, "yarn.lock"), "\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "yarn");
+    assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "yarn");
     rmSync(join(root, "yarn.lock"));
     writeFileSync(join(root, "bun.lock"), "\n");
     writeFileSync(join(root, "bun.lockb"), "\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "bun");
+    assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "bun");
     rmSync(join(root, "bun.lock"));
     rmSync(join(root, "bun.lockb"));
     writeFileSync(join(root, "package-lock.json"), "{}\n");
-    assert.equal(packageManager.resolvePackageManager(root, {}, {}).name, "npm");
+    assert.equal((await packageManager.resolvePackageManager(root, {}, { userAgent: null })).name, "npm");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("package manager selection rejects ambiguous and unsupported configuration", () => {
+test("package manager selection preserves stable diagnostics around the detector", async () => {
   const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-package-manager-"));
   try {
+    writeFileSync(join(root, "package.json"), "{}\n");
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     writeFileSync(join(root, "yarn.lock"), "\n");
-    assert.throws(
-      () => packageManager.resolvePackageManager(root, {}, {}),
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, {}, { userAgent: null }),
       (error: { code?: string; message?: string }) =>
         error.code === "PACKAGE_MANAGER_AMBIGUOUS"
-        && error.message === "multiple package-manager lockfiles found: yarn, npm",
+        && error.message === "multiple package-manager lockfiles found: npm, yarn",
     );
     for (const value of [null, 42, "", " ", "deno@2"]) {
-      assert.throws(
-        () => packageManager.resolvePackageManager(root, { packageManager: value }, {}),
+      await assert.rejects(
+        packageManager.resolvePackageManager(root, { packageManager: value }, { userAgent: null }),
         (error: { code?: string; message?: string }) =>
           error.code === "PACKAGE_MANAGER_UNSUPPORTED"
           && (
             value === "deno@2"
               ? error.message === "unsupported package manager: deno@2"
               : error.message === "packageManager must name npm, pnpm, yarn or bun"
-        ),
+          ),
       );
     }
-    assert.throws(
-      () => packageManager.resolvePackageManager(root, { packageManager: "yarn@4.5.0" }, {}),
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, { packageManager: "yarn@4.5.0" }, { userAgent: null }),
       (error: { code?: string; message?: string }) =>
         error.code === "PACKAGE_MANAGER_UNSUPPORTED"
-        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
     );
-    assert.throws(
-      () => packageManager.resolvePackageManager(root, {}, { npm_config_user_agent: "yarn/4.5.0 node/v24.19.0" }),
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, {}, { userAgent: "deno" }),
       (error: { code?: string; message?: string }) =>
         error.code === "PACKAGE_MANAGER_UNSUPPORTED"
-        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+        && error.message === "unsupported package manager: deno",
     );
     rmSync(join(root, "package-lock.json"));
     rmSync(join(root, "yarn.lock"));
     writeFileSync(join(root, ".yarnrc.yml"), "nodeLinker: pnp\n");
-    assert.throws(
-      () => packageManager.resolvePackageManager(root, { packageManager: "yarn" }, {}),
+    await assert.rejects(
+      packageManager.resolvePackageManager(root, { packageManager: "yarn" }, { userAgent: null }),
       (error: { code?: string; message?: string }) =>
         error.code === "PACKAGE_MANAGER_UNSUPPORTED"
-        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1) or configure node_modules linking",
+        && error.message === "Yarn Berry (v2+) is not supported; use Yarn Classic (v1), npm, pnpm or Bun",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("install invocation uses manager-specific flags without leaking npm lock handling", () => {
+test("install invocation comes from the detector and adds only TSX-LVGL safety flags", () => {
   assert.deepEqual(
-    packageManager.buildInstallInvocation({ name: "npm", command: "npm", prefixArgs: [] }, true),
+    packageManager.buildInstallInvocation({ name: "npm", agent: "npm" }, true),
     {
       command: "npm",
-      args: ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline", "--package-lock=false"],
+      args: ["i", "--ignore-scripts", "--no-audit", "--no-fund", "--offline", "--package-lock=false"],
     },
   );
   assert.deepEqual(
-    packageManager.buildInstallInvocation({ name: "npm", command: "npm", prefixArgs: [] }, false),
-    { command: "npm", args: ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"] },
+    packageManager.buildInstallInvocation({ name: "npm", agent: "npm" }, false),
+    { command: "npm", args: ["i", "--ignore-scripts", "--no-audit", "--no-fund", "--offline"] },
   );
   assert.deepEqual(
-    packageManager.buildInstallInvocation({ name: "pnpm", command: "pnpm", prefixArgs: [] }, true),
-    { command: "pnpm", args: ["install", "--ignore-scripts", "--offline", "--no-frozen-lockfile"] },
+    packageManager.buildInstallInvocation({ name: "pnpm", agent: "pnpm" }, true),
+    { command: "pnpm", args: ["i", "--ignore-scripts", "--offline", "--no-frozen-lockfile"] },
   );
   assert.deepEqual(
-    packageManager.buildInstallInvocation({ name: "yarn", command: "yarn", prefixArgs: [] }, false),
+    packageManager.buildInstallInvocation({ name: "pnpm", agent: "pnpm@6" }, false),
+    { command: "pnpm", args: ["i", "--ignore-scripts", "--offline", "--no-frozen-lockfile"] },
+  );
+  assert.deepEqual(
+    packageManager.buildInstallInvocation({ name: "yarn", agent: "yarn" }, false),
     { command: "yarn", args: ["install", "--ignore-scripts"] },
   );
   assert.deepEqual(
-    packageManager.buildInstallInvocation({ name: "bun", command: "bun", prefixArgs: [] }, false),
-    { command: "bun", args: ["install", "--ignore-scripts"] },
+    packageManager.buildInstallInvocation({ name: "bun", agent: "bun" }, false, "/tmp/tsx-lvgl-bun-cache"),
+    { command: "bun", args: ["install", "--ignore-scripts", "--cache-dir", "/tmp/tsx-lvgl-bun-cache"] },
   );
   assert.equal(existsSync(resolve(process.cwd(), "packages/sdk/dist/package-manager.js")), true);
 });

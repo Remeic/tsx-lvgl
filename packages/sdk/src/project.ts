@@ -100,7 +100,10 @@ interface SourcePackResult {
   readonly byteLength: number;
 }
 
-export function createProject(target: string, artifactArgument?: string): { readonly root: string; readonly lock: FrameworkLock } {
+export async function createProject(
+  target: string,
+  artifactArgument?: string,
+): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
   const root = resolve(target);
   if (existsSync(root) && readdirSync(root).length > 0) {
     throw new CliError(DIAGNOSTIC_CODES.PROJECT_EXISTS, "target directory is not empty");
@@ -150,10 +153,10 @@ export function createProject(target: string, artifactArgument?: string): { read
   const generatedArtifact = artifactArgument === undefined;
   const artifactPath = generatedArtifact ? packInstalledSdk() : resolve(artifactArgument);
   try {
-    return withProjectInstallTransaction(root, () => {
+    return await withProjectInstallTransaction(root, async () => {
       const lock = installArtifactIntoProject(root, artifactPath);
       writeSdkDependency(root, lock);
-      runPackageManagerInstall(root, resolveArtifactPath(root, lock));
+      await runPackageManagerInstall(root, resolveArtifactPath(root, lock));
       verifyInstalledSdk(root, lock);
       return { root, lock };
     });
@@ -162,18 +165,18 @@ export function createProject(target: string, artifactArgument?: string): { read
   }
 }
 
-export function syncProject(root: string): { readonly lock: FrameworkLock } {
+export async function syncProject(root: string): Promise<{ readonly lock: FrameworkLock }> {
   const project = readProjectFiles(root);
   verifyArtifact(project);
-  return withProjectInstallTransaction(project.root, () => {
+  return withProjectInstallTransaction(project.root, async () => {
     writeSdkDependency(project.root, project.lock);
-    runPackageManagerInstall(project.root, project.artifactPath);
+    await runPackageManagerInstall(project.root, project.artifactPath);
     verifyInstalledSdk(project.root, project.lock);
     return { lock: project.lock };
   });
 }
 
-export function updateProject(root: string, explicitSource?: string): { readonly lock: FrameworkLock } {
+export async function updateProject(root: string, explicitSource?: string): Promise<{ readonly lock: FrameworkLock }> {
   const projectRoot = resolve(root);
   const sourceRoot = resolveFrameworkSource(explicitSource);
   const tempRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-update-"));
@@ -194,10 +197,10 @@ export function updateProject(root: string, explicitSource?: string): { readonly
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
-    return withProjectInstallTransaction(projectRoot, () => {
+    return await withProjectInstallTransaction(projectRoot, async () => {
       const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
       writeSdkDependency(projectRoot, lock);
-      runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
+      await runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
       verifyInstalledSdk(projectRoot, lock);
       return { lock };
     });
@@ -541,7 +544,7 @@ interface FileSnapshot {
   readonly bytes?: Buffer;
 }
 
-function withProjectInstallTransaction<T>(root: string, action: () => T): T {
+async function withProjectInstallTransaction<T>(root: string, action: () => Promise<T>): Promise<T> {
   const rollbackRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-install-rollback-"));
   const snapshotPaths = [
     "package.json",
@@ -565,7 +568,7 @@ function withProjectInstallTransaction<T>(root: string, action: () => T): T {
   }
 
   try {
-    const result = action();
+    const result = await action();
     rmSync(rollbackRoot, { recursive: true, force: true });
     return result;
   } catch (error) {
@@ -628,13 +631,22 @@ function writeSdkDependency(root: string, lock: FrameworkLock): void {
   );
 }
 
-function runPackageManagerInstall(root: string, artifactPath: string): void {
+async function runPackageManagerInstall(root: string, artifactPath: string): Promise<void> {
   const packageJson = readJson(join(root, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
-  const packageManager = resolvePackageManager(root, packageJson);
+  const packageManager = await resolvePackageManager(root, packageJson);
   const packageLockPath = join(root, "package-lock.json");
   const hasPackageLock = existsSync(packageLockPath);
-  const invocation = buildInstallInvocation(packageManager, hasPackageLock);
-  const result = spawnSync(invocation.command, invocation.args, { cwd: root, encoding: "utf8", stdio: "pipe" });
+  const bunCacheRoot = packageManager.name === "bun"
+    ? mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-bun-cache-"))
+    : undefined;
+  const invocation = buildInstallInvocation(packageManager, hasPackageLock, bunCacheRoot);
+  const result = (() => {
+    try {
+      return spawnSync(invocation.command, invocation.args, { cwd: root, encoding: "utf8", stdio: "pipe" });
+    } finally {
+      if (bunCacheRoot !== undefined) rmSync(bunCacheRoot, { recursive: true, force: true });
+    }
+  })();
   const errorCode = result.error !== undefined && "code" in result.error ? result.error.code : undefined;
   if (errorCode === "ENOENT") {
     throw new CliError(
@@ -836,7 +848,7 @@ function consumerAgentsTemplate(): string {
     "## Commands",
     "",
     `- ${tick}tsx-lvgl create <directory> --artifact <sdk.tgz>${tick} — scaffold a new app during bootstrap.`,
-    `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, Yarn Classic v1 or bun) to run these scripts. Yarn Berry requires an explicit node_modules linker. For example: ${tick}<package-manager> run sync${tick}.`,
+    `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, Yarn Classic v1 or bun) to run these scripts. Yarn Berry/PnP is not supported by this CLI. For example: ${tick}<package-manager> run sync${tick}.`,
     `- ${tick}<package-manager> run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
     `- ${tick}<package-manager> run update${tick} — explicitly package a configured framework checkout and update the pin.`,
     `- ${tick}<package-manager> run dev${tick} — run one deterministic headless kernel check.`,
