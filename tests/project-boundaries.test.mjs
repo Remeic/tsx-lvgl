@@ -130,6 +130,12 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   leakingPackage.workspaces = ["packages/*"];
   writeFileSync(packagePath, `${JSON.stringify(leakingPackage)}\n`);
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
+  for (const field of ["compilerOptions", "paths"]) {
+    const candidate = JSON.parse(consumerPackage);
+    candidate[field] = {};
+    writeFileSync(packagePath, `${JSON.stringify(candidate)}\n`);
+    assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
+  }
   writeFileSync(packagePath, consumerPackage);
   rmSync(installed, { recursive: true });
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
@@ -141,16 +147,27 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
   writeFileSync(installedPackagePath, installedPackage);
   const provenancePath = join(installed, "provenance.json");
-  const provenance = JSON.parse(readFileSync(provenancePath));
-  provenance.sourceDirty = true;
-  writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
+  const installedPackageValue = JSON.parse(installedPackage);
+  installedPackageValue.version = "wrong";
+  writeFileSync(installedPackagePath, `${JSON.stringify(installedPackageValue)}\n`);
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
+  writeFileSync(installedPackagePath, installedPackage);
+  for (const field of ["packageName", "version", "sourceSha", "sourceDirty"]) {
+    const provenance = JSON.parse(readFileSync(provenancePath));
+    provenance[field] = field === "sourceDirty" ? true : "wrong";
+    writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
+    assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
+  }
   cpSync(installedSnapshot, installed, { recursive: true, force: true });
   writeFileSync(tsconfigPath, '{ invalid json');
+  assertCode(() => checkProject(root), DIAGNOSTIC_CODES.TYPECHECK_FAILED);
+  writeFileSync(tsconfigPath, '{"compilerOptions":{},"include":1}\n');
   assertCode(() => checkProject(root), DIAGNOSTIC_CODES.TYPECHECK_FAILED);
   rmSync(tsconfigPath);
   assertCode(() => checkProject(root), DIAGNOSTIC_CODES.CONFIG_NOT_FOUND);
   writeFileSync(tsconfigPath, tsconfig);
+  writeFileSync(entryPath, "const value: string = 1; export default value as any;\n");
+  assertCode(() => checkProject(root), DIAGNOSTIC_CODES.TYPECHECK_FAILED);
   writeFileSync(tsconfigPath, `${tsconfig}\n// paths\n`);
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
   writeFileSync(tsconfigPath, tsconfig);
