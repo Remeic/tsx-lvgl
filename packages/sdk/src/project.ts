@@ -111,12 +111,15 @@ export async function createProject(
     throw new CliError(DIAGNOSTIC_CODES.PROJECT_EXISTS, "target directory is not empty");
   }
 
-  let generatedArtifact = false;
-  let artifactPath: string | undefined;
+  let cleanupGeneratedArtifact: () => void = () => {};
   try {
     scaffoldProject(root);
-    generatedArtifact = artifactArgument === undefined;
-    artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument!);
+    const artifactPath = artifactArgument === undefined
+      ? packArtifact()
+      : resolve(artifactArgument);
+    if (artifactArgument === undefined) {
+      cleanupGeneratedArtifact = () => rmSync(dirname(artifactPath), { recursive: true, force: true });
+    }
     const installArtifact = artifactPath;
     return await withInstallTransaction(root, async () => {
       const lock = adapters.artifactStore.install(root, installArtifact);
@@ -127,7 +130,7 @@ export async function createProject(
     restoreCreateTarget(root, targetExisted);
     throw error;
   } finally {
-    if (generatedArtifact && artifactPath !== undefined) rmSync(dirname(artifactPath), { recursive: true, force: true });
+    cleanupGeneratedArtifact();
   }
 }
 
