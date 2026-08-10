@@ -39,3 +39,21 @@ test("failed install restores all prior dependency and metadata state atomically
   assert.equal(await readFile(unrelatedDependency, "utf8"), "preserve me\n");
   await assert.rejects(readFile(join(root, "node_modules", "new-dependency", "marker.txt")), { code: "ENOENT" });
 });
+
+test("transaction removes newly-created dependency state after a failed first install", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-transaction-empty-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {
+      await mkdir(join(root, "node_modules", "temporary"), { recursive: true });
+      await writeFile(join(root, "node_modules", "temporary", "marker.txt"), "new\n");
+      await writeFile(join(root, "package.json"), "{\"dependencies\":{\"temporary\":\"1\"}}\n");
+      throw new Error("first install failed");
+    }),
+    /first install failed/,
+  );
+  await assert.rejects(readFile(join(root, "node_modules", "temporary", "marker.txt")), { code: "ENOENT" });
+  await assert.rejects(readFile(join(root, "package.json")), { code: "ENOENT" });
+  const result = await withInstallTransaction(root, async () => "committed");
+  assert.equal(result, "committed");
+});

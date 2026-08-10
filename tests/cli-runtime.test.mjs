@@ -35,6 +35,7 @@ test("CLI parser normalizes supported options and rejects malformed input", () =
   assert.deepEqual(parseArgs(["create", "app", "--artifact", "sdk.tgz", "--json", "--"]), { command: "create", positional: ["app"], artifact: "sdk.tgz", json: true });
   assert.equal(parseArgs([]).command, "help");
   assert.equal(parseArgs(["sync", "-h"]).command, "help");
+  assert.deepEqual(parseArgs(["create", "--artifact", "sdk.tgz", "--source", "framework", "--help"]), { command: "help", positional: [], json: false, artifact: "sdk.tgz", source: "framework" });
   assert.throws(() => parseArgs(["create", "--artifact"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["update", "--source", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--wat"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
@@ -77,4 +78,10 @@ test("CLI runtime emits help, doctor failures, usage failures and operation erro
   assert.equal(await runCli(["sync"], "/cwd", operations({ syncProject: async () => { throw new CliError(DIAGNOSTIC_CODES.CHECK_FAILED, "nope"); } }), output.writer), 1);
   assert.match(output.errors[0], /CHECK_FAILED/);
   assert.match(output.errors[1], /Usage:/);
+  output = recorder();
+  assert.equal(await runCli(["sync"], "/cwd", operations({ syncProject: async () => { throw new Error("unexpected"); } }), output.writer), 1);
+  assert.match(output.errors[0], /unexpected/);
+  output = recorder();
+  assert.equal(await runCli(["sync"], "/cwd", operations({ syncProject: async () => { throw "primitive"; } }), output.writer), 1);
+  assert.match(output.errors[0], /primitive/);
 });

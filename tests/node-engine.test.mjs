@@ -7,6 +7,7 @@ import test from "node:test";
 import { DOCTOR_CHECK_IDS, DOCTOR_SUCCESS_CODES } from "../packages/sdk/dist/doctor.js";
 import { doctorProject } from "../packages/sdk/dist/project.js";
 import { NODE_ENGINE_RANGE } from "../packages/sdk/dist/node-engine.js";
+import { validateNodeEngine } from "../packages/sdk/dist/node-engine.js";
 
 test("doctor applies the declared Node SemVer range to injected versions", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-node-engine-"));
@@ -61,4 +62,14 @@ test("doctor applies the declared Node SemVer range to injected versions", async
       diagnosticCode: "SDK_UNSUPPORTED_NODE",
     },
   );
+});
+
+test("Node contract diagnostics distinguish every SDK and consumer declaration failure", () => {
+  for (const [subject, code] of [["consumer", "NODE_ENGINE_MISSING"], ["sdk", "SDK_NODE_ENGINE_MISSING"]]) {
+    assert.throws(() => validateNodeEngine({}, "24.19.0", subject), { code });
+  }
+  for (const [subject, code] of [["consumer", "NODE_ENGINE_INVALID"], ["sdk", "SDK_NODE_ENGINE_INVALID"]]) {
+    assert.throws(() => validateNodeEngine({ engines: { node: "not a range" } }, "24.19.0", subject), { code });
+  }
+  assert.throws(() => validateNodeEngine({ engines: [] }, "24.19.0"), { code: "NODE_ENGINE_MISSING" });
 });
