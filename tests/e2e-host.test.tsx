@@ -25,6 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const shakeFaceSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-a.tsx"), "utf8");
 const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
+const embeddedShakeFaceDirectory = join(repoRoot, "examples/esp-idf/runtime_port_probe/main");
 
 const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
 
@@ -35,6 +36,18 @@ function compileShakeFace(generation: number): BundleOutput {
     bundleId: "shakeface",
     boardId: BOARD_ID,
     generation,
+  });
+}
+
+/** Mirrors `scripts/bundle-app.mjs`, which publishes the SDK JSX runtime into the embedded generation-one app. */
+function compileEmbeddedShakeFace(generation: number): BundleOutput {
+  return compileTsxBundle({
+    fileName: "ShakeFace.tsx",
+    source: shakeFaceSource,
+    bundleId: "shakeface",
+    boardId: BOARD_ID,
+    generation,
+    jsxImportSource: "@tsx-lvgl/sdk",
   });
 }
 
@@ -203,4 +216,13 @@ test("compiling ShakeFace twice is byte-for-byte and manifest-for-manifest deter
   const second = compileShakeFace(1);
   assert.deepEqual([...first.bytes], [...second.bytes]);
   assert.deepEqual(first.manifest, second.manifest);
+});
+
+test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {
+  const generated = compileEmbeddedShakeFace(1);
+  assert.equal(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.js"), "utf8"), generated.code);
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.manifest.json"), "utf8")),
+    generated.manifest,
+  );
 });

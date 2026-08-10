@@ -7,18 +7,18 @@ const SHAKE_COOLDOWN_MS = 700;
 function ShakeFace() {
     const [happy, setHappy] = (0, sdk_1.useState)(true);
     const [lastShakeAt, setLastShakeAt] = (0, sdk_1.useState)(-Infinity);
-    const sample = (0, sdk_1.useMotion)();
+    const motion = (0, sdk_1.useMotion)();
     (0, sdk_1.useEffect)(() => {
-        if (sample === undefined || sample.status !== "ok" || sample.value === undefined)
+        if (motion.state.status !== "ready" && motion.state.status !== "stale")
             return;
-        if (!(0, sdk_1.isShake)(sample.value))
+        if (!(0, sdk_1.isShake)(motion.state.value))
             return;
-        if (sample.sampledAtMs - lastShakeAt < SHAKE_COOLDOWN_MS)
+        if (motion.state.observedAtMs - lastShakeAt < SHAKE_COOLDOWN_MS)
             return;
-        setLastShakeAt(sample.sampledAtMs);
+        setLastShakeAt(motion.state.observedAtMs);
         setHappy((current) => !current);
-    }, [sample]);
-    const imuUnavailable = sample !== undefined && sample.status !== "ok";
+    }, [motion.state]);
+    const imuUnavailable = motion.state.status === "unavailable" || motion.state.status === "error" || motion.state.status === "unsupported";
     const status = imuUnavailable
         ? "IMU non disponibile"
         : happy
