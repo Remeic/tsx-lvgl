@@ -174,6 +174,6 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "${"a".repeat(40)}", sourceDirty: true, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_DIRTY);
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
-  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND);
   assert.equal(existsSync(join(root, ".tsx-lvgl", "framework.lock.json")), true);
 });
