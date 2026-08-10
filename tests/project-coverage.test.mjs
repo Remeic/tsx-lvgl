@@ -269,3 +269,15 @@ test("failed create restores a retryable target to its pre-command state", async
   await assertAsyncCode(() => createProject(existingTarget, invalidArtifact), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
   assert.deepEqual(readdirSync(existingTarget), []);
 });
+
+test("failed self-pack restores the target before an artifact exists", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-create-pack-failure-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const target = join(sandbox, "app");
+
+  await assert.rejects(
+    createProject(target, undefined, () => { throw new Error("installed SDK pack failed"); }),
+    /installed SDK pack failed/,
+  );
+  assert.equal(existsSync(target), false);
+});
