@@ -25,6 +25,7 @@ import {
   VALIDATION_GIT_SHA_ENV,
   VALIDATION_GIT_STATE_ENV,
 } from "../scripts/validation-context.mjs";
+import { emitMutationOutput } from "../scripts/build-mutation-output.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,6 +69,50 @@ test("test output preparation rejects any cleanup target other than test-dist", 
     () => resolveTestOutputDirectory("relative/repository"),
     /repository root must be absolute/,
   );
+});
+
+test("mutation output re-emits JavaScript without changing the strict declaration snapshot", async (t) => {
+  const mutationRoot = await mkdtemp(join(tmpdir(), "tsx-lvgl-mutation-output-"));
+  t.after(async () => {
+    await rm(mutationRoot, { recursive: true, force: true });
+  });
+  const sourceRoot = join(mutationRoot, "packages", "core", "src");
+  const outputRoot = join(mutationRoot, "packages", "core", "dist");
+  await Promise.all([
+    mkdir(sourceRoot, { recursive: true }),
+    mkdir(outputRoot, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(sourceRoot, "index.ts"), 'export const Screen = "instrumented";\n'),
+    writeFile(join(outputRoot, "index.d.ts"), 'export declare const Screen = "Screen";\n'),
+  ]);
+  for (const packageName of ["sensors", "runtime", "bundler", "device", "sdk"]) {
+    await Promise.all([
+      mkdir(join(mutationRoot, "packages", packageName, "src"), { recursive: true }),
+      mkdir(join(mutationRoot, "packages", packageName, "dist"), { recursive: true }),
+    ]);
+  }
+
+  const emitted = emitMutationOutput(mutationRoot);
+
+  assert.deepEqual(emitted, [join(outputRoot, "index.js")]);
+  assert.match(await readFile(join(outputRoot, "index.js"), "utf8"), /instrumented/);
+  assert.doesNotMatch(await readFile(join(outputRoot, "index.js"), "utf8"), /exports\./);
+  assert.equal(
+    await readFile(join(outputRoot, "index.d.ts"), "utf8"),
+    'export declare const Screen = "Screen";\n',
+  );
+});
+
+test("Stryker dry run uses the declaration-preserving mutation harness", async () => {
+  const [manifest, config] = await Promise.all([
+    readFile(join(repositoryRoot, "package.json"), "utf8"),
+    readFile(join(repositoryRoot, "stryker.config.mjs"), "utf8"),
+  ]);
+  assert.match(manifest, /"mutation:dry-run": "npm run test:prepare && stryker run --dryRunOnly"/);
+  assert.match(config, /TSX_LVGL_MUTATION_BUILD=1 TSX_LVGL_VALIDATION_GIT_SHA/);
+  assert.match(config, /node scripts\/build-mutation-output\.mjs/);
+  assert.doesNotMatch(config, /buildCommand: ".*tsc -b/);
 });
 
 test("validation context has stable machine-readable fields", () => {

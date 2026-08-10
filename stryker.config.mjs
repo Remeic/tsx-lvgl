@@ -2,13 +2,15 @@
 const config = {
   testRunner: "command",
   commandRunner: {
-    // Compile each mutant, then run the already-compiled suite. The public
-    // test command cleans first, which would discard Stryker's sandbox output.
-    command: "npx tsc -b --noCheck --pretty false && node --test --test-concurrency=1 'test-dist/tests/**/*.test.js' tests/*.test.mjs",
+    // The strict build before Stryker creates the public declaration snapshot.
+    // Emit only instrumented JavaScript here: instrumentation can widen public
+    // literal types, which is not a consumer API mutation. The same per-mutant
+    // suite still exercises packed consumers and package-manager contracts.
+    command: "export TSX_LVGL_MUTATION_BUILD=1 TSX_LVGL_VALIDATION_GIT_SHA=\"$(git rev-parse HEAD)\" TSX_LVGL_VALIDATION_GIT_STATE=clean; node scripts/build-mutation-output.mjs && node --test --test-concurrency=1 'test-dist/tests/**/*.test.js' tests/*.test.mjs",
   },
-  // Install workspace links inside the sandbox before building. This keeps
-  // mutation runs isolated from the checkout while preserving package exports.
-  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --pretty false",
+  // `npm run mutation` runs the strict build before Stryker. The sandbox keeps
+  // those baseline declarations and only installs its isolated dependencies.
+  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false",
   inPlace: false,
   symlinkNodeModules: false,
   // Every shipped TypeScript module is mutation-tested. Consumer lifecycle,

@@ -62,6 +62,12 @@ function gitValue(args) {
 }
 
 function collectSourceProvenance(environment = process.env) {
+  // Instrumented files necessarily look dirty inside a mutation sandbox. Its
+  // command injects the validated pre-instrumentation revision instead, so a
+  // consumer artifact keeps testing the same source provenance contract.
+  if (environment.TSX_LVGL_MUTATION_BUILD === "1") {
+    return sourceProvenanceFromEnvironment(environment);
+  }
   try {
     return {
       sourceSha: gitValue(["rev-parse", "HEAD"]),
@@ -160,6 +166,10 @@ function main() {
 }
 
 function buildSdk() {
+  // Stryker has just emitted instrumented JavaScript while preserving the
+  // strict-build declaration snapshot. Rebuilding here would widen literal
+  // public types solely because of instrumentation before consumer typechecks.
+  if (process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
   const tscPath = resolve(ROOT, "node_modules/typescript/bin/tsc");
   if (!existsSync(tscPath)) throw new Error("missing root node_modules/typescript; run npm ci first");
   run(process.execPath, [tscPath, "-b", resolve(SDK_ROOT, "tsconfig.json"), "--force", "--pretty", "false"], {
