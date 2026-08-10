@@ -21,9 +21,10 @@ import {
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 import { runDoctor, type DoctorResult } from "./doctor.js";
 import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
-import { withInstallTransaction } from "./install-transaction.js";
+import { recoverInterruptedInstall, withInstallTransaction } from "./install-transaction.js";
 import {
   DEFAULT_ARTIFACT_STORE,
+  recoverProjectArtifactState,
   type ArtifactStore,
   validateArtifactReference,
 } from "./artifact-store.js";
@@ -107,6 +108,7 @@ export async function createProject(
 ): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
   const root = resolve(target);
   const targetExisted = existsSync(root);
+  if (targetExisted) recoverConsumerProjectState(root);
   if (targetExisted && readdirSync(root).length > 0) {
     throw new CliError(DIAGNOSTIC_CODES.PROJECT_EXISTS, "target directory is not empty");
   }
@@ -135,7 +137,9 @@ export async function createProject(
 }
 
 export async function syncProject(root: string): Promise<{ readonly lock: FrameworkLock }> {
-  const project = readProjectFiles(root);
+  const projectRoot = resolve(root);
+  recoverConsumerProjectState(projectRoot);
+  const project = readProjectFiles(projectRoot);
   DEFAULT_ARTIFACT_STORE.verify(project.artifactPath, project.lock);
   return withInstallTransaction(project.root, async () => {
     await installLockedArtifact(project.root, project.lock);
@@ -149,6 +153,7 @@ export async function updateProject(
   adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
 ): Promise<{ readonly lock: FrameworkLock }> {
   const projectRoot = resolve(root);
+  recoverConsumerProjectState(projectRoot);
   const project = readProjectFiles(projectRoot);
   const sourceRoot = adapters.sourcePackAdapter.resolveSource(explicitSource);
   const tempRoot = adapters.sourcePackAdapter.createOutputDirectory();
@@ -168,12 +173,14 @@ export async function updateProject(
 }
 
 export function checkProject(root: string): CheckResult {
+  recoverConsumerProjectState(root);
   const project = verifyProject(root);
   const files = typecheckProject(project.root);
   return { files };
 }
 
 export function buildProject(root: string): BuildResult {
+  recoverConsumerProjectState(root);
   const project = verifyProject(root);
   typecheckProject(project.root);
   const bundle = compileProject(project);
@@ -191,6 +198,7 @@ export function buildProject(root: string): BuildResult {
 }
 
 export async function devProject(root: string): Promise<DevResult> {
+  recoverConsumerProjectState(root);
   const project = verifyProject(root);
   typecheckProject(project.root);
   const bundle = compileProject(project);
@@ -210,6 +218,7 @@ export function doctorProject(
   { nodeVersion = process.versions.node }: { readonly nodeVersion?: string } = {},
 ): DoctorResult {
   const projectRoot = resolve(root);
+  recoverConsumerProjectState(projectRoot);
   let config: ProjectConfig | undefined;
   let lock: FrameworkLock | undefined;
   return runDoctor({
@@ -247,6 +256,7 @@ export function doctorProject(
 
 export function readProjectFiles(root: string): Project {
   const projectRoot = resolve(root);
+  recoverConsumerProjectState(projectRoot);
   const config = readProjectConfig(projectRoot);
   const lock = readFrameworkLock(projectRoot);
   const artifactPath = DEFAULT_ARTIFACT_STORE.resolve(projectRoot, lock);
@@ -261,6 +271,13 @@ export function verifyProject(root: string): Project {
   verifyInstalledSdk(project.root, project.lock);
   verifyPortableConfig(project.root);
   return project;
+}
+
+/** Recover durable install and artifact swap state before a public project read. */
+function recoverConsumerProjectState(root: string): void {
+  const projectRoot = resolve(root);
+  recoverInterruptedInstall(projectRoot);
+  recoverProjectArtifactState(projectRoot);
 }
 
 function readProjectConfig(root: string): ProjectConfig {

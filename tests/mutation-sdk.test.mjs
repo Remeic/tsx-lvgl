@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { DEFAULT_ARTIFACT_STORE, createArtifactStore, validateArtifactReference } from "../packages/sdk/dist/artifact-store.js";
+import {
+  DEFAULT_ARTIFACT_STORE,
+  createArtifactStore,
+  recoverProjectArtifactState,
+  validateArtifactReference,
+} from "../packages/sdk/dist/artifact-store.js";
+import { InstallTransactionInterruptedError } from "../packages/sdk/dist/install-transaction.js";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import { createInstallExecutor } from "../packages/sdk/dist/install-executor.js";
 import { createProject, updateProject } from "../packages/sdk/dist/project.js";
@@ -165,6 +171,94 @@ test("artifact-store stage swap cannot be redirected when artifacts is replaced 
   assert.equal(readFileSync(outsideArtifact, "utf8"), "outside must survive");
   assert.equal(existsSync(join(root, ".tsx-lvgl", "artifacts")), true);
   assert.equal(existsSync(join(outside, "tsx-lvgl-sdk-0.1.0.tgz")), true);
+});
+
+test("artifact-store rejects a replaced project-state parent before any swap mutation", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-state-swap-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(sourceArtifact, "inside artifact");
+  const store = createArtifactStore({
+    beforeInstallSwap: () => {
+      rmSync(join(root, ".tsx-lvgl"), { recursive: true, force: true });
+      symlinkSync(outside, join(root, ".tsx-lvgl"), "dir");
+    },
+  });
+
+  assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  assert.equal(existsSync(join(outside, "artifacts")), false);
+});
+
+test("artifact-store restart recovery completes both interrupted rename states idempotently", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-restart-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  writeFileSync(sourceArtifact, "new SDK artifact");
+
+  for (const checkpoint of ["after-first-rename", "after-second-rename"]) {
+    const root = join(sandbox, checkpoint);
+    const initial = join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz");
+    mkdirSync(dirname(initial), { recursive: true });
+    writeFileSync(initial, "old SDK artifact");
+    const store = createArtifactStore({
+      ...(checkpoint === "after-first-rename"
+        ? { afterFirstRename: () => { throw new InstallTransactionInterruptedError(); } }
+        : { afterSecondRename: () => { throw new InstallTransactionInterruptedError(); } }),
+    });
+
+    assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), InstallTransactionInterruptedError);
+    recoverProjectArtifactState(root);
+    recoverProjectArtifactState(root);
+    assert.equal(
+      readFileSync(join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz"), "utf8"),
+      checkpoint === "after-first-rename" ? "old SDK artifact" : "new SDK artifact",
+    );
+    assert.equal(existsSync(join(root, ".tsx-lvgl", ".artifacts-backup")), false);
+    assert.equal(
+      readdirSync(join(root, ".tsx-lvgl")).some((entry) => entry.startsWith(".artifacts-stage-")),
+      false,
+    );
+  }
+});
+
+test("artifact recovery refuses a swapped state parent before rename or cleanup", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-recovery-swap-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  writeFileSync(sourceArtifact, "new SDK artifact");
+
+  for (const checkpoint of ["after-first-rename", "after-second-rename"]) {
+    const root = join(sandbox, checkpoint);
+    const state = join(root, ".tsx-lvgl");
+    const outside = join(sandbox, `${checkpoint}-outside`);
+    const initial = join(state, "artifacts", "tsx-lvgl-sdk-0.1.0.tgz");
+    mkdirSync(dirname(initial), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(initial, "old SDK artifact");
+    writeFileSync(join(outside, "keep.txt"), "outside state");
+    const store = createArtifactStore({
+      ...(checkpoint === "after-first-rename"
+        ? { afterFirstRename: () => { throw new InstallTransactionInterruptedError(); } }
+        : { afterSecondRename: () => { throw new InstallTransactionInterruptedError(); } }),
+    });
+    assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), InstallTransactionInterruptedError);
+
+    assert.throws(
+      () => recoverProjectArtifactState(root, {
+        beforeRecoveryMutation: () => {
+          rmSync(state, { recursive: true, force: true });
+          symlinkSync(outside, state, "dir");
+        },
+      }),
+      { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+    );
+    assert.equal(readFileSync(join(outside, "keep.txt"), "utf8"), "outside state");
+    assert.equal(existsSync(join(outside, "artifacts")), false);
+  }
 });
 
 test("artifact references reject every non-canonical persisted path shape", () => {
