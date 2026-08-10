@@ -26,9 +26,19 @@ export type CapabilitySelection =
   | { readonly status: "ambiguous"; readonly instances: readonly CapabilityInstance[] }
   | { readonly status: "unsupported"; readonly reason: "not-present" | "invalid-instance" };
 export interface Observation<T> { readonly value: T; readonly observedAtMs: number; readonly sequence: number; readonly droppedSincePrevious: number; }
-export type BoardIssueCode = "unsupported" | "not-ready" | "busy" | "cancelled" | "timeout" | "invalid-input" | "hardware-failure" | "protocol-error" | "internal";
+export type BoardIssueCode = "unsupported" | "not-ready" | "busy" | "cancelled" | "timeout" | "invalid-input" | "resource-exhausted" | "hardware-failure" | "protocol-error" | "internal";
 export type BoardIssueRetry = "automatic" | "manual" | "after-reconfigure" | "never";
 export interface BoardIssue { readonly code: BoardIssueCode; readonly retry: BoardIssueRetry; readonly diagnosticId: string; }
+
+/** Opaque, process-local correlation identifier for a command lifecycle. */
+export type OperationId = number & { readonly __operationId: never };
+
+/** Commands always enter one terminal state; they never expose a Promise seam. */
+export type OperationState<T> =
+  | { readonly status: "idle" }
+  | { readonly status: "running"; readonly id: OperationId }
+  | { readonly status: "succeeded"; readonly id: OperationId; readonly value: T }
+  | { readonly status: "failed"; readonly id: OperationId; readonly issue: BoardIssue };
 export type CapabilityState<T> =
   | { readonly status: "unsupported"; readonly reason: "not-present" | "not-implemented" | "disabled-by-profile" | "invalid-instance" }
   | { readonly status: "ambiguous"; readonly instances: readonly CapabilityInstance[] }
@@ -79,7 +89,7 @@ export function selectCapabilityInstance(instances: readonly CapabilityInstance[
   if (instanceId !== undefined) { const instance = instances.find((entry) => entry.id === instanceId); return instance === undefined ? { status: "unsupported", reason: "invalid-instance" } : { status: "selected", instance }; }
   const defaults = instances.filter((instance) => instance.isDefault); return defaults.length === 1 ? { status: "selected", instance: defaults[0]! } : { status: "ambiguous", instances };
 }
-const ISSUE_CODES: readonly BoardIssueCode[] = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "hardware-failure", "protocol-error", "internal"];
+const ISSUE_CODES: readonly BoardIssueCode[] = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "resource-exhausted", "hardware-failure", "protocol-error", "internal"];
 const ISSUE_RETRIES: readonly BoardIssueRetry[] = ["automatic", "manual", "after-reconfigure", "never"];
 const MAX_DIAGNOSTIC_ID_LENGTH = 96;
 

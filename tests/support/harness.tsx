@@ -9,6 +9,7 @@ import {
   type RuntimeHostInstance,
   type RuntimeScheduler,
 } from "@tsx-lvgl/runtime";
+import type { WifiService } from "@tsx-lvgl/connectivity";
 import {
   createSensorRegistry,
   type DeviceCapabilities,
@@ -287,6 +288,7 @@ export interface Harness {
 export interface CreateHarnessOptions {
   readonly capabilities?: DeviceCapabilities;
   readonly board?: CapabilityRuntime;
+  readonly wifi?: WifiService;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -304,6 +306,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     scheduler,
     ...(options.capabilities !== undefined ? { capabilities: options.capabilities } : {}),
     ...(options.board !== undefined ? { board: options.board } : {}),
+    ...(options.wifi !== undefined ? { wifi: options.wifi } : {}),
     onError: options.onError ?? ((error: unknown) => errors.push(error)),
   });
   return { host, scheduler, runtime, errors };

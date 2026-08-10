@@ -49,11 +49,11 @@ test("board runtime recomputes the native cadence from active subscribers", () =
   const context = { reloadEpoch: 1, isCancelled: () => false };
   const slow = board.subscribe(motionSchema, { periodMs: 80 }, context, () => undefined);
   const fast = board.subscribe(motionSchema, { periodMs: 20 }, context, () => undefined);
-  assert.deepEqual(adapter.submitted.map((request) => request.periodMs), [80, 20]);
+  assert.deepEqual(adapter.submitted.filter((request) => request.kind === "observe").map((request) => request.periodMs), [80, 20]);
   assert.deepEqual(adapter.cancelled, [1]);
   assert.equal(board.diagnostics().effectivePeriodsMs.motion, 20);
   fast.cancel();
-  assert.deepEqual(adapter.submitted.map((request) => request.periodMs), [80, 20, 80]);
+  assert.deepEqual(adapter.submitted.filter((request) => request.kind === "observe").map((request) => request.periodMs), [80, 20, 80]);
   assert.deepEqual(adapter.cancelled, [1, 2]);
   assert.equal(board.diagnostics().effectivePeriodsMs.motion, 80);
   slow.cancel();

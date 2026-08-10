@@ -57,8 +57,11 @@ export interface NativeCapabilityDescriptor {
 export interface NativeBoardObserveRequest { readonly version: 1; readonly kind: "observe"; readonly instanceId: string; readonly periodMs: number; readonly reloadEpoch: number; }
 export interface NativeBoardStreamRequest { readonly version: 1; readonly kind: "stream"; readonly instanceId: string; readonly reloadEpoch: number; }
 export interface NativeBoardCommandRequest { readonly version: 1; readonly kind: "command"; readonly instanceId: string; readonly commandId: string; readonly correlationId: string; readonly reloadEpoch: number; }
-export type NativeBoardRequest = NativeBoardObserveRequest;
-export interface NativeBoardEvent { readonly version: 1; readonly kind: "state"; readonly handle: number; readonly reloadEpoch: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; }
+export type NativeBoardRequest = NativeBoardObserveRequest | NativeBoardCommandRequest;
+/** All board-originated events cross one owner-queue and one JavaScript sink. */
+export interface NativeBoardStateEvent { readonly version: 1; readonly kind: "state"; readonly handle: number; readonly reloadEpoch: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; readonly instanceId?: string; }
+export interface NativeBoardOperationEvent { readonly version: 1; readonly kind: "operation"; readonly handle: number; readonly reloadEpoch: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; readonly instanceId: string; }
+export type NativeBoardEvent = NativeBoardStateEvent | NativeBoardOperationEvent;
 export interface BoardPlatformAdapter {
   list(): readonly NativeCapabilityDescriptor[];
   readCached(instanceId: string): NativeBoardEvent | undefined;

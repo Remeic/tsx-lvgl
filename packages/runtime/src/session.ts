@@ -1,5 +1,6 @@
 import type { VNode } from "@tsx-lvgl/core";
 import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
+import type { WifiService } from "@tsx-lvgl/connectivity";
 import type { DeviceCapabilities } from "@tsx-lvgl/sensors";
 import {
   mountFiber,
@@ -48,6 +49,10 @@ export class Session implements RuntimeSession {
 
   public get board(): CapabilityRuntime {
     return this.context.board;
+  }
+
+  public get wifi(): WifiService | undefined {
+    return this.context.wifi;
   }
 
   public get rootHost(): RuntimeHostInstance {

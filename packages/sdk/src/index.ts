@@ -13,9 +13,11 @@ import {
   useInterval,
   useMotion,
   useState,
+  useWifi,
 } from "@tsx-lvgl/runtime";
 export type { StateSetter } from "@tsx-lvgl/runtime";
 export type { CapabilityBinding, CapabilityObserveOptions, CapabilityState } from "@tsx-lvgl/capabilities";
+export type { WifiController, WifiLink, WifiNetwork, WifiScanRequest } from "@tsx-lvgl/connectivity";
 
 import {
   isShake,
@@ -35,6 +37,7 @@ const applicationFacade = createApplicationFacade({
   useInterval,
   useMotion,
   useState,
+  useWifi,
 }) as Readonly<{
   Button: typeof Button;
   Fragment: typeof Fragment;
@@ -46,6 +49,7 @@ const applicationFacade = createApplicationFacade({
   useInterval: typeof useInterval;
   useMotion: typeof useMotion;
   useState: typeof useState;
+  useWifi: typeof useWifi;
 }>;
 
 const {
@@ -59,6 +63,7 @@ const {
   useInterval: facadeUseInterval,
   useMotion: facadeUseMotion,
   useState: facadeUseState,
+  useWifi: facadeUseWifi,
 } = applicationFacade;
 
 export {
@@ -72,4 +77,5 @@ export {
   facadeUseInterval as useInterval,
   facadeUseMotion as useMotion,
   facadeUseState as useState,
+  facadeUseWifi as useWifi,
 };

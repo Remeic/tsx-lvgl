@@ -1,5 +1,7 @@
 import { motionSchema, subscribeSensor, type MotionSample, type SensorSample, type SensorSchema } from "@tsx-lvgl/sensors";
 import type { CapabilityBinding, CapabilityObserveOptions } from "@tsx-lvgl/capabilities";
+import type { CapabilityState, OperationId, OperationState } from "@tsx-lvgl/capabilities";
+import type { ConnectivityContext, WifiController, WifiLink, WifiNetwork, WifiOperation, WifiScanRequest, WifiService } from "@tsx-lvgl/connectivity";
 import type { Fiber } from "./fiber.js";
 import type { Session } from "./session.js";
 
@@ -149,6 +151,56 @@ export function useMotion(options: CapabilityObserveOptions = {}): CapabilityBin
   }, [options.enabled, options.instanceId, options.periodMs]);
   return binding;
 }
+
+/** Station state is device-owned; this hook owns only its subscription and in-flight commands. */
+export function useWifi(): WifiController {
+  const fiber = requireFiber("useWifi");
+  const session = currentSession as Session;
+  const [, invalidate] = useState(0);
+  const [holder] = useState(() => createWifiHolder(session.wifi));
+  const [controller] = useState(() => createWifiController(holder, session, fiber, invalidate));
+  useEffect(() => {
+    holder.wifi = session.wifi;
+    holder.state = holder.wifi?.getState() ?? unsupportedWifiState();
+    invalidate((value) => value + 1);
+    if (holder.wifi === undefined) return;
+    const unsubscribe = holder.wifi.subscribe((state) => { holder.state = state; invalidate((value) => value + 1); }, wifiContext(session, fiber));
+    return () => {
+      unsubscribe();
+      holder.scanUnsubscribe?.(); holder.scanUnsubscribe = undefined; holder.scanOperation?.cancel(); holder.scanOperation = undefined;
+      holder.connectionUnsubscribe?.(); holder.connectionUnsubscribe = undefined; holder.connectionOperation?.cancel(); holder.connectionOperation = undefined;
+    };
+  }, [session.wifi, session.epoch]);
+  return controller;
+}
+
+interface WifiHolder {
+  wifi: WifiService | undefined;
+  state: CapabilityState<WifiLink>;
+  scan: OperationState<readonly WifiNetwork[]>;
+  connection: OperationState<void>;
+  nextUnsupportedId: number;
+  scanOperation: WifiOperation<readonly WifiNetwork[]> | undefined;
+  connectionOperation: WifiOperation<void> | undefined;
+  scanUnsubscribe: (() => void) | undefined;
+  connectionUnsubscribe: (() => void) | undefined;
+}
+function createWifiHolder(wifi: WifiService | undefined): WifiHolder { return { wifi, state: wifi?.getState() ?? unsupportedWifiState(), scan: { status: "idle" }, connection: { status: "idle" }, nextUnsupportedId: 1, scanOperation: undefined, connectionOperation: undefined, scanUnsubscribe: undefined, connectionUnsubscribe: undefined }; }
+function createWifiController(holder: WifiHolder, session: Session, fiber: Fiber, invalidate: StateSetter<number>): WifiController {
+  const update = (): void => invalidate((value) => value + 1);
+  const attachScan = (operation: WifiOperation<readonly WifiNetwork[]>): OperationId => { holder.scanUnsubscribe?.(); holder.scanOperation?.cancel(); holder.scanOperation = operation; holder.scan = { status: "running", id: operation.id }; holder.scanUnsubscribe = operation.subscribe((state) => { holder.scan = state; update(); }); update(); return operation.id; };
+  const attachConnection = (operation: WifiOperation<void>): OperationId => { holder.connectionUnsubscribe?.(); holder.connectionOperation?.cancel(); holder.connectionOperation = operation; holder.connection = { status: "running", id: operation.id }; holder.connectionUnsubscribe = operation.subscribe((state) => { holder.connection = state; update(); }); update(); return operation.id; };
+  return Object.freeze({
+    get state(): CapabilityState<WifiLink> { return holder.state; }, get scan(): OperationState<readonly WifiNetwork[]> { return holder.scan; }, get connection(): OperationState<void> { return holder.connection; },
+    scanNetworks(request: WifiScanRequest = {}): OperationId { const wifi = holder.wifi; return attachScan(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.scan(request, wifiContext(session, fiber))); },
+    cancelScan(): void { holder.scanOperation?.cancel(); },
+    connect(): OperationId { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.connect(wifiContext(session, fiber))); },
+    disconnect(): OperationId { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.disconnect(wifiContext(session, fiber))); },
+  });
+}
+function wifiContext(session: Session, fiber: Fiber): ConnectivityContext { return { reloadEpoch: session.epoch, isCancelled: () => !session.isActive() || !fiber.active }; }
+function unsupportedWifiState(): CapabilityState<WifiLink> { return { status: "unsupported", reason: "not-implemented" }; }
+function unsupportedOperation<T>(holder: WifiHolder, diagnosticId: string): WifiOperation<T> { const id = holder.nextUnsupportedId++ as OperationId; const state: OperationState<T> = { status: "failed", id, issue: { code: "unsupported", retry: "never", diagnosticId } }; return { id, cancel: () => undefined, subscribe(listener) { listener(state); return () => undefined; } }; }
 
 /** Runs the cleanup of every effect hook a fiber owns, exactly once. */
 export function releaseHooks(hooks: readonly Hook[]): void {

@@ -62,6 +62,15 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
+    /* Wi-Fi owns a separate bounded native worker, but publishes only through
+     * the existing board owner queue. It must be ready before app evaluation. */
+    if (runtime_probe_start_connectivity(probe) != ESP_OK) {
+        ESP_LOGE(TAG, "PROBE checkpoint=wifi_init status=fail");
+        runtime_probe_destroy(probe);
+        vTaskDelete(NULL);
+        return;
+    }
+
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
         runtime_probe_destroy(probe);

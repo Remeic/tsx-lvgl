@@ -7,9 +7,7 @@
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "references": [
-    { "path": "../core" },
-    { "path": "../connectivity" },
-    { "path": "../sensors" }
+    { "path": "../capabilities" }
   ],
   "include": ["src/**/*.ts"]
 }

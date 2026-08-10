@@ -17,6 +17,7 @@ import {
 } from "@tsx-lvgl/capabilities";
 import { motionSchema } from "@tsx-lvgl/sensors";
 import { decodeBoardPayload } from "./board-adapter.js";
+import { NativeBoardWifiService } from "./board-wifi.js";
 import { DEFAULT_BOARD_SCHEMA_REGISTRY, type BoardSchemaRegistry } from "./board-schema-registry.js";
 import type { BoardPlatformAdapter, NativeBoardEvent, NativeCapabilityDescriptor } from "./native.js";
 
@@ -73,6 +74,7 @@ const DEFAULT_LIMITS: BoardRuntimeLimits = Object.freeze({
  */
 export class BoardRuntime implements CapabilityRuntime {
   public readonly catalog;
+  public readonly wifi: NativeBoardWifiService;
   private readonly descriptors = new Map<string, NativeCapabilityDescriptor[]>();
   private readonly producers = new Map<string, Producer>();
   private readonly handles = new Map<number, Producer>();
@@ -113,6 +115,7 @@ export class BoardRuntime implements CapabilityRuntime {
       });
     }
     this.catalog = createCapabilityCatalog(registrations);
+    this.wifi = new NativeBoardWifiService(adapter);
     adapter.setSink((event) => this.handleEvent(event));
   }
 
@@ -187,6 +190,9 @@ export class BoardRuntime implements CapabilityRuntime {
     };
   }
 
+  /** Advances bounded command deadlines from the kernel owner tick. */
+  public expire(): void { this.wifi.expire(); }
+
   public commitEpoch(epoch: number): void {
     if (!isEpoch(epoch) || epoch <= this.committedEpoch) return;
     const pending: Array<{ producer: Producer; handle: number }> = [];
@@ -229,6 +235,7 @@ export class BoardRuntime implements CapabilityRuntime {
     for (const producer of this.producers.values()) this.adapter.cancel(producer.handle);
     this.producers.clear();
     this.handles.clear();
+    this.wifi.dispose();
     this.adapter.dispose();
   }
 
@@ -252,6 +259,8 @@ export class BoardRuntime implements CapabilityRuntime {
 
   private handleEvent(event: NativeBoardEvent): void {
     if (this.disposed) return;
+    if (this.wifi.accept(event)) return;
+    if (event.kind !== "state") return this.reject("board-envelope");
     const producer = this.handles.get(event.handle);
     if (producer === undefined || !isEventValid(event, producer)) return this.reject("board-envelope");
     if (event.sequence <= producer.lastSequence) return this.reject("board-sequence");
