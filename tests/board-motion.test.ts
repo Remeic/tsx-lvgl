@@ -1,11 +1,22 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { createCapabilityCatalog, createCapabilityToken, selectCapabilityInstance } from "@tsx-lvgl/capabilities";
-import { BoardRuntime, MemoryBoardAdapter, createBoardSchemaRegistry, createDefaultBoardDescriptors, encodeBoardPayload } from "@tsx-lvgl/device";
+import { createCapabilityCatalog, createCapabilityToken, selectCapabilityInstance, type CapabilitySchema } from "@tsx-lvgl/capabilities";
+import { BoardRuntime, MemoryBoardAdapter, createBoardSchemaRegistry, createDefaultBoardDescriptors, encodeBoardPayload, type NativeBoardRequest, type NativeCapabilityDescriptor } from "@tsx-lvgl/device";
 import { motionSchema } from "@tsx-lvgl/sensors";
 
 const motion = createDefaultBoardDescriptors()[0]!;
 const frame = { accelerationMps2: [0, 0, 9.80665], angularVelocityDps: [0, 0, 0] };
+const numberSchema: CapabilitySchema<number> = { id: "test.number", version: 1, validate: (value: unknown): value is number => typeof value === "number" };
+const numberDescriptor: NativeCapabilityDescriptor = { ...motion, familyCode: 0x0102, semanticId: numberSchema.id, instanceId: "number", source: "fixture" };
+
+class FailingBoardAdapter extends MemoryBoardAdapter {
+  public failAtSubmission: number | undefined;
+
+  public override submit(request: NativeBoardRequest): number {
+    if (this.failAtSubmission === this.submitted.length + 1) throw new Error("submit failed");
+    return super.submit(request);
+  }
+}
 
 test("catalog is boot-frozen and selection never guesses an ambiguous instance", () => {
   const token = createCapabilityToken({ familyCode: 7, semanticId: "test.number", version: 1, delivery: "snapshot", validate: (value: unknown): value is number => typeof value === "number" });
@@ -29,6 +40,23 @@ test("one board producer multiplexes subscribers, caches a validated motion read
   assert.equal(board.getBinding(motionSchema).state.status, "ready");
   first.cancel(); assert.equal(adapter.activeHandleCount(), 1);
   second.cancel(); second.cancel(); assert.deepEqual(adapter.cancelled, [1]);
+  board.dispose();
+});
+
+test("board runtime recomputes the native cadence from active subscribers", () => {
+  const adapter = new MemoryBoardAdapter({ descriptors: [motion] });
+  const board = new BoardRuntime(adapter);
+  const context = { reloadEpoch: 1, isCancelled: () => false };
+  const slow = board.subscribe(motionSchema, { periodMs: 80 }, context, () => undefined);
+  const fast = board.subscribe(motionSchema, { periodMs: 20 }, context, () => undefined);
+  assert.deepEqual(adapter.submitted.map((request) => request.periodMs), [80, 20]);
+  assert.deepEqual(adapter.cancelled, [1]);
+  assert.equal(board.diagnostics().effectivePeriodsMs.motion, 20);
+  fast.cancel();
+  assert.deepEqual(adapter.submitted.map((request) => request.periodMs), [80, 20, 80]);
+  assert.deepEqual(adapter.cancelled, [1, 2]);
+  assert.equal(board.diagnostics().effectivePeriodsMs.motion, 80);
+  slow.cancel();
   board.dispose();
 });
 
@@ -90,5 +118,38 @@ test("board runtime bounds subscriber delivery and rejects unsafe issue text", (
   adapter.emit({ version: 1, kind: "state", handle: 1, reloadEpoch: 1, sequence: 1, observedAtMs: 1, payload: encodeBoardPayload({ status: "error", schemaVersion: 1, issue: { code: "internal", retry: "never", diagnosticId: "BAD\u0000ID" } }) });
   assert.equal(board.diagnostics().lastIssue?.diagnosticId, "board-reading");
   assert.equal(board.diagnostics().resourceUse.subscriberBudget, 1);
+  board.dispose();
+});
+
+test("board runtime admits subscribers against one budget across all producers", () => {
+  const adapter = new MemoryBoardAdapter({ descriptors: [motion, numberDescriptor] });
+  const registry = createBoardSchemaRegistry([motionSchema, numberSchema]);
+  const board = new BoardRuntime(adapter, { registry, limits: { maxSubscribers: 1 } });
+  const context = { reloadEpoch: 1, isCancelled: () => false };
+  board.subscribe(motionSchema, {}, context, () => undefined);
+  const states: string[] = [];
+  board.subscribe(numberSchema, {}, context, (binding) => states.push(binding.state.status));
+  assert.deepEqual(states, ["starting", "unavailable"]);
+  assert.equal(adapter.submitted.length, 1, "a globally rejected subscriber must not start another native observation");
+  assert.equal(board.diagnostics().resourceUse.subscribers, 1);
+  board.dispose();
+});
+
+test("board runtime leaves epoch and cached producer state intact when a staged submit fails", () => {
+  const adapter = new FailingBoardAdapter({ descriptors: [motion, numberDescriptor] });
+  const registry = createBoardSchemaRegistry([motionSchema, numberSchema]);
+  const board = new BoardRuntime(adapter, { registry });
+  const epochOne = { reloadEpoch: 1, isCancelled: () => false };
+  const received: number[] = [];
+  board.subscribe(motionSchema, {}, epochOne, () => undefined, (event) => received.push(event.sequence));
+  board.subscribe(numberSchema, {}, epochOne, () => undefined);
+  board.commitEpoch(1);
+  adapter.emit({ version: 1, kind: "state", handle: 1, reloadEpoch: 1, sequence: 1, observedAtMs: 1, payload: encodeBoardPayload({ status: "ok", schemaVersion: 1, value: frame }) });
+  adapter.failAtSubmission = adapter.submitted.length + 2;
+  assert.throws(() => board.commitEpoch(2), /submit failed/);
+  assert.deepEqual(adapter.cancelled, [3], "only the tentative replacement is cancelled");
+  assert.equal(board.getBinding(motionSchema).state.status, "ready", "the pre-commit cache remains available");
+  adapter.emit({ version: 1, kind: "state", handle: 1, reloadEpoch: 1, sequence: 2, observedAtMs: 2, payload: encodeBoardPayload({ status: "ok", schemaVersion: 1, value: frame }) });
+  assert.deepEqual(received, [1, 2], "the original epoch remains committed after the failed transaction");
   board.dispose();
 });

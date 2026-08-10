@@ -455,21 +455,20 @@ static JSValue new_board_payload(JSContext *context, const waveshare_v1_motion_f
     return payload;
 }
 
-static JSValue new_board_event(JSContext *context, runtime_probe_t *probe, int32_t handle, uint32_t reload_epoch)
+static JSValue new_board_event(JSContext *context, runtime_probe_t *probe, int32_t handle, uint32_t reload_epoch,
+                               const waveshare_v1_motion_frame_t *frame, bool available)
 {
-    waveshare_v1_motion_frame_t frame = {0};
-    const bool available = waveshare_v1_sensors_read_motion(probe->sensors, &frame);
     JSValue event = JS_NewObject(context);
     if (JS_IsException(event)) return event;
-    const uint32_t sequence = available ? frame.sequence : (probe->board_last_sequence + 1U);
-    const int64_t observed_at = available ? frame.observed_at_ms : esp_timer_get_time() / 1000;
+    const uint32_t sequence = available ? frame->sequence : (probe->board_last_sequence + 1U);
+    const int64_t observed_at = available ? frame->observed_at_ms : esp_timer_get_time() / 1000;
     JS_SetPropertyStr(context, event, "version", JS_NewInt32(context, 1));
     JS_SetPropertyStr(context, event, "kind", JS_NewString(context, "state"));
     JS_SetPropertyStr(context, event, "handle", JS_NewInt32(context, handle));
     JS_SetPropertyStr(context, event, "reloadEpoch", JS_NewUint32(context, reload_epoch));
     JS_SetPropertyStr(context, event, "sequence", JS_NewUint32(context, sequence));
     JS_SetPropertyStr(context, event, "observedAtMs", JS_NewInt64(context, observed_at));
-    JS_SetPropertyStr(context, event, "payload", new_board_payload(context, &frame, available));
+    JS_SetPropertyStr(context, event, "payload", new_board_payload(context, frame, available));
     return event;
 }
 
@@ -506,7 +505,9 @@ static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this
     if (!is_motion) return JS_UNDEFINED;
     const int32_t handle = probe->board_handle == 0 ? 1 : probe->board_handle;
     const uint32_t epoch = probe->board_reload_epoch == 0 ? 1U : probe->board_reload_epoch;
-    return new_board_event(context, probe, handle, epoch);
+    waveshare_v1_motion_frame_t frame = {0};
+    const bool available = waveshare_v1_sensors_read_motion(probe->sensors, &frame);
+    return new_board_event(context, probe, handle, epoch, &frame, available);
 }
 
 static JSValue js_native_board_submit(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
@@ -516,13 +517,21 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
     if (probe == NULL || argc < 1) return JS_ThrowTypeError(context, "board.submit(request) requires request");
     JSValue instance = JS_GetPropertyStr(context, argv[0], "instanceId");
     JSValue epoch = JS_GetPropertyStr(context, argv[0], "reloadEpoch");
+    JSValue period = JS_GetPropertyStr(context, argv[0], "periodMs");
     const char *instance_id = JS_ToCString(context, instance);
     int32_t reload_epoch = 0;
-    const bool valid = instance_id != NULL && strcmp(instance_id, "motion") == 0 && JS_ToInt32(context, &reload_epoch, epoch) == 0 && reload_epoch > 0;
+    int32_t period_ms = 0;
+    const bool valid = instance_id != NULL && strcmp(instance_id, "motion") == 0 && JS_ToInt32(context, &reload_epoch, epoch) == 0 && reload_epoch > 0 &&
+                       JS_ToInt32(context, &period_ms, period) == 0 && period_ms >= (int32_t)WAVESHARE_V1_MOTION_MIN_PERIOD_MS &&
+                       period_ms <= (int32_t)WAVESHARE_V1_MOTION_MAX_PERIOD_MS;
     JS_FreeCString(context, instance_id);
     JS_FreeValue(context, instance);
     JS_FreeValue(context, epoch);
+    JS_FreeValue(context, period);
     if (!valid) return JS_ThrowTypeError(context, "board.submit: invalid motion observation");
+    if (waveshare_v1_sensors_set_period_ms(probe->sensors, (uint32_t)period_ms) != ESP_OK) {
+        return JS_ThrowInternalError(context, "board.submit: motion cadence unavailable");
+    }
     probe->board_handle++;
     probe->board_reload_epoch = (uint32_t)reload_epoch;
     probe->board_last_sequence = 0;
@@ -565,7 +574,7 @@ static void emit_board_reading(runtime_probe_t *probe)
     if (!probe->board_active || JS_IsUndefined(probe->board_sink)) return;
     waveshare_v1_motion_frame_t frame = {0};
     if (!waveshare_v1_sensors_read_motion(probe->sensors, &frame) || frame.sequence <= probe->board_last_sequence) return;
-    JSValue event = new_board_event(probe->context, probe, probe->board_handle, probe->board_reload_epoch);
+    JSValue event = new_board_event(probe->context, probe, probe->board_handle, probe->board_reload_epoch, &frame, true);
     JSValue result = JS_Call(probe->context, probe->board_sink, JS_UNDEFINED, 1, &event);
     JS_FreeValue(probe->context, event);
     if (JS_IsException(result)) {

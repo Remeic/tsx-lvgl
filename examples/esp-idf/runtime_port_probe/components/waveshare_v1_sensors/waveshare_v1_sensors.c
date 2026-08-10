@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 
 #include <stdlib.h>
+#include <stdatomic.h>
 
 #define QMI_HIGH 0x6BU
 #define QMI_LOW 0x6AU
@@ -13,7 +14,7 @@
 #define QMI_ID_VALUE 0x05U
 #define QMI_DATA 0x35U
 #define QMI_TIMEOUT_MS 100
-#define PERIOD_MS 20
+#define DEFAULT_PERIOD_MS 80U
 
 struct waveshare_v1_sensors {
     i2c_master_dev_handle_t device;
@@ -21,6 +22,7 @@ struct waveshare_v1_sensors {
     SemaphoreHandle_t stopped;
     TaskHandle_t task;
     volatile bool stopping;
+    atomic_uint_fast32_t period_ms;
     waveshare_v1_motion_frame_t frame;
 };
 
@@ -100,7 +102,7 @@ static void sample_task(void *arg)
             provider->frame = next;
             xSemaphoreGive(provider->lock);
         }
-        vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
+        vTaskDelay(pdMS_TO_TICKS(atomic_load(&provider->period_ms)));
     }
     xSemaphoreGive(provider->stopped);
     vTaskDelete(NULL);
@@ -112,6 +114,7 @@ esp_err_t waveshare_v1_sensors_create(i2c_master_bus_handle_t bus, waveshare_v1_
     *out = NULL;
     waveshare_v1_sensors_t *provider = calloc(1, sizeof(*provider));
     if (provider == NULL) return ESP_ERR_NO_MEM;
+    atomic_init(&provider->period_ms, DEFAULT_PERIOD_MS);
     provider->lock = xSemaphoreCreateMutex();
     provider->stopped = xSemaphoreCreateBinary();
     if (provider->lock == NULL || provider->stopped == NULL) {
@@ -160,4 +163,13 @@ bool waveshare_v1_sensors_read_motion(waveshare_v1_sensors_t *provider, waveshar
     *out = provider->frame;
     xSemaphoreGive(provider->lock);
     return out->available;
+}
+
+esp_err_t waveshare_v1_sensors_set_period_ms(waveshare_v1_sensors_t *provider, uint32_t period_ms)
+{
+    if (provider == NULL || period_ms < WAVESHARE_V1_MOTION_MIN_PERIOD_MS || period_ms > WAVESHARE_V1_MOTION_MAX_PERIOD_MS) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    atomic_store(&provider->period_ms, period_ms);
+    return ESP_OK;
 }

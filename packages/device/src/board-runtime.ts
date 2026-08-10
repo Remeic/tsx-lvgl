@@ -23,6 +23,7 @@ import type { BoardPlatformAdapter, NativeBoardEvent, NativeCapabilityDescriptor
 interface Subscriber {
   readonly id: number;
   readonly context: CapabilityContext;
+  readonly periodMs: number;
   readonly onState: (binding: CapabilityBinding<unknown>) => void;
   readonly onEvent?: (event: CapabilityEvent<unknown>) => void;
   active: boolean;
@@ -138,23 +139,26 @@ export class BoardRuntime implements CapabilityRuntime {
     if (initial.state.status === "unsupported" || initial.state.status === "ambiguous") return { cancel: () => undefined };
     const instanceId = this.selectedInstance(schema, options);
     if (instanceId === undefined) return { cancel: () => undefined };
+    if (this.subscriberCount() >= this.limits.maxSubscribers) {
+      return this.rejectSubscription(schema, this.instances(schema), onState, "board-subscriber-budget");
+    }
+    const descriptor = (this.descriptors.get(schema.id) ?? []).find((entry) => entry.instanceId === instanceId)!;
+    const requestedPeriodMs = boundPeriod(options.periodMs ?? descriptor.defaultPeriodMs, descriptor);
     let producer = this.producers.get(instanceId);
     if (producer === undefined) {
       if (this.producers.size >= this.limits.maxObservers) {
         return this.rejectSubscription(schema, this.instances(schema), onState, "board-observer-budget");
       }
-      const descriptor = (this.descriptors.get(schema.id) ?? []).find((entry) => entry.instanceId === instanceId)!;
-      const periodMs = boundPeriod(options.periodMs ?? descriptor.defaultPeriodMs, descriptor);
-      producer = this.createProducer(descriptor, schema, periodMs, context.reloadEpoch);
+      producer = this.createProducer(descriptor, schema, requestedPeriodMs, context.reloadEpoch);
       this.producers.set(instanceId, producer);
       this.handles.set(producer.handle, producer);
-    }
-    if (producer.subscribers.size >= this.limits.maxSubscribers) {
-      return this.rejectSubscription(schema, this.instances(schema), onState, "board-subscriber-budget");
+    } else {
+      this.reconfigureProducer(producer, this.effectivePeriod(producer, requestedPeriodMs));
     }
     const subscriber: Subscriber = {
       id: this.nextId++,
       context,
+      periodMs: requestedPeriodMs,
       onState: onState as (binding: CapabilityBinding<unknown>) => void,
       active: true,
       ...(onEvent === undefined ? {} : { onEvent: onEvent as (event: CapabilityEvent<unknown>) => void }),
@@ -185,8 +189,28 @@ export class BoardRuntime implements CapabilityRuntime {
 
   public commitEpoch(epoch: number): void {
     if (!isEpoch(epoch) || epoch <= this.committedEpoch) return;
+    const pending: Array<{ producer: Producer; handle: number }> = [];
+    try {
+      for (const producer of this.producers.values()) {
+        if (producer.reloadEpoch === epoch) continue;
+        pending.push({
+          producer,
+          handle: this.adapter.submit({ version: 1, kind: "observe", instanceId: producer.descriptor.instanceId, periodMs: producer.periodMs, reloadEpoch: epoch }),
+        });
+      }
+    } catch (error) {
+      for (const move of pending) this.adapter.cancel(move.handle);
+      throw error;
+    }
+    for (const move of pending) {
+      this.adapter.cancel(move.producer.handle);
+      this.handles.delete(move.producer.handle);
+      move.producer.handle = move.handle;
+      move.producer.reloadEpoch = epoch;
+      move.producer.lastSequence = 0;
+      this.handles.set(move.handle, move.producer);
+    }
     this.committedEpoch = epoch;
-    for (const producer of this.producers.values()) this.moveProducerToEpoch(producer, epoch);
   }
 
   public rollbackEpoch(epoch: number): void {
@@ -213,21 +237,14 @@ export class BoardRuntime implements CapabilityRuntime {
     return { descriptor, schema, subscribers: new Map(), handle, reloadEpoch, periodMs, lastSequence: 0 };
   }
 
-  private moveProducerToEpoch(producer: Producer, reloadEpoch: number): void {
-    if (producer.reloadEpoch === reloadEpoch) return;
-    this.adapter.cancel(producer.handle);
-    this.handles.delete(producer.handle);
-    producer.handle = this.adapter.submit({ version: 1, kind: "observe", instanceId: producer.descriptor.instanceId, periodMs: producer.periodMs, reloadEpoch });
-    producer.reloadEpoch = reloadEpoch;
-    producer.lastSequence = 0;
-    this.handles.set(producer.handle, producer);
-  }
-
   private cancelSubscriber(instanceId: string, producer: Producer, subscriber: Subscriber): void {
     if (!subscriber.active) return;
     subscriber.active = false;
     producer.subscribers.delete(subscriber.id);
-    if (producer.subscribers.size !== 0) return;
+    if (producer.subscribers.size !== 0) {
+      this.reconfigureProducer(producer, this.effectivePeriod(producer));
+      return;
+    }
     this.adapter.cancel(producer.handle);
     this.handles.delete(producer.handle);
     this.producers.delete(instanceId);
@@ -273,6 +290,28 @@ export class BoardRuntime implements CapabilityRuntime {
   private readCached<T>(instanceId: string, schema: CapabilitySchema<T>): Reading | undefined {
     const event = this.adapter.readCached(instanceId);
     return event === undefined || !isCachedEventValid(event, 512) ? undefined : decodeReading(event, schema);
+  }
+
+  private subscriberCount(): number {
+    return [...this.producers.values()].reduce((total, producer) => total + producer.subscribers.size, 0);
+  }
+
+  private effectivePeriod(producer: Producer, pendingPeriodMs?: number): number {
+    const periods = [...producer.subscribers.values()].map((subscriber) => subscriber.periodMs);
+    if (pendingPeriodMs !== undefined) periods.push(pendingPeriodMs);
+    return Math.min(...periods);
+  }
+
+  /** Replaces the native observation only after its replacement has been admitted. */
+  private reconfigureProducer(producer: Producer, periodMs: number): void {
+    if (producer.periodMs === periodMs) return;
+    const handle = this.adapter.submit({ version: 1, kind: "observe", instanceId: producer.descriptor.instanceId, periodMs, reloadEpoch: producer.reloadEpoch });
+    this.adapter.cancel(producer.handle);
+    this.handles.delete(producer.handle);
+    producer.handle = handle;
+    producer.periodMs = periodMs;
+    producer.lastSequence = 0;
+    this.handles.set(handle, producer);
   }
 
   private instances(schema: CapabilitySchema<unknown>): { id: string; isDefault: boolean; source: string }[] {
