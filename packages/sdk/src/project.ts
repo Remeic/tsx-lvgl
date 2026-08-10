@@ -91,6 +91,23 @@ interface SourcePackResult {
   readonly byteLength: number;
 }
 
+export interface InstalledSdkPackRuntime {
+  exists(path: string): boolean;
+  makeTemporaryDirectory(prefix: string): string;
+  remove(path: string): void;
+  run(command: string, args: readonly string[], cwd: string): { readonly status: number | null; readonly stdout: string };
+}
+
+const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
+  exists: existsSync,
+  makeTemporaryDirectory: mkdtempSync,
+  remove: (path) => rmSync(path, { recursive: true, force: true }),
+  run: (command, args, cwd) => {
+    const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: "pipe" });
+    return { status: result.status, stdout: result.stdout };
+  },
+};
+
 export async function createProject(
   target: string,
   artifactArgument?: string,
@@ -642,17 +659,19 @@ function parseSourcePackResult(stdout: string): SourcePackResult {
   };
 }
 
-function packInstalledSdk(): string {
-  const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+export function packInstalledSdk(
+  sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), ".."),
+  runtime: InstalledSdkPackRuntime = DEFAULT_INSTALLED_SDK_PACK_RUNTIME,
+): string {
   const vendorCore = join(sdkRoot, "dist", "vendor", "core");
-  if (!existsSync(vendorCore)) {
+  if (!runtime.exists(vendorCore)) {
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "create needs --artifact when the CLI is not running from a packed SDK");
   }
-  const outputRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-create-"));
+  const outputRoot = runtime.makeTemporaryDirectory(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-create-"));
   const args = ["pack", sdkRoot, "--ignore-scripts", "--json", "--pack-destination", outputRoot];
-  const result = spawnSync("npm", args, { cwd: sdkRoot, encoding: "utf8", stdio: "pipe" });
+  const result = runtime.run("npm", args, sdkRoot);
   if (result.status !== 0) {
-    rmSync(outputRoot, { recursive: true, force: true });
+    runtime.remove(outputRoot);
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "the installed SDK could not be repacked");
   }
   let metadata: { filename: string } | undefined;
@@ -662,7 +681,7 @@ function packInstalledSdk(): string {
     metadata = undefined;
   }
   if (metadata === undefined) {
-    rmSync(outputRoot, { recursive: true, force: true });
+    runtime.remove(outputRoot);
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "the installed SDK returned no artifact");
   }
   return join(outputRoot, metadata.filename);

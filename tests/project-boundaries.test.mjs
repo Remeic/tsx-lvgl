@@ -183,5 +183,16 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   const packedArtifact = JSON.parse(packed.stdout).artifactPath;
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: ${JSON.stringify(packedArtifact)}, packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  const originalSource = process.env.TSX_LVGL_SOURCE;
+  const originalConfig = process.env.TSX_LVGL_CONFIG;
+  const machineConfig = join(sandbox, "machine-config.json");
+  writeFileSync(machineConfig, JSON.stringify({ sourcePath: source }));
+  delete process.env.TSX_LVGL_SOURCE;
+  process.env.TSX_LVGL_CONFIG = machineConfig;
+  await assertAsyncCode(() => updateProject(root), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  writeFileSync(machineConfig, "not json");
+  await assertAsyncCode(() => updateProject(root), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
+  if (originalSource === undefined) delete process.env.TSX_LVGL_SOURCE; else process.env.TSX_LVGL_SOURCE = originalSource;
+  if (originalConfig === undefined) delete process.env.TSX_LVGL_CONFIG; else process.env.TSX_LVGL_CONFIG = originalConfig;
   assert.equal(existsSync(join(root, ".tsx-lvgl", "framework.lock.json")), true);
 });
