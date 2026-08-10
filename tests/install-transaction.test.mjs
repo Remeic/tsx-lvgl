@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,4 +57,19 @@ test("transaction removes newly-created dependency state after a failed first in
   await assert.rejects(readFile(join(root, "package.json")), { code: "ENOENT" });
   const result = await withInstallTransaction(root, async () => "committed");
   assert.equal(result, "committed");
+});
+
+test("transaction accepts an explicitly injected filesystem adapter", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-transaction-adapter-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filesystem = {
+    exists: existsSync,
+    makeTemporaryDirectory: mkdtempSync,
+    readFile: readFileSync,
+    rename: renameSync,
+    remove: rmSync,
+    makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+    writeFile: writeFileSync,
+  };
+  assert.equal(await withInstallTransaction(root, async () => "adapter", filesystem), "adapter");
 });

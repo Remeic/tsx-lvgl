@@ -72,6 +72,9 @@ test("CLI runtime emits help, doctor failures, usage failures and operation erro
   assert.equal(await runCli(["create", "--artifact"], "/cwd", operations(), output.writer), 2);
   assert.match(output.errors[0], /requires a value/);
   output = recorder();
+  assert.equal(await runCli(["create", "--artifact", "--json"], "/cwd", operations(), output.writer), 2);
+  assert.equal(JSON.parse(output.errors[0]).code, DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND);
+  output = recorder();
   assert.equal(await runCli(["create", "--json"], "/cwd", operations(), output.writer), 2);
   assert.equal(JSON.parse(output.errors[0]).code, DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND);
   output = recorder();

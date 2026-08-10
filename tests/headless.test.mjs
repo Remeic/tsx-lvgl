@@ -29,6 +29,8 @@ test("headless native exercises lifecycle, hierarchy, sensors, timers and edge c
   host.native.lvgl.insert(screen, first, 99);
   host.native.lvgl.insert(screen, second, -1);
   host.native.lvgl.insert(screen, first, 0);
+  host.native.lvgl.remove(screen, second);
+  host.native.lvgl.insert(screen, second, 1);
   host.native.lvgl.remove(screen, 999);
   host.native.lvgl.loadScreen(screen);
   assert.deepEqual(host.activeTexts(), ["first", "second"]);
