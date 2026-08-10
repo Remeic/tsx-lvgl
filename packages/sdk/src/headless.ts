@@ -32,7 +32,7 @@ export async function runHeadless(bundle: RuntimeBundle, boardId: string): Promi
   };
 }
 
-function createHeadlessNative(boardId: string): {
+export function createHeadlessNative(boardId: string): {
   readonly native: NativeBindings;
   readonly logs: string[];
   activeTexts(): readonly string[];
