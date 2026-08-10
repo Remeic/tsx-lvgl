@@ -1,9 +1,9 @@
 # TSX-LVGL runtime probe
 
 Dev runtime host for the ESP32-S3 V1 board: the compiled `core + sensors +
-runtime + device` packages ("kernel") plus the `ShakeFace` app baked in as
+runtime + device` packages ("kernel") plus a small `ShakeFace` verification app baked in as
 bundle generation 1, both embedded at build time. On boot the probe evaluates
-the kernel, mounts `ShakeFace`, and then accepts hot-reloaded app bundles over
+the kernel, mounts the verification fixture, and then accepts hot-reloaded app bundles over
 a dev-only USB Serial/JTAG transport — no reflash required to try a new app
 bundle. It is not a product path or release artifact; this committed source
 and build harness proves the runtime-first architecture on the physical
@@ -12,16 +12,16 @@ target, while board captures remain transient evidence. See
 for the normative contracts (native ABI, bundle format, transport wire
 protocol).
 
-`ShakeFace` (`examples/apps/ShakeFace.tsx`) is an internal verification app
+`ShakeFace` (`tests/fixtures/shakeface-a.tsx`) is an internal verification fixture
 only, not a published example.
 
 ## Regenerate the embedded bundles
 
-From the repository root, after any change to `examples/apps/ShakeFace.tsx`
+From the repository root, after any change to `tests/fixtures/shakeface-a.tsx`
 or the `core`/`sensors`/`runtime`/`device` packages:
 
 ```bash
-node scripts/bundle-app.mjs --entry examples/apps/ShakeFace.tsx \
+node scripts/bundle-app.mjs --entry tests/fixtures/shakeface-a.tsx \
   --out examples/esp-idf/runtime_port_probe/main \
   --bundle-id shakeface --generation 1
 node scripts/build-kernel.mjs
@@ -87,7 +87,7 @@ Build a new generation and push it over the probe's USB Serial/JTAG port
 while it's running:
 
 ```bash
-node scripts/bundle-app.mjs --entry examples/apps/ShakeFace.tsx \
+node scripts/bundle-app.mjs --entry tests/fixtures/shakeface-a.tsx \
   --out /tmp/shakeface-g2 --bundle-id shakeface --generation 2
 ./tools/push-bundle --port /dev/cu.usbmodemXXX \
   --bundle /tmp/shakeface-g2/shakeface.g2.js \

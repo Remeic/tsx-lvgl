@@ -24,7 +24,7 @@ import { makeFakeNative } from "./support/fake-native.js";
 // from there is the repo root regardless of the cwd `node --test` runs from.
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
-const shakeFaceSource = readFileSync(join(repoRoot, "examples/apps/ShakeFace.tsx"), "utf8");
+const shakeFaceSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-a.tsx"), "utf8");
 const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
 
 const calmMotion = { accelerationMps2: [0, 0, 9.80665] as const, angularVelocityDps: [0, 0, 0] as const };

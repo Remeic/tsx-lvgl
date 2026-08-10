@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true,
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../core" },
+    { "path": "../sensors" },
+    { "path": "../runtime" },
+    { "path": "../bundler" },
+    { "path": "../device" }
+  ],
+  "include": ["src/**/*.ts"]
+}

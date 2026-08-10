@@ -6,6 +6,7 @@
     { "path": "packages/runtime" },
     { "path": "packages/bundler" },
     { "path": "packages/device" },
+    { "path": "packages/sdk" },
     { "path": "tsconfig.tests.json" },
     { "path": "tsconfig.examples.json" }
   ]

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -9,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -24,6 +25,11 @@ import {
   VALIDATION_GIT_SHA_ENV,
   VALIDATION_GIT_STATE_ENV,
 } from "../scripts/validation-context.mjs";
+import { emitMutationOutput } from "../scripts/build-mutation-output.mjs";
+import {
+  assertMutationDryRunBudget,
+  MUTATION_DRY_RUN_BUDGET_MS,
+} from "../scripts/run-mutation-dry-run.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,6 +73,60 @@ test("test output preparation rejects any cleanup target other than test-dist", 
     () => resolveTestOutputDirectory("relative/repository"),
     /repository root must be absolute/,
   );
+});
+
+test("mutation output re-emits JavaScript without changing the strict declaration snapshot", async (t) => {
+  const mutationRoot = await mkdtemp(join(tmpdir(), "tsx-lvgl-mutation-output-"));
+  t.after(async () => {
+    await rm(mutationRoot, { recursive: true, force: true });
+  });
+  const sourceRoot = join(mutationRoot, "packages", "core", "src");
+  const outputRoot = join(mutationRoot, "packages", "core", "dist");
+  await Promise.all([
+    mkdir(sourceRoot, { recursive: true }),
+    mkdir(outputRoot, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(sourceRoot, "index.ts"), 'export const Screen = "instrumented";\n'),
+    writeFile(join(outputRoot, "index.d.ts"), 'export declare const Screen = "Screen";\n'),
+  ]);
+  for (const packageName of ["sensors", "runtime", "bundler", "device", "sdk"]) {
+    await Promise.all([
+      mkdir(join(mutationRoot, "packages", packageName, "src"), { recursive: true }),
+      mkdir(join(mutationRoot, "packages", packageName, "dist"), { recursive: true }),
+    ]);
+  }
+
+  const emitted = emitMutationOutput(mutationRoot);
+
+  assert.deepEqual(emitted, [join(outputRoot, "index.js")]);
+  assert.match(await readFile(join(outputRoot, "index.js"), "utf8"), /instrumented/);
+  assert.doesNotMatch(await readFile(join(outputRoot, "index.js"), "utf8"), /exports\./);
+  assert.equal(
+    await readFile(join(outputRoot, "index.d.ts"), "utf8"),
+    'export declare const Screen = "Screen";\n',
+  );
+});
+
+test("Stryker dry run uses the declaration-preserving mutation harness", async () => {
+  const [manifest, config] = await Promise.all([
+    readFile(join(repositoryRoot, "package.json"), "utf8"),
+    readFile(join(repositoryRoot, "stryker.config.mjs"), "utf8"),
+  ]);
+  assert.match(manifest, /"mutation:dry-run": "node scripts\/run-mutation-dry-run\.mjs"/);
+  assert.match(manifest, /"test:mutation": ".*tests\/mutation-sdk\.test\.mjs/);
+  assert.match(manifest, /"mutation": "npm test && stryker run && npm test"/);
+  assert.match(config, /TSX_LVGL_MUTATION_BUILD=1 TSX_LVGL_VALIDATION_GIT_SHA/);
+  assert.match(config, /node scripts\/build-mutation-output\.mjs/);
+  assert.match(config, /npm run test:mutation/);
+  assert.doesNotMatch(config, /project-lifecycle\.test\.mjs/);
+  assert.doesNotMatch(config, /buildCommand: ".*tsc -b/);
+});
+
+test("mutation dry-run budget fails closed above ten seconds", () => {
+  assert.equal(MUTATION_DRY_RUN_BUDGET_MS, 10_000);
+  assert.doesNotThrow(() => assertMutationDryRunBudget(9_999));
+  assert.throws(() => assertMutationDryRunBudget(10_001), /exceeded 10000ms/);
 });
 
 test("validation context has stable machine-readable fields", () => {
@@ -208,5 +268,50 @@ esac
       },
     }),
     (error) => error.code === 23,
+  );
+});
+
+test("SDK packing uses a validated hermetic Git snapshot only when metadata is unavailable", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-pack-hermetic-"));
+  t.after(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+  });
+  const fakeBin = join(sandbox, "bin");
+  await mkdir(fakeBin, { recursive: true });
+  const fakeGit = join(fakeBin, "git");
+  await writeFile(fakeGit, "#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n");
+  await chmod(fakeGit, 0o755);
+
+  const sourceSha = "0123456789abcdef0123456789abcdef01234567";
+  const outputRoot = join(sandbox, "artifact");
+  const packed = await execFile(process.execPath, [
+    join(repositoryRoot, "scripts", "pack-sdk.mjs"),
+    "--out",
+    outputRoot,
+    "--json",
+  ], {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+      TSX_LVGL_VALIDATION_GIT_SHA: sourceSha,
+      TSX_LVGL_VALIDATION_GIT_STATE: "clean",
+    },
+  });
+  const metadata = JSON.parse(packed.stdout);
+  assert.equal(metadata.sourceSha, sourceSha);
+  assert.equal(metadata.sourceDirty, false);
+
+  await assert.rejects(
+    execFile(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--json"], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+        TSX_LVGL_VALIDATION_GIT_SHA: "malformed",
+        TSX_LVGL_VALIDATION_GIT_STATE: "missing",
+      },
+    }),
+    /TSX_LVGL_VALIDATION_GIT_SHA must be a full hexadecimal object ID/,
   );
 });

@@ -2,16 +2,29 @@
 const config = {
   testRunner: "command",
   commandRunner: {
-    // Compile each mutant, then run the already-compiled suite. The public
-    // test command cleans first, which would discard Stryker's sandbox output.
-    command: "npx tsc -b --noCheck --pretty false && npm run test:compiled",
+    // The strict build before Stryker creates the public declaration snapshot.
+    // Emit only instrumented JavaScript here: instrumentation can widen public
+    // literal types, which is not a consumer API mutation. Per-mutant runs use
+    // direct, injected lifecycle seams; full coverage and installed-consumer
+    // contracts remain mandatory before/after the campaign, not per mutant.
+    command: "export TSX_LVGL_MUTATION_BUILD=1 TSX_LVGL_VALIDATION_GIT_SHA=\"$(git rev-parse HEAD)\" TSX_LVGL_VALIDATION_GIT_STATE=clean; node scripts/build-mutation-output.mjs && npm run test:mutation",
   },
-  // Install workspace links inside the sandbox before building. This keeps
-  // mutation runs isolated from the checkout while preserving package exports.
-  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --noCheck --pretty false",
+  // `npm run mutation` runs the strict build before Stryker. The sandbox keeps
+  // those baseline declarations and only installs its isolated dependencies.
+  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false",
   inPlace: false,
   symlinkNodeModules: false,
-  mutate: ["packages/*/src/**/*.ts"],
+  // Every shipped TypeScript module is mutation-tested. Consumer lifecycle,
+  // CLI, packaging and provenance tests run for every mutant too, because the
+  // SDK is only supported through that installed-package boundary.
+  mutate: [
+    "packages/core/src/**/*.ts",
+    "packages/sensors/src/**/*.ts",
+    "packages/runtime/src/**/*.ts",
+    "packages/bundler/src/**/*.ts",
+    "packages/device/src/**/*.ts",
+    "packages/sdk/src/**/*.ts",
+  ],
   // The ESP-IDF probe is validated by its own firmware gate. Its generated
   // managed_components tree is not part of the host mutation project.
   ignorePatterns: [
