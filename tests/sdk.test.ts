@@ -1,18 +1,12 @@
 import { strict as assert } from "node:assert";
 import { jsx } from "@tsx-lvgl/core/jsx-runtime";
 import type { VNode } from "@tsx-lvgl/core";
+import { BoardRuntime, MemoryBoardAdapter, createDefaultBoardDescriptors, encodeBoardPayload } from "@tsx-lvgl/device";
 import * as sdk from "@tsx-lvgl/sdk";
 import { APPLICATION_FACADE_KEYS } from "@tsx-lvgl/core";
-import {
-  motionSchema,
-  type MotionSample,
-  type Sensor,
-  type SensorContext,
-  type SensorSample,
-} from "@tsx-lvgl/sensors";
 import { test } from "node:test";
 
-import { createHarness, sensorCapabilities } from "./support/harness.js";
+import { createHarness } from "./support/harness.js";
 
 test("SDK facade exposes only the supported application surface", () => {
   assert.deepEqual(Object.keys(sdk).sort(), [...APPLICATION_FACADE_KEYS].sort());
@@ -30,38 +24,32 @@ test("SDK facade exposes only the supported application surface", () => {
   ]);
 });
 
-test("useMotion reads the motion schema through the runtime hook", async () => {
-  const sensor: Sensor<MotionSample> = {
-    schema: motionSchema,
-    read(context: SensorContext): Promise<SensorSample<MotionSample>> {
-      return Promise.resolve({
-        sensorId: motionSchema.id,
-        schemaVersion: motionSchema.version,
-        sequence: 1,
-        sampledAtMs: 10,
-        reloadEpoch: context.reloadEpoch,
-        status: "ok",
-        value: {
-          accelerationMps2: [0, 0, 0],
-          angularVelocityDps: [0, 0, 0],
-        },
-      });
-    },
-    subscribe(): () => void {
-      return () => undefined;
-    },
-  };
-  const { host, scheduler, runtime } = createHarness({ capabilities: sensorCapabilities(sensor) });
+test("useMotion reads the motion schema through the board capability runtime", () => {
+  const adapter = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
+  const board = new BoardRuntime(adapter);
+  const { host, scheduler, runtime } = createHarness({ board });
 
   function App(): VNode {
-    const sample = sdk.useMotion();
-    return jsx(sdk.Screen, { children: jsx(sdk.Text, { text: sample?.status ?? "waiting" }) });
+    const motion = sdk.useMotion();
+    return jsx(sdk.Screen, { children: jsx(sdk.Text, { text: motion.state.status }) });
   }
 
   runtime.mount(jsx(App, {}));
-  await Promise.resolve();
-  await Promise.resolve();
+  assert.equal(host.text(), "starting");
+  adapter.emit({
+    version: 1,
+    kind: "state",
+    handle: 1,
+    reloadEpoch: 1,
+    sequence: 1,
+    observedAtMs: 10,
+    payload: encodeBoardPayload({
+      status: "ok",
+      schemaVersion: 1,
+      value: { accelerationMps2: [0, 0, 0], angularVelocityDps: [0, 0, 0] },
+    }),
+  });
   scheduler.flush();
-  assert.equal(host.text(), "ok");
+  assert.equal(host.text(), "ready");
   runtime.unmount();
 });

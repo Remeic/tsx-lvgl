@@ -23,20 +23,19 @@ const SHAKE_COOLDOWN_MS = 700;
 
 export default function ShakeFaceB(): VNode {
   const [happy, setHappy] = useState(true);
-  // -Infinity: any real sampledAtMs clears the cooldown, so the first shake always counts.
+  // -Infinity: any real observedAtMs clears the cooldown, so the first shake always counts.
   const [lastShakeAt, setLastShakeAt] = useState(-Infinity);
-  const sample = useMotion();
+  const motion = useMotion();
 
   useEffect(() => {
-    if (sample === undefined) return;
-    if (sample.status !== "ok" || sample.value === undefined) return;
-    if (!isShake(sample.value)) return;
-    if (sample.sampledAtMs - lastShakeAt < SHAKE_COOLDOWN_MS) return;
-    setLastShakeAt(sample.sampledAtMs);
+    if (motion.state.status !== "ready" && motion.state.status !== "stale") return;
+    if (!isShake(motion.state.value)) return;
+    if (motion.state.observedAtMs - lastShakeAt < SHAKE_COOLDOWN_MS) return;
+    setLastShakeAt(motion.state.observedAtMs);
     setHappy((current) => !current);
-  }, [sample]);
+  }, [motion.state]);
 
-  const imuUnavailable = sample !== undefined && sample.status !== "ok";
+  const imuUnavailable = motion.state.status === "unavailable" || motion.state.status === "error" || motion.state.status === "unsupported";
   const status = imuUnavailable
     ? "B: IMU non disponibile"
     : happy

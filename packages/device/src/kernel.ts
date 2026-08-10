@@ -23,12 +23,12 @@ import * as runtimeModule from "@tsx-lvgl/runtime";
 import {
   useEffect,
   useInterval,
-  useSensor,
+  useMotion,
   useState,
 } from "@tsx-lvgl/runtime";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
 import * as sensorsModule from "@tsx-lvgl/sensors";
-import { isShake, motionSchema } from "@tsx-lvgl/sensors";
+import { isShake } from "@tsx-lvgl/sensors";
 import * as capabilitiesModule from "@tsx-lvgl/capabilities";
 import { BoardRuntime } from "./board-runtime.js";
 import { createClickRegistry, createLvglHost } from "./lvgl-host.js";
@@ -69,7 +69,7 @@ function resolveModule(specifier: string): Record<string, unknown> {
         View,
         useEffect,
         useInterval,
-        useMotion: () => useSensor(motionSchema),
+        useMotion,
         useState,
         isShake,
       }) as Record<string, unknown>;

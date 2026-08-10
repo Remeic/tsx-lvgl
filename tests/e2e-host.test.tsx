@@ -17,7 +17,6 @@ import {
   validateRuntimeBundle,
   type RuntimeBundle,
 } from "@tsx-lvgl/runtime";
-import { motionSchema } from "@tsx-lvgl/sensors";
 import { makeFakeNative } from "./support/fake-native.js";
 
 // Compiled test files live at test-dist/tests/e2e-host.test.js; two hops up
@@ -28,7 +27,6 @@ const shakeFaceSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-a.
 const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
 
 const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
-const calmMotion = { accelerationMps2: [0, 0, 9.80665] as const, angularVelocityDps: [0, 0, 0] as const };
 
 function compileShakeFace(generation: number): BundleOutput {
   return compileTsxBundle({
@@ -58,9 +56,6 @@ function toBundle(output: BundleOutput): RuntimeBundle {
 function startedKernel() {
   const fake = makeFakeNative(BOARD_ID);
   const kernel = createKernel(fake.native);
-  // Variant B remains a legacy-sensor reload fixture; keep that seam valid
-  // while the shipped ShakeFace consumes the board transport.
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 0, value: calmMotion });
   kernel.start(toBundle(compileShakeFace(1)));
   return { fake, kernel };
 }

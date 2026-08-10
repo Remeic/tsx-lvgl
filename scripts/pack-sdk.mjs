@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SDK_ROOT = resolve(ROOT, "packages/sdk");
-const PACKAGE_NAMES = ["core", "sensors", "runtime", "bundler", "device"];
+const PACKAGE_NAMES = ["core", "capabilities", "sensors", "runtime", "bundler", "device"];
 const VALIDATION_GIT_SHA_ENV = "TSX_LVGL_VALIDATION_GIT_SHA";
 const VALIDATION_GIT_STATE_ENV = "TSX_LVGL_VALIDATION_GIT_STATE";
 const FULL_GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
@@ -219,6 +219,7 @@ function rewriteInternalImports(stagingDist) {
   const replacements = {
     "@tsx-lvgl/core/jsx-runtime": ["core", "jsx-runtime.js"],
     "@tsx-lvgl/core": ["core", "index.js"],
+    "@tsx-lvgl/capabilities": ["capabilities", "index.js"],
     "@tsx-lvgl/runtime": ["runtime", "index.js"],
     "@tsx-lvgl/sensors": ["sensors", "index.js"],
     "@tsx-lvgl/bundler": ["bundler", "index.js"],

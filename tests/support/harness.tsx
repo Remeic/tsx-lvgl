@@ -17,6 +17,7 @@ import {
   type SensorSample,
   type SensorSchema,
 } from "@tsx-lvgl/sensors";
+import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
 import { strict as assert } from "node:assert";
 
 import { advanceTimers } from "./time.js";
@@ -285,6 +286,7 @@ export interface Harness {
 
 export interface CreateHarnessOptions {
   readonly capabilities?: DeviceCapabilities;
+  readonly board?: CapabilityRuntime;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -301,6 +303,7 @@ export function createHarness(options: CreateHarnessOptions = {}): Harness {
     host,
     scheduler,
     ...(options.capabilities !== undefined ? { capabilities: options.capabilities } : {}),
+    ...(options.board !== undefined ? { board: options.board } : {}),
     onError: options.onError ?? ((error: unknown) => errors.push(error)),
   });
   return { host, scheduler, runtime, errors };
