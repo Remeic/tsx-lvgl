@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, posix, resolve } from "node:path";
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, posix, relative, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { valid as validSemver } from "semver";
 
@@ -30,6 +30,7 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
     if (!existsSync(path)) {
       throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "framework artifact is missing");
     }
+    assertArtifactFile(path);
     const bytes = readFileSync(path);
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest !== lock.artifact.sha256 || statSync(path).size !== lock.artifact.byteLength) {
@@ -56,9 +57,8 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
       throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
     }
     const artifactFile = artifactFileName(provenance.version);
-    const destination = resolveProjectArtifact(root, `.tsx-lvgl/artifacts/${artifactFile}`);
-    mkdirSync(dirname(destination), { recursive: true });
-    copyFileSync(artifactPath, destination);
+    const destination = resolveProjectArtifact(root, `.tsx-lvgl/artifacts/${artifactFile}`, true);
+    replaceArtifactAtomically(destination, readFileSync(artifactPath));
     const bytes = readFileSync(destination);
     return {
       formatVersion: LOCK_FORMAT_VERSION,
@@ -87,11 +87,74 @@ export function validateArtifactReference(file: string): void {
   }
 }
 
-function resolveProjectArtifact(root: string, file: string): string {
+function resolveProjectArtifact(root: string, file: string, createDirectory = false): string {
   validateArtifactReference(file);
-  // `validateArtifactReference` accepts only canonical descendants of this
-  // fixed relative directory, so lexical resolution cannot leave it.
-  return resolve(root, file);
+  const projectRoot = resolve(root);
+  const artifacts = projectArtifactDirectory(projectRoot, createDirectory);
+  const destination = resolve(projectRoot, file);
+  if (!isContained(projectRoot, destination) || !isContained(artifacts, destination)) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
+  }
+  if (existsSync(destination)) assertArtifactFile(destination);
+  return destination;
+}
+
+function projectArtifactDirectory(root: string, createDirectory: boolean): string {
+  const canonicalRoot = canonicalDirectory(root);
+  let current = root;
+  for (const component of [".tsx-lvgl", "artifacts"]) {
+    current = join(current, component);
+    if (!existsSync(current)) {
+      if (!createDirectory) return current;
+      mkdirSync(current);
+    }
+    const details = lstatSync(current);
+    if (!details.isDirectory() || details.isSymbolicLink()) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory must not be a symlink");
+    }
+    const canonicalCurrent = canonicalDirectory(current);
+    if (!isContained(canonicalRoot, canonicalCurrent)) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory escapes the project");
+    }
+  }
+  return current;
+}
+
+function canonicalDirectory(path: string): string {
+  try {
+    if (!lstatSync(path).isDirectory()) throw new Error("not a directory");
+    return realpathSync(path);
+  } catch {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project artifact directory is unavailable");
+  }
+}
+
+function isContained(parent: string, child: string): boolean {
+  const difference = relative(parent, child);
+  return difference === "" || (!difference.startsWith("..") && !isAbsolute(difference));
+}
+
+function assertArtifactFile(path: string): void {
+  const details = lstatSync(path);
+  if (!details.isFile() || details.isSymbolicLink()) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact must not be a symlink");
+  }
+}
+
+function replaceArtifactAtomically(destination: string, bytes: Uint8Array): void {
+  const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    writeFileSync(descriptor, bytes);
+    closeSync(descriptor);
+    descriptor = undefined;
+    /* rename replaces a raced final symlink itself, never its target. */
+    renameSync(temporary, destination);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }
 
 function artifactFileName(version: string): string {

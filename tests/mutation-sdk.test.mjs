@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -117,6 +117,35 @@ test("artifact-store rejects escaped lock paths and unsafe provenance versions",
     { code: DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH },
   );
   assert.equal(existsSync(join(root, "escaped.tgz")), false);
+});
+
+test("artifact-store refuses artifact-directory and final-file symlink escapes without touching the target", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-symlink-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(sourceArtifact, "new SDK artifact");
+  const outsideArtifact = join(outside, "tsx-lvgl-sdk-0.1.0.tgz");
+  writeFileSync(outsideArtifact, "keep this outside value");
+  symlinkSync(outside, join(root, ".tsx-lvgl", "artifacts"), "dir");
+
+  assert.throws(
+    () => DEFAULT_ARTIFACT_STORE.install(root, sourceArtifact, metadata(sourceArtifact)),
+    { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+  );
+  assert.equal(readFileSync(outsideArtifact, "utf8"), "keep this outside value");
+  assert.equal(existsSync(join(outside, "tsx-lvgl-sdk-0.1.0.tgz")), true);
+  assert.throws(() => DEFAULT_ARTIFACT_STORE.resolve(root, lock()), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+
+  rmSync(join(root, ".tsx-lvgl", "artifacts"));
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"));
+  symlinkSync(outsideArtifact, join(root, lock().artifact.file));
+  assert.throws(() => DEFAULT_ARTIFACT_STORE.resolve(root, lock()), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  assert.throws(() => DEFAULT_ARTIFACT_STORE.verify(join(root, lock().artifact.file), lock()), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  assert.equal(readFileSync(outsideArtifact, "utf8"), "keep this outside value");
 });
 
 test("artifact references reject every non-canonical persisted path shape", () => {
