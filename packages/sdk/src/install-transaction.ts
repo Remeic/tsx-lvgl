@@ -71,14 +71,12 @@ export async function withInstallTransaction<T>(
   action: () => Promise<T>,
   filesystem: InstallTransactionFs = DEFAULT_INSTALL_TRANSACTION_FS,
 ): Promise<T> {
-  let rollbackRoot: string | undefined;
+  const rollbackRoot = filesystem.makeSiblingTemporaryDirectory(root, `.${basename(root)}.tsx-lvgl-install-rollback-`);
   let metadata: readonly FileSnapshot[] = [];
   let directories: readonly DirectorySnapshot[] = [];
   try {
-    const activeRollbackRoot = filesystem.makeSiblingTemporaryDirectory(root, `.${basename(root)}.tsx-lvgl-install-rollback-`);
-    rollbackRoot = activeRollbackRoot;
     metadata = METADATA_PATHS.map((path) => snapshotFile(join(root, path), filesystem));
-    directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(root, activeRollbackRoot, definition.path, definition.move, filesystem));
+    directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(root, rollbackRoot, definition.path, definition.move, filesystem));
     for (const directory of directories) {
       if (directory.existed) {
         filesystem.makeDirectory(dirname(directory.backupPath));
@@ -99,7 +97,7 @@ export async function withInstallTransaction<T>(
     restoreFiles(metadata, filesystem);
     throw error;
   } finally {
-    if (rollbackRoot !== undefined) filesystem.remove(rollbackRoot, { recursive: true, force: true });
+    filesystem.remove(rollbackRoot, { recursive: true, force: true });
   }
 }
 
