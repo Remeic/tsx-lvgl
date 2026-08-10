@@ -20,7 +20,8 @@ import {
 } from "../packages/sdk/dist/project.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SHA = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }).stdout.trim();
+const SHA = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }).stdout.trim()
+  || process.env.TSX_LVGL_VALIDATION_GIT_SHA;
 
 function assertCode(action, code) {
   assert.throws(action, { code });
@@ -214,7 +215,7 @@ test("package-manager and lock alternatives preserve the consumer boundary", asy
   writeFileSync(packagePath, `${JSON.stringify(packageJson)}\n`);
   const bin = join(sandbox, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "bun"), "#!/bin/sh\nexec /opt/homebrew/opt/node@24/bin/npm install --ignore-scripts\n");
+  writeFileSync(join(bin, "bun"), `#!/bin/sh\nexec ${join(dirname(process.execPath), "npm")} install --ignore-scripts\n`);
   chmodSync(join(bin, "bun"), 0o755);
   const previousPath = process.env.PATH;
   process.env.PATH = `${bin}:${previousPath}`;
