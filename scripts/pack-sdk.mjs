@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SDK_ROOT = resolve(ROOT, "packages/sdk");
 const PACKAGE_NAMES = ["core", "sensors", "runtime", "bundler", "device"];
+const VALIDATION_GIT_SHA_ENV = "TSX_LVGL_VALIDATION_GIT_SHA";
+const VALIDATION_GIT_STATE_ENV = "TSX_LVGL_VALIDATION_GIT_STATE";
+const FULL_GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 function usage() {
   return `Usage:
@@ -44,7 +47,7 @@ function parseArgs(argv) {
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed`);
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr ?? ""}`.trim());
   }
   return result;
 }
@@ -56,6 +59,41 @@ function readPackage(packageRoot) {
 function gitValue(args) {
   const result = run("git", args, { cwd: ROOT, stdio: "pipe" });
   return result.stdout.trim();
+}
+
+function collectSourceProvenance(environment = process.env) {
+  try {
+    return {
+      sourceSha: gitValue(["rev-parse", "HEAD"]),
+      sourceDirty: gitValue(["status", "--porcelain"]).length > 0,
+    };
+  } catch (error) {
+    if (!isGitMetadataUnavailable(error)) throw error;
+    return sourceProvenanceFromEnvironment(environment);
+  }
+}
+
+function isGitMetadataUnavailable(error) {
+  return /not a git repository/i.test(error instanceof Error ? error.message : String(error));
+}
+
+function sourceProvenanceFromEnvironment(environment) {
+  const sourceSha = requiredEnvironmentValue(VALIDATION_GIT_SHA_ENV, environment[VALIDATION_GIT_SHA_ENV]);
+  if (!FULL_GIT_SHA_PATTERN.test(sourceSha)) {
+    throw new Error(`${VALIDATION_GIT_SHA_ENV} must be a full hexadecimal object ID`);
+  }
+  const sourceState = requiredEnvironmentValue(VALIDATION_GIT_STATE_ENV, environment[VALIDATION_GIT_STATE_ENV]);
+  if (sourceState !== "clean" && sourceState !== "dirty") {
+    throw new Error(`${VALIDATION_GIT_STATE_ENV} must be clean or dirty`);
+  }
+  return { sourceSha, sourceDirty: sourceState === "dirty" };
+}
+
+function requiredEnvironmentValue(name, value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${name} is required when Git metadata is unavailable`);
+  }
+  return value.trim();
 }
 
 function main() {
@@ -77,8 +115,7 @@ function main() {
     copyTypeScript(stagingDist);
     rewriteInternalImports(stagingDist);
 
-    const sourceSha = gitValue(["rev-parse", "HEAD"]);
-    const dirty = gitValue(["status", "--porcelain"]).length > 0;
+    const { sourceSha, sourceDirty: dirty } = collectSourceProvenance();
     const provenance = {
       formatVersion: 1,
       packageName: sdkPackage.name,

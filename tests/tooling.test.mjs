@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -9,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -208,5 +209,50 @@ esac
       },
     }),
     (error) => error.code === 23,
+  );
+});
+
+test("SDK packing uses a validated hermetic Git snapshot only when metadata is unavailable", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-pack-hermetic-"));
+  t.after(async () => {
+    await rm(sandbox, { recursive: true, force: true });
+  });
+  const fakeBin = join(sandbox, "bin");
+  await mkdir(fakeBin, { recursive: true });
+  const fakeGit = join(fakeBin, "git");
+  await writeFile(fakeGit, "#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n");
+  await chmod(fakeGit, 0o755);
+
+  const sourceSha = "0123456789abcdef0123456789abcdef01234567";
+  const outputRoot = join(sandbox, "artifact");
+  const packed = await execFile(process.execPath, [
+    join(repositoryRoot, "scripts", "pack-sdk.mjs"),
+    "--out",
+    outputRoot,
+    "--json",
+  ], {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+      TSX_LVGL_VALIDATION_GIT_SHA: sourceSha,
+      TSX_LVGL_VALIDATION_GIT_STATE: "clean",
+    },
+  });
+  const metadata = JSON.parse(packed.stdout);
+  assert.equal(metadata.sourceSha, sourceSha);
+  assert.equal(metadata.sourceDirty, false);
+
+  await assert.rejects(
+    execFile(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--json"], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+        TSX_LVGL_VALIDATION_GIT_SHA: "malformed",
+        TSX_LVGL_VALIDATION_GIT_STATE: "missing",
+      },
+    }),
+    /TSX_LVGL_VALIDATION_GIT_SHA must be a full hexadecimal object ID/,
   );
 });
