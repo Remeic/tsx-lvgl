@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +20,7 @@ export interface InstallTransactionFs {
   exists(path: string): boolean;
   makeSiblingTemporaryDirectory(root: string, prefix: string): string;
   readFile(path: string): Buffer;
+  copy(from: string, to: string): void;
   rename(from: string, to: string): void;
   remove(path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }): void;
   makeDirectory(path: string): void;
@@ -29,6 +31,7 @@ export const DEFAULT_INSTALL_TRANSACTION_FS: InstallTransactionFs = {
   exists: existsSync,
   makeSiblingTemporaryDirectory: (root, prefix) => mkdtempSync(join(dirname(root), prefix)),
   readFile: readFileSync,
+  copy: (from, to) => cpSync(from, to, { recursive: true, dereference: false }),
   rename: renameSync,
   remove: rmSync,
   makeDirectory: (path) => mkdirSync(path, { recursive: true }),
@@ -52,13 +55,16 @@ const METADATA_PATHS = [
   ".tsx-lvgl/framework.lock.json",
 ] as const;
 
-const TRANSACTION_DIRECTORIES = ["node_modules", ".tsx-lvgl/artifacts"] as const;
+const TRANSACTION_DIRECTORIES = [
+  { path: "node_modules", move: true },
+  { path: ".tsx-lvgl/artifacts", move: false },
+] as const;
 
 /**
  * Make a package-manager operation all-or-nothing. Mutable dependency and
- * artifact directories are moved as opaque trees to a sibling on the project
- * filesystem, so manager-specific entries, symlinks and old artifacts return
- * byte-for-byte after a failed install without relying on a cross-device move.
+ * dependency directories are moved and old artifacts copied as opaque trees to
+ * a sibling on the project filesystem. This preserves the artifact currently
+ * being installed while ensuring every pre-existing byte returns on failure.
  */
 export async function withInstallTransaction<T>(
   root: string,
@@ -72,11 +78,12 @@ export async function withInstallTransaction<T>(
     const activeRollbackRoot = filesystem.makeSiblingTemporaryDirectory(root, `.${basename(root)}.tsx-lvgl-install-rollback-`);
     rollbackRoot = activeRollbackRoot;
     metadata = METADATA_PATHS.map((path) => snapshotFile(join(root, path), filesystem));
-    directories = TRANSACTION_DIRECTORIES.map((path) => snapshotDirectory(root, activeRollbackRoot, path, filesystem));
+    directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(root, activeRollbackRoot, definition.path, definition.move, filesystem));
     for (const directory of directories) {
       if (directory.existed) {
         filesystem.makeDirectory(dirname(directory.backupPath));
-        filesystem.rename(directory.path, directory.backupPath);
+        if (directory.move) filesystem.rename(directory.path, directory.backupPath);
+        else filesystem.copy(directory.path, directory.backupPath);
       }
     }
     const result = await action();
@@ -100,12 +107,14 @@ interface DirectorySnapshot {
   readonly path: string;
   readonly backupPath: string;
   readonly existed: boolean;
+  readonly move: boolean;
 }
 
 function snapshotDirectory(
   root: string,
   rollbackRoot: string,
   path: string,
+  move: boolean,
   filesystem: InstallTransactionFs,
 ): DirectorySnapshot {
   const destination = join(root, path);
@@ -113,6 +122,7 @@ function snapshotDirectory(
     path: destination,
     backupPath: join(rollbackRoot, path),
     existed: filesystem.exists(destination),
+    move,
   };
 }
 

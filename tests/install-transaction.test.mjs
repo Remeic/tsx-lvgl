@@ -74,6 +74,7 @@ test("transaction accepts an explicitly injected filesystem adapter", async (t) 
     exists: existsSync,
     makeSiblingTemporaryDirectory: (projectRoot, prefix) => mkdtempSync(join(dirname(projectRoot), prefix)),
     readFile: readFileSync,
+    copy: () => {},
     rename: renameSync,
     remove: rmSync,
     makeDirectory: (path) => mkdirSync(path, { recursive: true }),
@@ -93,6 +94,7 @@ test("transaction keeps its backup beside the project to avoid cross-device rena
       return backupRoot;
     },
     readFile: readFileSync,
+    copy: () => {},
     rename: renameSync,
     remove: rmSync,
     makeDirectory: (path) => mkdirSync(path, { recursive: true }),
