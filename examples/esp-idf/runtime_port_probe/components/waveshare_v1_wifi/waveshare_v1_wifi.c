@@ -26,7 +26,19 @@
 typedef struct {
     waveshare_v1_wifi_command_t command;
     uint32_t correlation_id;
+    uint32_t reservation;
+    uint8_t slot_index;
 } wifi_command_t;
+
+/* A reservation stays allocated from submit until the worker either consumes
+ * it or cancellation removes it from the queue. This makes a cancellation
+ * fence exact to one command without retaining an unbounded history. */
+typedef struct {
+    uint32_t correlation_id;
+    uint32_t reservation;
+    bool reserved;
+    bool cancelled;
+} wifi_command_slot_t;
 
 struct waveshare_v1_wifi {
     QueueHandle_t commands;
@@ -46,28 +58,51 @@ struct waveshare_v1_wifi {
     volatile bool disconnected;
     uint32_t pending_connect;
     TickType_t connect_deadline;
-    uint32_t cancelled_correlations[WIFI_COMMAND_QUEUE_DEPTH];
+    uint32_t next_command_reservation;
+    wifi_command_slot_t command_slots[WIFI_COMMAND_QUEUE_DEPTH];
 };
+
+static bool command_slot_matches(const waveshare_v1_wifi_t *wifi, const wifi_command_t *command)
+{
+    if (command->slot_index >= WIFI_COMMAND_QUEUE_DEPTH) return false;
+    const wifi_command_slot_t *slot = &wifi->command_slots[command->slot_index];
+    return slot->reserved && slot->reservation == command->reservation && slot->correlation_id == command->correlation_id;
+}
+
+static void release_command_slot(waveshare_v1_wifi_t *wifi, const wifi_command_t *command)
+{
+    if (command_slot_matches(wifi, command)) memset(&wifi->command_slots[command->slot_index], 0, sizeof(wifi->command_slots[0]));
+}
+
+static bool reserve_command_slot(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_command_t command,
+                                 uint32_t correlation_id, wifi_command_t *out_command)
+{
+    for (uint32_t index = 0; index < WIFI_COMMAND_QUEUE_DEPTH; index++) {
+        wifi_command_slot_t *slot = &wifi->command_slots[index];
+        if (slot->reserved) continue;
+        uint32_t reservation = ++wifi->next_command_reservation;
+        if (reservation == 0U) reservation = ++wifi->next_command_reservation;
+        *slot = (wifi_command_slot_t) { .correlation_id = correlation_id, .reservation = reservation, .reserved = true };
+        *out_command = (wifi_command_t) { .command = command, .correlation_id = correlation_id, .reservation = reservation, .slot_index = (uint8_t)index };
+        return true;
+    }
+    return false;
+}
+
+static bool take_command_slot(waveshare_v1_wifi_t *wifi, const wifi_command_t *command)
+{
+    if (!command_slot_matches(wifi, command)) return false;
+    const bool runnable = !wifi->command_slots[command->slot_index].cancelled;
+    release_command_slot(wifi, command);
+    return runnable;
+}
 
 static void mark_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
 {
     for (uint32_t index = 0; index < WIFI_COMMAND_QUEUE_DEPTH; index++) {
-        if (wifi->cancelled_correlations[index] == correlation_id) return;
-        if (wifi->cancelled_correlations[index] == 0U) {
-            wifi->cancelled_correlations[index] = correlation_id;
-            return;
-        }
+        wifi_command_slot_t *slot = &wifi->command_slots[index];
+        if (slot->reserved && slot->correlation_id == correlation_id) slot->cancelled = true;
     }
-}
-
-static bool take_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
-{
-    for (uint32_t index = 0; index < WIFI_COMMAND_QUEUE_DEPTH; index++) {
-        if (wifi->cancelled_correlations[index] != correlation_id) continue;
-        wifi->cancelled_correlations[index] = 0U;
-        return true;
-    }
-    return false;
 }
 
 static void purge_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
@@ -76,7 +111,13 @@ static void purge_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlat
     uint32_t retained_count = 0U;
     wifi_command_t entry;
     while (xQueueReceive(wifi->commands, &entry, 0) == pdTRUE) {
-        if (entry.correlation_id != correlation_id && retained_count < WIFI_COMMAND_QUEUE_DEPTH) retained[retained_count++] = entry;
+        if (entry.correlation_id == correlation_id) {
+            /* The worker cannot take the lock while cancellation holds it, so
+             * a purged entry has not started and can release its reservation. */
+            release_command_slot(wifi, &entry);
+        } else if (retained_count < WIFI_COMMAND_QUEUE_DEPTH) {
+            retained[retained_count++] = entry;
+        }
     }
     for (uint32_t index = 0; index < retained_count; index++) (void)xQueueSend(wifi->commands, &retained[index], 0);
 }
@@ -161,7 +202,7 @@ static void wifi_task(void *argument)
             xSemaphoreGive(wifi->command_lock);
             break;
         }
-        if (received && !take_cancelled_command(wifi, command.correlation_id)) switch (command.command) {
+        if (received && take_command_slot(wifi, &command)) switch (command.command) {
                 case WAVESHARE_V1_WIFI_SCAN:
                     if (!wifi->configured) send_event(wifi, WAVESHARE_V1_WIFI_EVENT_FAILED, command.command, command.correlation_id, "wifi-disabled");
                     else send_event(wifi, WAVESHARE_V1_WIFI_EVENT_SUCCEEDED, command.command, command.correlation_id, NULL);
@@ -240,6 +281,7 @@ void waveshare_v1_wifi_destroy(waveshare_v1_wifi_t *wifi)
         (void)xSemaphoreTake(wifi->command_lock, portMAX_DELAY);
         wifi->active = false;
         (void)xQueueReset(wifi->commands);
+        memset(wifi->command_slots, 0, sizeof(wifi->command_slots));
         if (wifi->pending_connect != 0U && wifi->configured) (void)esp_wifi_disconnect();
         wifi->pending_connect = 0U;
         xSemaphoreGive(wifi->command_lock);
@@ -265,11 +307,15 @@ esp_err_t waveshare_v1_wifi_submit(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_
                                    uint32_t correlation_id)
 {
     if (wifi == NULL || correlation_id == 0U || wifi->command_lock == NULL) return ESP_ERR_INVALID_STATE;
-    const wifi_command_t entry = { .command = command, .correlation_id = correlation_id };
     if (xSemaphoreTake(wifi->command_lock, portMAX_DELAY) != pdTRUE) return ESP_ERR_TIMEOUT;
-    const esp_err_t result = !wifi->active ? ESP_ERR_INVALID_STATE : xQueueSend(wifi->commands, &entry, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    const bool active = wifi->active;
+    wifi_command_t entry = {0};
+    const bool reserved = active && reserve_command_slot(wifi, command, correlation_id, &entry);
+    const bool queued = reserved && xQueueSend(wifi->commands, &entry, 0) == pdTRUE;
+    if (reserved && !queued) release_command_slot(wifi, &entry);
     xSemaphoreGive(wifi->command_lock);
-    return result;
+    if (!active) return ESP_ERR_INVALID_STATE;
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 void waveshare_v1_wifi_cancel(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)

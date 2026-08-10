@@ -7,6 +7,39 @@ const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/mai
 const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
 
+function createReservationFence(slotCount = 4) {
+  let nextReservation = 0;
+  const slots = Array.from({ length: slotCount }, () => null);
+  const queued = [];
+  return {
+    submit(correlationId) {
+      const slotIndex = slots.findIndex((slot) => slot === null);
+      if (slotIndex < 0) return null;
+      const entry = { correlationId, reservation: ++nextReservation, slotIndex };
+      slots[slotIndex] = { ...entry, cancelled: false };
+      queued.push(entry);
+      return entry;
+    },
+    dequeue() { return queued.shift() ?? null; },
+    cancel(correlationId) {
+      for (const slot of slots) if (slot?.correlationId === correlationId) slot.cancelled = true;
+      for (let index = queued.length - 1; index >= 0; index--) {
+        const entry = queued[index];
+        if (entry.correlationId !== correlationId) continue;
+        slots[entry.slotIndex] = null;
+        queued.splice(index, 1);
+      }
+    },
+    consume(entry) {
+      const slot = slots[entry.slotIndex];
+      if (slot === null || slot.reservation !== entry.reservation || slot.correlationId !== entry.correlationId) return false;
+      slots[entry.slotIndex] = null;
+      return !slot.cancelled;
+    },
+    reservedCount() { return slots.filter(Boolean).length; },
+  };
+}
+
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {
   assert.match(source, /JSValue period = JS_GetPropertyStr\(context, argv\[0\], "periodMs"\);/);
   assert.match(source, /waveshare_v1_sensors_set_period_ms\(probe->sensors, \(uint32_t\)period_ms\)/);
@@ -63,11 +96,45 @@ test("Wi-Fi cancellation fences commands already dequeued or waiting in the prov
   assert.match(component, /SemaphoreHandle_t command_lock/);
   assert.match(component, /mark_cancelled_command/);
   assert.match(component, /purge_cancelled_command/);
-  assert.match(component, /take_cancelled_command/);
+  assert.match(component, /take_command_slot/);
   assert.match(component, /xSemaphoreTake\(wifi->command_lock, portMAX_DELAY\)/);
   assert.match(component, /if \(!wifi->active\) \{[\s\S]*break;/);
   const cancel = component.match(/void waveshare_v1_wifi_cancel\([\s\S]*?\n}\n\nbool waveshare_v1_wifi_take_event/);
   assert.ok(cancel, "Wi-Fi cancellation implementation must remain present");
   assert.ok(cancel[0].indexOf("mark_cancelled_command") < cancel[0].indexOf("purge_cancelled_command"));
   assert.ok(cancel[0].indexOf("purge_cancelled_command") < cancel[0].indexOf("xSemaphoreGive"));
+});
+
+test("Wi-Fi cancellation uses reclaimable command reservations beyond queue-depth cancellations", () => {
+  const fence = createReservationFence();
+  for (let correlationId = 1; correlationId <= 5; correlationId++) {
+    assert.ok(fence.submit(correlationId), `cancellation ${correlationId} must reserve a slot`);
+    fence.cancel(correlationId);
+    assert.equal(fence.reservedCount(), 0, `cancellation ${correlationId} must reclaim its reservation`);
+  }
+  assert.doesNotMatch(component, /cancelled_correlations/);
+  assert.match(component, /wifi_command_slot_t command_slots\[WIFI_COMMAND_QUEUE_DEPTH\]/);
+  assert.match(component, /static bool reserve_command_slot[\s\S]*?if \(slot->reserved\) continue;/);
+  assert.match(component, /static void release_command_slot[\s\S]*?memset\(&wifi->command_slots/);
+  const purge = component.match(/static void purge_cancelled_command[\s\S]*?\n}\n\nstatic bool send_event/);
+  assert.ok(purge, "queue purge must remain present");
+  assert.match(purge[0], /entry\.correlation_id == correlation_id[\s\S]*?release_command_slot\(wifi, &entry\)/);
+});
+
+test("Wi-Fi dequeued-before-cancel race consumes a marked reservation before side effects", () => {
+  const fence = createReservationFence();
+  const dequeued = fence.submit(99);
+  assert.ok(dequeued);
+  assert.deepEqual(fence.dequeue(), dequeued);
+  fence.cancel(99);
+  assert.equal(fence.consume(dequeued), false, "a command dequeued before cancellation must not run");
+  assert.equal(fence.reservedCount(), 0);
+  const worker = component.match(/static void wifi_task[\s\S]*?\n}\n\nesp_err_t waveshare_v1_wifi_create/);
+  assert.ok(worker, "Wi-Fi worker must remain present");
+  assert.ok(worker[0].indexOf("xQueueReceive") < worker[0].indexOf("xSemaphoreTake(wifi->command_lock"));
+  assert.ok(worker[0].indexOf("xSemaphoreTake(wifi->command_lock") < worker[0].indexOf("take_command_slot(wifi, &command)"));
+  assert.match(worker[0], /if \(received && take_command_slot\(wifi, &command\)\) switch \(command\.command\)/);
+  const consume = component.match(/static bool take_command_slot[\s\S]*?\n}\n\nstatic void mark_cancelled_command/);
+  assert.ok(consume, "reservation consumer must remain present");
+  assert.ok(consume[0].indexOf("!wifi->command_slots[command->slot_index].cancelled") < consume[0].indexOf("release_command_slot"));
 });
