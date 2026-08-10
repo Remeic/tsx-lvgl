@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -170,12 +170,37 @@ function buildSdk() {
   // strict-build declaration snapshot. Rebuilding here would widen literal
   // public types solely because of instrumentation before consumer typechecks.
   if (process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
+  // Consumer contracts pack concurrently. Reusing a current project build
+  // avoids two `tsc --force` processes racing over shared declaration output.
+  if (!sdkBuildIsStale()) return;
   const tscPath = resolve(ROOT, "node_modules/typescript/bin/tsc");
   if (!existsSync(tscPath)) throw new Error("missing root node_modules/typescript; run npm ci first");
   run(process.execPath, [tscPath, "-b", resolve(SDK_ROOT, "tsconfig.json"), "--force", "--pretty", "false"], {
     cwd: ROOT,
     stdio: "pipe",
   });
+}
+
+function sdkBuildIsStale() {
+  const packageRoots = [SDK_ROOT, ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name))];
+  const outputPaths = packageRoots.map((packageRoot) => resolve(packageRoot, "dist", "index.js"));
+  if (outputPaths.some((path) => !existsSync(path))) return true;
+  const oldestOutput = Math.min(...outputPaths.map((path) => statSync(path).mtimeMs));
+  return packageRoots.some((packageRoot) => newestSourceModification(packageRoot) > oldestOutput);
+}
+
+function newestSourceModification(root) {
+  let newest = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === "dist" || entry.name === "node_modules") continue;
+    const path = resolve(root, entry.name);
+    if (entry.isDirectory()) {
+      newest = Math.max(newest, newestSourceModification(path));
+    } else if (entry.isFile()) {
+      newest = Math.max(newest, statSync(path).mtimeMs);
+    }
+  }
+  return newest;
 }
 
 function copyInternalDist(name, stagingDist) {
