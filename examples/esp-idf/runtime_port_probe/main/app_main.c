@@ -69,6 +69,9 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
+    /* I2C discovery/configuration is intentionally outside the LVGL lock. */
+    (void)runtime_probe_start_sensors(probe);
+
     const esp_err_t transport_result = bundle_transport_start(probe);
     ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
              transport_result == ESP_OK ? "pass" : "fail");

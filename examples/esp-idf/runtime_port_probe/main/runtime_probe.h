@@ -21,6 +21,8 @@ typedef struct runtime_probe runtime_probe_t;
 #define RUNTIME_PROBE_PROTOCOL_VERSION 1
 
 esp_err_t runtime_probe_start(runtime_probe_t **out_probe);
+/** Starts the cached QMI provider outside the display/QuickJS owner lock. */
+esp_err_t runtime_probe_start_sensors(runtime_probe_t *probe);
 void runtime_probe_task(void *arg);
 void runtime_probe_destroy(runtime_probe_t *probe);
 

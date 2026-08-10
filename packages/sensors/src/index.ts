@@ -51,6 +51,9 @@ export interface DeviceCapabilities {
   readonly sensors: SensorRegistry;
 }
 
+/** Structural compatibility with the boot-frozen board catalog. */
+export type { CapabilitySchema } from "@tsx-lvgl/capabilities";
+
 export interface SensorSubscription {
   cancel(): void;
 }

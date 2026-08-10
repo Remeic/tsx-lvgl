@@ -14,6 +14,7 @@
 
 #include "bundle_transport.h"
 #include "lvgl_host.h"
+#include "waveshare_v1_sensors.h"
 
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -93,9 +94,7 @@ struct runtime_probe {
     _Atomic bool reload_in_flight;
     _Atomic uint32_t cached_last_generation;
 
-    i2c_master_dev_handle_t imu_device;
-    uint8_t imu_address;
-    bool imu_ready;
+    waveshare_v1_sensors_t *sensors;
     bool sensor_checkpoint_logged;
     bool timer_checkpoint_logged;
     bool lvgl_binding_checkpoint_logged;
@@ -236,7 +235,8 @@ static void native_timer_fired(void *arg)
     queue_probe_event(probe, RUNTIME_PROBE_EVENT_INTERVAL, (int)(intptr_t)arg);
 }
 
-/* --- QMI8658 driver (unchanged from the earlier probe) --- */
+/* Retired direct I2C path: the provider component owns all QMI transactions. */
+#if 0
 
 static esp_err_t qmi8658_write_register(runtime_probe_t *probe, uint8_t reg, uint8_t value)
 {
@@ -308,6 +308,7 @@ static esp_err_t initialize_qmi8658(runtime_probe_t *probe)
     return ESP_ERR_NOT_FOUND;
 }
 
+#endif
 /* --- __native binding surface (packages/device/src/native.ts is the normative contract) --- */
 
 static JSValue js_console_log(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
@@ -529,47 +530,32 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
 
     const char *sensor_id = JS_ToCString(context, argv[0]);
     if (sensor_id == NULL) return JS_EXCEPTION;
-    const bool is_motion = strcmp(sensor_id, "board.qmi8658.motion") == 0;
+    const bool is_motion = strcmp(sensor_id, "device.motion") == 0;
     JS_FreeCString(context, sensor_id);
     if (!is_motion) return JS_ThrowTypeError(context, "sensors.read: unknown sensorId");
 
     const bool is_first_call = !probe->sensor_checkpoint_logged;
     probe->sensor_checkpoint_logged = true;
 
-    const int64_t sampled_at_ms = esp_timer_get_time() / 1000;
     JSValue sample = JS_NewObject(context);
     if (JS_IsException(sample)) return sample;
-    JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, sampled_at_ms));
-
-    if (!probe->imu_ready) {
+    waveshare_v1_motion_frame_t frame = {0};
+    if (!waveshare_v1_sensors_read_motion(probe->sensors, &frame)) {
         JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "unavailable"));
-        if (is_first_call) log_checkpoint("sensor_read", "fail", "sensor=board.qmi8658.motion unavailable");
+        JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, esp_timer_get_time() / 1000));
+        if (is_first_call) log_checkpoint("sensor_read", "fail", "sensor=device.motion cache-unavailable");
         return sample;
     }
-
-    uint8_t raw[12] = {0};
-    if (qmi8658_read_registers(probe, QMI8658_ACCEL_GYRO_REGISTER, raw, sizeof(raw)) != ESP_OK) {
-        JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "error"));
-        if (is_first_call) log_checkpoint("sensor_read", "fail", "sensor=board.qmi8658.motion i2c-error");
-        return sample;
-    }
-
-    const double acceleration_x = (double)qmi8658_signed_sample(raw, 0) * QMI8658_ACCEL_SCALE_MPS2;
-    const double acceleration_y = (double)qmi8658_signed_sample(raw, 2) * QMI8658_ACCEL_SCALE_MPS2;
-    const double acceleration_z = (double)qmi8658_signed_sample(raw, 4) * QMI8658_ACCEL_SCALE_MPS2;
-    const double angular_x = (double)qmi8658_signed_sample(raw, 6) * QMI8658_GYRO_SCALE_DPS;
-    const double angular_y = (double)qmi8658_signed_sample(raw, 8) * QMI8658_GYRO_SCALE_DPS;
-    const double angular_z = (double)qmi8658_signed_sample(raw, 10) * QMI8658_GYRO_SCALE_DPS;
-
     JSValue value = JS_NewObject(context);
     if (JS_IsException(value)) return value;
     JS_SetPropertyStr(context, value, "accelerationMps2",
-                      new_motion_vector(context, acceleration_x, acceleration_y, acceleration_z));
+                      new_motion_vector(context, frame.acceleration_mps2[0], frame.acceleration_mps2[1], frame.acceleration_mps2[2]));
     JS_SetPropertyStr(context, value, "angularVelocityDps",
-                      new_motion_vector(context, angular_x, angular_y, angular_z));
+                      new_motion_vector(context, frame.angular_velocity_dps[0], frame.angular_velocity_dps[1], frame.angular_velocity_dps[2]));
     JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "ok"));
+    JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, frame.observed_at_ms));
     JS_SetPropertyStr(context, sample, "value", value);
-    if (is_first_call) log_checkpoint("sensor_read", "pass", "sensor=board.qmi8658.motion schema=1");
+    if (is_first_call) log_checkpoint("sensor_read", "pass", "sensor=device.motion cache=true");
     return sample;
 }
 
@@ -997,13 +983,6 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
         }
     }
 
-    const esp_err_t imu_result = initialize_qmi8658(probe);
-    if (imu_result != ESP_OK) {
-        char detail[96];
-        snprintf(detail, sizeof(detail), "sensor=qmi8658 err=%s", esp_err_to_name(imu_result));
-        log_checkpoint("imu_init", "fail", detail);
-    }
-
     probe->active = true;
     s_active_probe = probe;
 
@@ -1023,6 +1002,16 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     log_checkpoint("runtime_start", "pass", detail);
     return ESP_OK;
+}
+
+esp_err_t runtime_probe_start_sensors(runtime_probe_t *probe)
+{
+    if (probe == NULL) return ESP_ERR_INVALID_ARG;
+    if (probe->sensors != NULL) return ESP_OK;
+    const esp_err_t result = waveshare_v1_sensors_create(bsp_i2c_get_handle(), &probe->sensors);
+    log_checkpoint("imu_init", result == ESP_OK ? "pass" : "fail",
+                   result == ESP_OK ? "provider=waveshare_v1_sensors cache-task=true" : "provider=waveshare_v1_sensors unavailable");
+    return result;
 }
 
 void runtime_probe_destroy(runtime_probe_t *probe)
@@ -1061,9 +1050,9 @@ void runtime_probe_destroy(runtime_probe_t *probe)
         probe->lvgl_host = NULL;
     }
 
-    if (probe->imu_device != NULL) {
-        (void)i2c_master_bus_rm_device(probe->imu_device);
-        probe->imu_device = NULL;
+    if (probe->sensors != NULL) {
+        waveshare_v1_sensors_destroy(probe->sensors);
+        probe->sensors = NULL;
     }
 
     if (probe->context != NULL) {

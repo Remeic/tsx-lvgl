@@ -1,4 +1,5 @@
 import type { VNode } from "@tsx-lvgl/core";
+import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
 import type { DeviceCapabilities } from "@tsx-lvgl/sensors";
 import {
   mountFiber,
@@ -43,6 +44,10 @@ export class Session implements RuntimeSession {
 
   public get capabilities(): DeviceCapabilities {
     return this.context.capabilities;
+  }
+
+  public get board(): CapabilityRuntime {
+    return this.context.board;
   }
 
   public get rootHost(): RuntimeHostInstance {

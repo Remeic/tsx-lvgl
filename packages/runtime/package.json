@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@tsx-lvgl/capabilities": "0.1.0",
     "@tsx-lvgl/core": "0.1.0",
     "@tsx-lvgl/sensors": "0.1.0"
   },

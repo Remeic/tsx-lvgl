@@ -1,5 +1,6 @@
 import type { VNode } from "@tsx-lvgl/core";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
+import type { CapabilityRuntime, CapabilitySchema, CapabilityObserveOptions, CapabilityBinding, CapabilityContext, CapabilitySubscription, BoardDiagnosticsSnapshot } from "@tsx-lvgl/capabilities";
 import {
   validateRuntimeBundle,
   type RuntimeBundle,
@@ -14,6 +15,7 @@ export interface RuntimeOptions {
   readonly host: RuntimeHost;
   readonly scheduler: RuntimeScheduler;
   readonly capabilities?: DeviceCapabilities;
+  readonly board?: CapabilityRuntime;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -27,6 +29,12 @@ export type BundleReloadResult = ReloadResult | {
 };
 
 const noCapabilities: DeviceCapabilities = { sensors: createSensorRegistry([]) };
+const noBoard: CapabilityRuntime = {
+  getBinding<T>(_schema: CapabilitySchema<T>, _options?: CapabilityObserveOptions): CapabilityBinding<T> { return { state: { status: "unsupported", reason: "not-implemented" }, instances: [] }; },
+  subscribe<T>(schema: CapabilitySchema<T>, options: CapabilityObserveOptions, _context: CapabilityContext, onState: (binding: CapabilityBinding<T>) => void): CapabilitySubscription { onState(this.getBinding(schema, options)); return { cancel: () => undefined }; },
+  diagnostics(): BoardDiagnosticsSnapshot { return { effectivePeriodsMs: {}, queueDepth: 0, queueHighWater: 0, droppedEvents: 0, activeOwners: [], resourceUse: { observers: 0 } }; },
+  commitEpoch: () => undefined, rollbackEpoch: () => undefined, dispose: () => undefined,
+};
 
 export class Runtime implements RuntimeContext {
   private activeSession: Session | null = null;
@@ -48,6 +56,10 @@ export class Runtime implements RuntimeContext {
 
   public get capabilities(): DeviceCapabilities {
     return this.options.capabilities ?? noCapabilities;
+  }
+
+  public get board(): CapabilityRuntime {
+    return this.options.board ?? noBoard;
   }
 
   public mount(root: VNode): RuntimeSession {
@@ -134,6 +146,7 @@ export class Runtime implements RuntimeContext {
         return { status: "rolled_back", epoch: this.currentEpoch, error };
       }
 
+      this.board.commitEpoch(candidate.epoch);
       this.activeSession = candidate;
       this.currentEpoch = candidate.epoch;
       try {
@@ -143,6 +156,7 @@ export class Runtime implements RuntimeContext {
       }
       return { status: "committed", epoch: candidate.epoch };
     } catch (error) {
+      this.board.rollbackEpoch(candidate.epoch);
       restorePreviousRoot();
       candidate.dispose();
       return { status: "rolled_back", epoch: this.currentEpoch, error };

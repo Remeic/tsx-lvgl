@@ -5,12 +5,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { APP_FLASH_OFFSET, buildReloadPlan } from "./board-reload-plan.mjs";
+import { resolveBoardProfile } from "./board-profile.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const defaultArtifact = resolve(
-  repoRoot,
-  "examples/esp-idf/tsx_lvgl_v1/build/tsx_lvgl_esp32_s3_v1.bin",
-);
+const defaultProfile = "runtime-probe";
+const defaultArtifact = resolveBoardProfile(defaultProfile, repoRoot).artifact;
 const dryRunPython = "/absolute/path/to/esptool-5.3.1-venv/bin/python";
 const dryRunPort = "/dev/cu.EXAMPLE";
 
@@ -25,7 +24,8 @@ Options:
   --port PATH                Current serial path, for example /dev/cu.usbmodem101.
   --recovery-dir PATH        External recovery directory containing the manifest.
   --esptool-python PATH      Python executable with esptool/espefuse 5.3.1.
-  --artifact PATH             App image; defaults to the V1 build artifact.
+  --artifact PATH             App image; defaults to the selected profile artifact.
+  --profile NAME              Board profile; default runtime-probe.
   --baud NUMBER               Serial baud rate; defaults to 115200.
   --reset-mode MODE          hard-reset or watchdog-reset; default watchdog-reset.
   --help                     Show this help.
@@ -44,6 +44,7 @@ function parseCli(argv) {
     recoveryDir: process.env.TSX_LVGL_RECOVERY_DIR ?? "",
     esptoolPython: process.env.ESPTOOL_PYTHON ?? dryRunPython,
     artifact: defaultArtifact,
+    profile: defaultProfile,
     baud: 115200,
     resetMode: "watchdog-reset",
   };
@@ -83,6 +84,10 @@ function parseCli(argv) {
         break;
       case "--artifact":
         options.artifact = resolve(value);
+        break;
+      case "--profile":
+        options.profile = value;
+        options.artifact = resolveBoardProfile(value, repoRoot).artifact;
         break;
       case "--baud":
         options.baud = Number(value);
