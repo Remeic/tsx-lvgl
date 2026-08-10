@@ -135,9 +135,11 @@ function snapshotFile(path: string, filesystem: InstallTransactionFs): FileSnaps
 function restoreFiles(snapshots: readonly FileSnapshot[], filesystem: InstallTransactionFs): void {
   for (const snapshot of snapshots) {
     filesystem.remove(snapshot.path, { force: true });
-    if (snapshot.existed && snapshot.bytes !== undefined) {
+    // snapshotFile always captures bytes for an existing path; testing an
+    // undefined value here only creates an unreachable rollback branch.
+    if (snapshot.existed) {
       filesystem.makeDirectory(dirname(snapshot.path));
-      filesystem.writeFile(snapshot.path, snapshot.bytes);
+      filesystem.writeFile(snapshot.path, snapshot.bytes as Buffer);
     }
   }
 }

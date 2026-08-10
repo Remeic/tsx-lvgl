@@ -240,6 +240,8 @@ test("package-manager and lock alternatives preserve the consumer boundary", asy
   synchronizePackageLock(lock, sandbox, artifact);
   writeFileSync(lock, JSON.stringify({ dependencies: null }));
   assertCode(() => synchronizePackageLock(lock, sandbox, artifact), DIAGNOSTIC_CODES.INSTALL_FAILED);
+  writeFileSync(lock, "not JSON\n");
+  assertCode(() => synchronizePackageLock(lock, sandbox, artifact), DIAGNOSTIC_CODES.INSTALL_FAILED);
 });
 
 test("scaffold fallback remains a valid portable package name", async (t) => {
