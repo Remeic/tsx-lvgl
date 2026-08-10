@@ -8,7 +8,7 @@ const config = {
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
-  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --noCheck --pretty false",
+  buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --pretty false",
   inPlace: false,
   symlinkNodeModules: false,
   // Keep per-mutant evidence focused on deterministic framework code and the
