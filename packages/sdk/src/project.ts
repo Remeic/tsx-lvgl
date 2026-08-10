@@ -111,6 +111,7 @@ export const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
 export async function createProject(
   target: string,
   artifactArgument?: string,
+  packArtifact: () => string = packInstalledSdk,
 ): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
   const root = resolve(target);
   if (existsSync(root) && readdirSync(root).length > 0) {
@@ -162,7 +163,7 @@ export async function createProject(
   writeText(root, "AGENTS.md", consumerAgentsTemplate());
 
   const generatedArtifact = artifactArgument === undefined;
-  const artifactPath = generatedArtifact ? packInstalledSdk() : resolve(artifactArgument);
+  const artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument);
   try {
     return await withInstallTransaction(root, async () => {
       const lock = installArtifactIntoProject(root, artifactPath);
@@ -629,8 +630,7 @@ function readMachineSourceConfig(): string | undefined {
 }
 
 function parseSourcePackResult(stdout: string): SourcePackResult {
-  const line = stdout.trim().split(/\r?\n/).at(-1);
-  if (line === undefined) throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "framework source returned no packaging metadata");
+  const line = stdout.trim().split(/\r?\n/).at(-1) as string;
   let value: Record<string, unknown>;
   try {
     value = JSON.parse(line) as Record<string, unknown>;

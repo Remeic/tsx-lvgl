@@ -113,7 +113,14 @@ test("consumer project validation reaches all portable persisted-state alternati
 
   const tsconfigPath = join(root, "tsconfig.json");
   const tsconfig = JSON.parse(readFileSync(tsconfigPath));
-  tsconfig.references = [];
+  const referenceRoot = join(root, "reference");
+  mkdirSync(join(referenceRoot, "src"), { recursive: true });
+  writeFileSync(join(referenceRoot, "src", "index.ts"), "export {};\n");
+  writeFileSync(join(referenceRoot, "tsconfig.json"), JSON.stringify({
+    compilerOptions: { composite: true, declaration: true, outDir: "dist" },
+    include: ["src/**/*.ts"],
+  }));
+  tsconfig.references = [{ path: "./reference" }];
   writeFileSync(tsconfigPath, `${JSON.stringify(tsconfig)}\n`);
   assert.deepEqual(checkProject(root).files, ["src/App.tsx"]);
 });
@@ -154,6 +161,9 @@ test("update covers source configuration, artifact, dependency and temporary-dir
     await assertAsyncCode(() => updateProject(root), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
     writeFileSync(machineConfig, JSON.stringify({ sourcePath: source }));
     await assertAsyncCode(() => updateProject(root), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
+    delete process.env.HOME;
+    rmSync(machineConfig);
+    await assertAsyncCode(() => updateProject(root), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
   } finally {
     if (previousTmpdir === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previousTmpdir;
     if (previousConfig === undefined) delete process.env.TSX_LVGL_CONFIG; else process.env.TSX_LVGL_CONFIG = previousConfig;
@@ -221,12 +231,18 @@ test("package-manager and lock alternatives preserve the consumer boundary", asy
   writeFileSync(lock, JSON.stringify({ dependencies: { "@tsx-lvgl/sdk": {} } }));
   synchronizePackageLock(lock, sandbox, artifact);
   assert.equal(existsSync(lock), true);
+  writeFileSync(lock, JSON.stringify({ packages: { "": { dependencies: null }, "node_modules/@tsx-lvgl/sdk": {} } }));
+  synchronizePackageLock(lock, sandbox, artifact);
+  writeFileSync(lock, JSON.stringify({ dependencies: null }));
+  assertCode(() => synchronizePackageLock(lock, sandbox, artifact), DIAGNOSTIC_CODES.INSTALL_FAILED);
 });
 
 test("scaffold fallback remains a valid portable package name", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-scaffold-name-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
   const root = join(sandbox, "---");
-  await createProject(root, packArtifact(sandbox));
+  const artifact = packArtifact(sandbox);
+  await createProject(root, undefined, () => artifact);
   assert.equal(JSON.parse(readFileSync(join(root, "package.json"))).name, "tsx-lvgl-app");
+  assert.equal(existsSync(dirname(artifact)), false);
 });
