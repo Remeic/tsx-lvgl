@@ -9,6 +9,7 @@ export const DOCTOR_CHECK_IDS = {
   PORTABILITY: "PORTABILITY",
   CONSUMER_NODE_ENGINE: "CONSUMER_NODE_ENGINE",
   SDK_NODE_ENGINE: "SDK_NODE_ENGINE",
+  DEVICE_PORT: "DEVICE_PORT",
 } as const;
 
 export type DoctorCheckId = (typeof DOCTOR_CHECK_IDS)[keyof typeof DOCTOR_CHECK_IDS];
@@ -22,6 +23,7 @@ export const DOCTOR_SUCCESS_CODES = {
   PORTABILITY_OK: "DOCTOR_PORTABILITY_OK",
   CONSUMER_NODE_ENGINE_OK: "DOCTOR_CONSUMER_NODE_ENGINE_OK",
   SDK_NODE_ENGINE_OK: "DOCTOR_SDK_NODE_ENGINE_OK",
+  DEVICE_PORT_OK: "DOCTOR_DEVICE_PORT_OK",
 } as const;
 
 export type DoctorSuccessCode = (typeof DOCTOR_SUCCESS_CODES)[keyof typeof DOCTOR_SUCCESS_CODES];
@@ -56,6 +58,7 @@ export interface DoctorInspection {
   portability(): string;
   consumerNodeEngine(): string;
   sdkNodeEngine(): string;
+  devicePort?(): string;
 }
 
 /** Stable doctor orchestration; project storage details stay behind callbacks. */
@@ -79,6 +82,9 @@ export function runDoctor(inspection: DoctorInspection): DoctorResult {
     DOCTOR_SUCCESS_CODES.SDK_NODE_ENGINE_OK,
     inspection.sdkNodeEngine,
   );
+  if (inspection.devicePort !== undefined) {
+    collectDoctorCheck(checks, DOCTOR_CHECK_IDS.DEVICE_PORT, DOCTOR_SUCCESS_CODES.DEVICE_PORT_OK, inspection.devicePort);
+  }
   return completeDoctorChecks(checks);
 }
 

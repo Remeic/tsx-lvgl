@@ -8,10 +8,10 @@ export const USAGE = `Usage:
   tsx-lvgl create <directory> [--artifact <sdk.tgz>]
   tsx-lvgl sync [--json]
   tsx-lvgl update [--source <framework-checkout>] [--json]
-  tsx-lvgl dev [--json]
+  tsx-lvgl dev [--device --port <serial-port>] [--json]
   tsx-lvgl check [--json]
   tsx-lvgl build [--json]
-  tsx-lvgl doctor [--json]
+  tsx-lvgl doctor [--device --port <serial-port>] [--json]
 
 The app-facing interface is deliberately limited to these commands.\n`;
 
@@ -19,8 +19,10 @@ export interface ParsedArgs {
   readonly command: string;
   readonly positional: readonly string[];
   readonly json: boolean;
+  readonly device?: true;
   readonly artifact?: string;
   readonly source?: string;
+  readonly port?: string;
 }
 
 export interface CliOperations {
@@ -29,8 +31,8 @@ export interface CliOperations {
   readonly updateProject: (root: string, source?: string) => Promise<{ readonly lock: FrameworkLock }>;
   readonly checkProject: (root: string) => CheckResult;
   readonly buildProject: (root: string) => BuildResult;
-  readonly devProject: (root: string) => Promise<DevResult>;
-  readonly doctorProject: (root: string) => DoctorResult;
+  readonly devProject: (root: string, options?: { readonly device: boolean; readonly port?: string }) => Promise<DevResult>;
+  readonly doctorProject: (root: string, options?: { readonly device: boolean; readonly port?: string }) => DoctorResult;
 }
 
 export interface CliWriter {
@@ -42,8 +44,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   const command = argv[0] ?? "help";
   const positional: string[] = [];
   let json = false;
+  let device = false;
   let artifact: string | undefined;
   let source: string | undefined;
+  let port: string | undefined;
 
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index]!;
@@ -53,7 +57,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       continue;
     }
     if (argument === "--help" || argument === "-h") {
-      return { command: "help", positional: [], json, ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }) };
+      return { command: "help", positional: [], json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
     }
     if (argument === "--artifact") {
       artifact = argv[++index];
@@ -65,11 +69,20 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       if (source === undefined || source.startsWith("--")) throw usageError("--source requires a value");
       continue;
     }
+    if (argument === "--device") {
+      device = true;
+      continue;
+    }
+    if (argument === "--port") {
+      port = argv[++index];
+      if (port === undefined || port.startsWith("--")) throw usageError("--port requires a value");
+      continue;
+    }
     if (argument.startsWith("--")) throw usageError(`unknown option: ${argument}`);
     positional.push(argument);
   }
 
-  return { command, positional, json, ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }) };
+  return { command, positional, json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
 }
 
 /** Runs the command policy against injected project operations and output streams. */
@@ -122,12 +135,20 @@ export async function runCli(
         return 0;
       }
       case "dev": {
-        const result = await operations.devProject(cwd);
-        emitSuccess(parsed.json, "DEV_OK", { bundleId: result.bundleId, generation: result.generation, texts: result.texts }, writer);
+        if (parsed.device && parsed.port === undefined) throw usageError("dev --device requires --port");
+        if (!parsed.device && parsed.port !== undefined) throw usageError("--port requires dev --device");
+        const result = await operations.devProject(cwd, { device: parsed.device === true, ...(parsed.port === undefined ? {} : { port: parsed.port }) });
+        if (result.device === undefined) {
+          emitSuccess(parsed.json, "DEV_OK", { bundleId: result.bundleId, generation: result.generation, texts: result.texts }, writer);
+        } else {
+          emitSuccess(parsed.json, "DEV_DEVICE_OK", { bundleId: result.bundleId, generation: result.generation, epoch: result.device.epoch, retryCount: result.device.retryCount }, writer);
+        }
         return 0;
       }
       case "doctor": {
-        const result = operations.doctorProject(cwd);
+        if (parsed.device && parsed.port === undefined) throw usageError("doctor --device requires --port");
+        if (!parsed.device && parsed.port !== undefined) throw usageError("--port requires doctor --device");
+        const result = operations.doctorProject(cwd, { device: parsed.device === true, ...(parsed.port === undefined ? {} : { port: parsed.port }) });
         emitDoctor(result, parsed.json, writer);
         return result.ok ? 0 : 1;
       }
