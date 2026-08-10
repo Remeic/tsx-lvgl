@@ -154,6 +154,15 @@ test("transport teardown joins the USB task before runtime probe ownership is re
   assert.match(source, /s_active_probe = NULL;[\s\S]*bundle_transport_stop\(\);/);
 });
 
+test("lvgl host stages widget creation for reparenting", () => {
+  assert.match(lvglHost, /LV_OBJ_FLAG_HIDDEN/);
+  assert.match(lvglHost, /staging_parent/);
+  assert.match(lvglHost, /lv_label_create\(staging\)/);
+  assert.match(lvglHost, /lv_button_create\(staging\)/);
+  assert.match(lvglHost, /lv_obj_remove_style_all/);
+  assert.match(lvglHost, /case LVGL_HOST_WIDGET_SCREEN:\s*\n\s*object = lv_obj_create\(NULL\);/);
+});
+
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {
   assert.match(source, /JSValue period = JS_GetPropertyStr\(context, argv\[0\], "periodMs"\);/);
   assert.match(source, /waveshare_v1_sensors_set_period_ms\(probe->sensors, \(uint32_t\)period_ms\)/);
