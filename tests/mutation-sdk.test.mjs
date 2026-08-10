@@ -225,6 +225,42 @@ test("artifact-store restart recovery completes both interrupted rename states i
   }
 });
 
+test("artifact recovery refuses a swapped state parent before rename or cleanup", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-recovery-swap-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  writeFileSync(sourceArtifact, "new SDK artifact");
+
+  for (const checkpoint of ["after-first-rename", "after-second-rename"]) {
+    const root = join(sandbox, checkpoint);
+    const state = join(root, ".tsx-lvgl");
+    const outside = join(sandbox, `${checkpoint}-outside`);
+    const initial = join(state, "artifacts", "tsx-lvgl-sdk-0.1.0.tgz");
+    mkdirSync(dirname(initial), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(initial, "old SDK artifact");
+    writeFileSync(join(outside, "keep.txt"), "outside state");
+    const store = createArtifactStore({
+      ...(checkpoint === "after-first-rename"
+        ? { afterFirstRename: () => { throw new InstallTransactionInterruptedError(); } }
+        : { afterSecondRename: () => { throw new InstallTransactionInterruptedError(); } }),
+    });
+    assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), InstallTransactionInterruptedError);
+
+    assert.throws(
+      () => recoverProjectArtifactState(root, {
+        beforeRecoveryMutation: () => {
+          rmSync(state, { recursive: true, force: true });
+          symlinkSync(outside, state, "dir");
+        },
+      }),
+      { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+    );
+    assert.equal(readFileSync(join(outside, "keep.txt"), "utf8"), "outside state");
+    assert.equal(existsSync(join(outside, "artifacts")), false);
+  }
+});
+
 test("artifact references reject every non-canonical persisted path shape", () => {
   for (const file of [
     "/tmp/sdk.tgz",

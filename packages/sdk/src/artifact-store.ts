@@ -32,6 +32,7 @@ export interface ArtifactStoreHooks {
   beforeSecondRename?(stagePath: string): void;
   failSecondRename?(): void;
   afterSecondRename?(): void;
+  beforeRecoveryMutation?(path: string): void;
 }
 
 export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactStore {
@@ -92,20 +93,23 @@ export const DEFAULT_ARTIFACT_STORE = createArtifactStore();
  * command reads the framework lock. It keeps a completed second rename and
  * restores the old artifacts when only the first rename completed.
  */
-export function recoverProjectArtifactState(root: string): void {
+export function recoverProjectArtifactState(root: string, hooks: ArtifactStoreHooks = {}): void {
   const projectRoot = resolve(root);
   const state = join(projectRoot, ".tsx-lvgl");
   if (!existsSync(state)) return;
   assertStateDirectory(state, projectRoot);
   const artifacts = join(state, "artifacts");
   const backup = join(state, ".artifacts-backup");
-  recoverArtifactSwap(artifacts, backup);
+  recoverArtifactSwap(state, projectRoot, artifacts, backup, hooks);
   for (const entry of readdirSync(state)) {
     if (!entry.startsWith(".artifacts-stage-")) continue;
-    assertStateDirectory(state, projectRoot);
     const stage = join(state, entry);
     const details = lstatSync(stage);
-    if (details.isDirectory() && !details.isSymbolicLink()) rmSync(stage, { recursive: true, force: true });
+    if (!details.isDirectory() || details.isSymbolicLink()) continue;
+    hooks.beforeRecoveryMutation?.(stage);
+    assertStateDirectory(state, projectRoot);
+    const current = lstatSync(stage);
+    if (current.isDirectory() && !current.isSymbolicLink()) rmSync(stage, { recursive: true, force: true });
   }
 }
 
@@ -239,13 +243,27 @@ function assertStateDirectory(path: string, projectRoot: string): void {
   }
 }
 
-function recoverArtifactSwap(artifacts: string, backup: string): void {
+function recoverArtifactSwap(
+  state: string,
+  projectRoot: string,
+  artifacts: string,
+  backup: string,
+  hooks: ArtifactStoreHooks,
+): void {
   if (!existsSync(backup)) return;
+  assertStateDirectory(state, projectRoot);
   assertArtifactDirectory(backup);
   if (!existsSync(artifacts)) {
+    hooks.beforeRecoveryMutation?.(backup);
+    assertStateDirectory(state, projectRoot);
+    assertArtifactDirectory(backup);
     renameSync(backup, artifacts);
     return;
   }
+  assertArtifactDirectory(artifacts);
+  hooks.beforeRecoveryMutation?.(backup);
+  assertStateDirectory(state, projectRoot);
+  assertArtifactDirectory(backup);
   assertArtifactDirectory(artifacts);
   /* The staged directory contains all prior regular artifacts, so current is
    * complete after the second rename and the backup can be discarded. */

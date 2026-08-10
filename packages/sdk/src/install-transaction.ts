@@ -78,6 +78,7 @@ const TRANSACTION_DIRECTORIES = [
 ] as const;
 
 const JOURNAL_FILE = "install-transaction.json";
+const PENDING_ROLLBACK_FILE = "install-transaction-pending.json";
 const ROLLBACK_OWNER_FILE = ".tsx-lvgl-install-owner.json";
 const JOURNAL_VERSION = 1;
 
@@ -101,6 +102,7 @@ export interface InstallTransactionHooks {
   beforeJournalPersist?(stateDirectory: string): void;
   beforeRollbackPersist?(rollbackDirectory: string): void;
   beforeJournalTemporaryOpen?(temporaryPath: string): void;
+  beforeOwnedJournalTemporaryCleanup?(temporaryPath: string): void;
 }
 
 interface DirectorySnapshot {
@@ -118,6 +120,12 @@ interface TransactionJournal {
   readonly metadata: readonly JournalFileSnapshot[];
   readonly directories: JournalDirectorySnapshot[];
   status: "active" | "committed" | "cleanup";
+}
+
+interface PendingRollback {
+  readonly version: typeof JOURNAL_VERSION;
+  readonly rollbackDirectory: string;
+  readonly rollbackToken: string;
 }
 
 interface JournalFileSnapshot {
@@ -158,6 +166,7 @@ export async function withInstallTransaction<T>(
     const directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(projectRoot, rollbackRoot, definition.path, definition.move, filesystem));
     journal = createJournal(projectRoot, rollbackRoot, metadata, directories, filesystem, hooks);
     writeJournal(projectRoot, journal, filesystem, hooks);
+    clearPendingRollback(projectRoot, journal, filesystem);
     hooks.afterTransition?.("journal-created");
 
     captureDirectories(projectRoot, rollbackRoot, directories, filesystem, (directory) => {
@@ -186,23 +195,25 @@ export async function withInstallTransaction<T>(
 export function recoverInterruptedInstall(
   root: string,
   filesystem: InstallTransactionFs = DEFAULT_INSTALL_TRANSACTION_FS,
+  hooks: InstallTransactionHooks = {},
 ): void {
   const projectRoot = resolve(root);
   if (!existsSync(projectRoot)) return;
   const journal = readJournal(projectRoot);
   if (journal === undefined) {
-    cleanupStaleJournalFiles(projectRoot);
+    const pending = readPendingRollback(projectRoot);
+    if (pending !== undefined) recoverPendingRollback(projectRoot, pending, filesystem);
     return;
   }
   const rollbackRoot = resolveRollbackRoot(projectRoot, journal.rollbackDirectory);
   if (journal.status === "committed" || journal.status === "cleanup") {
-    cleanupJournal(projectRoot, rollbackRoot, journal, filesystem);
+    cleanupJournal(projectRoot, rollbackRoot, journal, filesystem, hooks);
     return;
   }
 
   for (const directory of journal.directories) restoreDirectory(projectRoot, rollbackRoot, directory, journal, filesystem);
   restoreFiles(readMetadataSnapshots(projectRoot, rollbackRoot, journal), filesystem);
-  cleanupJournal(projectRoot, rollbackRoot, journal, filesystem);
+  cleanupJournal(projectRoot, rollbackRoot, journal, filesystem, hooks);
 }
 
 function createJournal(
@@ -216,6 +227,7 @@ function createJournal(
   const rollbackDirectory = basename(rollbackRoot);
   resolveRollbackRoot(root, rollbackDirectory);
   const rollbackToken = randomBytes(32).toString("hex");
+  writePendingRollback(root, { version: JOURNAL_VERSION, rollbackDirectory, rollbackToken }, filesystem);
   hooks.beforeRollbackPersist?.(rollbackRoot);
   assertRollbackDirectory(root, rollbackRoot);
   writeRollbackOwnership(root, rollbackRoot, rollbackToken, filesystem);
@@ -333,6 +345,8 @@ function restoreDirectory(
       writeJournal(root, journal, filesystem);
       filesystem.makeDirectory(dirname(destination));
       filesystem.rename(backup, destination);
+      persistDirectory(dirname(backup), filesystem);
+      persistDirectory(dirname(destination), filesystem);
     } else if (!destinationExists || (directory.move && backupExists)) {
       throw recoveryFailure(`rollback capture is ambiguous for ${directory.path}`);
     }
@@ -355,6 +369,8 @@ function restoreDirectory(
     }
     filesystem.makeDirectory(dirname(destination));
     filesystem.rename(backup, destination);
+    persistDirectory(dirname(backup), filesystem);
+    persistDirectory(dirname(destination), filesystem);
   }
   directory.recovery = "restored";
   writeJournal(root, journal, filesystem);
@@ -372,7 +388,9 @@ function restoreFiles(snapshots: readonly FileSnapshot[], filesystem: InstallTra
     if (snapshot.existed) {
       filesystem.makeDirectory(dirname(snapshot.path));
       filesystem.writeFile(snapshot.path, snapshot.bytes as Buffer);
+      persistFile(snapshot.path, filesystem);
     }
+    persistDirectory(dirname(snapshot.path), filesystem);
   }
 }
 
@@ -382,15 +400,9 @@ function writeJournal(
   filesystem: InstallTransactionFs,
   hooks: InstallTransactionHooks = {},
 ): void {
-  const statePath = join(resolve(root), ".tsx-lvgl");
-  const stateWasAbsent = !existsSync(statePath);
-  const state = stateDirectory(root, true)!;
-  if (stateWasAbsent) {
-    persistDirectory(resolve(root), filesystem);
-    persistDirectory(state, filesystem);
-  }
+  const state = stateDirectoryWithDurability(root, filesystem);
   const target = join(state, JOURNAL_FILE);
-  const temporary = join(state, `.${JOURNAL_FILE}.${randomBytes(16).toString("hex")}.tmp`);
+  const temporary = join(state, `.${JOURNAL_FILE}.${journal.rollbackToken}.${randomBytes(16).toString("hex")}.tmp`);
   hooks.beforeJournalPersist?.(state);
   assertProjectStateDirectory(root, state);
   hooks.beforeJournalTemporaryOpen?.(temporary);
@@ -487,6 +499,17 @@ function stateDirectory(root: string, create: boolean): string | undefined {
   return state;
 }
 
+function stateDirectoryWithDurability(root: string, filesystem: InstallTransactionFs): string {
+  const statePath = join(resolve(root), ".tsx-lvgl");
+  const stateWasAbsent = !existsSync(statePath);
+  const state = stateDirectory(root, true)!;
+  if (stateWasAbsent) {
+    persistDirectory(resolve(root), filesystem);
+    persistDirectory(state, filesystem);
+  }
+  return state;
+}
+
 function resolveRollbackRoot(root: string, rollbackDirectory: string): string {
   const expectedPrefix = `.${basename(resolve(root))}.tsx-lvgl-install-rollback-`;
   if (
@@ -509,6 +532,71 @@ function writeRollbackOwnership(
   persistFile(marker, filesystem);
   persistDirectory(rollbackRoot, filesystem);
   persistDirectory(dirname(rollbackRoot), filesystem);
+}
+
+function writePendingRollback(root: string, pending: PendingRollback, filesystem: InstallTransactionFs): void {
+  const state = stateDirectoryWithDurability(root, filesystem);
+  writeStateRecord(root, state, PENDING_ROLLBACK_FILE, pending, filesystem);
+}
+
+function readPendingRollback(root: string): PendingRollback | undefined {
+  const state = stateDirectory(root, false);
+  if (state === undefined) return undefined;
+  const path = join(state, PENDING_ROLLBACK_FILE);
+  if (!existsSync(path)) return undefined;
+  try {
+    const details = lstatSync(path);
+    if (!details.isFile() || details.isSymbolicLink()) throw new Error("not a regular file");
+    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (
+      !isRecord(value)
+      || value.version !== JOURNAL_VERSION
+      || typeof value.rollbackDirectory !== "string"
+      || typeof value.rollbackToken !== "string"
+      || !/^[a-f0-9]{64}$/.test(value.rollbackToken)
+    ) throw new Error("invalid pending rollback");
+    resolveRollbackRoot(root, value.rollbackDirectory);
+    return { version: JOURNAL_VERSION, rollbackDirectory: value.rollbackDirectory, rollbackToken: value.rollbackToken };
+  } catch {
+    throw recoveryFailure("pending install rollback is invalid");
+  }
+}
+
+function recoverPendingRollback(root: string, pending: PendingRollback, filesystem: InstallTransactionFs): void {
+  const rollbackRoot = resolveRollbackRoot(root, pending.rollbackDirectory);
+  if (existsSync(rollbackRoot) && isOwnedRollbackDirectory(root, rollbackRoot, pending.rollbackToken)) {
+    cleanupOwnedRollbackDirectory(root, rollbackRoot, pending.rollbackToken, filesystem);
+  }
+  clearPendingRollback(root, pending, filesystem);
+}
+
+function clearPendingRollback(root: string, expected: PendingRollback | TransactionJournal, filesystem: InstallTransactionFs): void {
+  const pending = readPendingRollback(root);
+  if (pending === undefined) return;
+  if (pending.rollbackDirectory !== expected.rollbackDirectory || pending.rollbackToken !== expected.rollbackToken) {
+    throw recoveryFailure("pending install rollback does not match the transaction");
+  }
+  const state = stateDirectory(root, false)!;
+  assertProjectStateDirectory(root, state);
+  filesystem.remove(join(state, PENDING_ROLLBACK_FILE), { force: true });
+  persistDirectory(state, filesystem);
+}
+
+function writeStateRecord(
+  root: string,
+  state: string,
+  file: string,
+  value: PendingRollback,
+  filesystem: InstallTransactionFs,
+): void {
+  const target = join(state, file);
+  const temporary = join(state, `.${file}.${randomBytes(16).toString("hex")}.tmp`);
+  assertProjectStateDirectory(root, state);
+  writeExclusiveFile(temporary, Buffer.from(`${JSON.stringify(value)}\n`, "utf8"));
+  persistFile(temporary, filesystem);
+  assertProjectStateDirectory(root, state);
+  renameSync(temporary, target);
+  persistDirectory(state, filesystem);
 }
 
 function isOwnedRollbackDirectory(projectRoot: string, rollbackRoot: string, expectedToken: string): boolean {
@@ -630,11 +718,12 @@ function cleanupJournal(
     hooks.afterTransition?.("cleanup-recorded");
   }
   cleanupOwnedRollbackDirectory(root, rollbackRoot, transaction.rollbackToken, filesystem);
+  cleanupOwnedJournalTemporaryFiles(root, transaction, hooks);
   const journal = join(stateDirectory(root, true)!, JOURNAL_FILE);
   assertProjectStateDirectory(root, dirname(journal));
   filesystem.remove(journal, { force: true });
   persistDirectory(dirname(journal), filesystem);
-  cleanupStaleJournalFiles(root);
+  clearPendingRollback(root, transaction, filesystem);
 }
 
 function cleanupOwnedRollbackDirectory(
@@ -655,15 +744,23 @@ function cleanupOwnedRollbackDirectory(
   }
 }
 
-function cleanupStaleJournalFiles(root: string): void {
+function cleanupOwnedJournalTemporaryFiles(
+  root: string,
+  transaction: TransactionJournal,
+  hooks: InstallTransactionHooks,
+): void {
   const state = stateDirectory(root, false);
   if (state === undefined) return;
-  const prefix = `.${JOURNAL_FILE}.`;
+  const prefix = `.${JOURNAL_FILE}.${transaction.rollbackToken}.`;
   for (const entry of readdirSync(state)) {
     if (!entry.startsWith(prefix) || !entry.endsWith(".tmp")) continue;
     const path = join(state, entry);
     const details = lstatSync(path);
-    if (details.isFile() && !details.isSymbolicLink()) rmSync(path, { force: true });
+    if (!details.isFile() || details.isSymbolicLink()) continue;
+    hooks.beforeOwnedJournalTemporaryCleanup?.(path);
+    assertProjectStateDirectory(root, state);
+    const current = lstatSync(path);
+    if (current.isFile() && !current.isSymbolicLink()) rmSync(path, { force: true });
   }
 }
 
