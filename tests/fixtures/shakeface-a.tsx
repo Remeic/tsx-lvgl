@@ -15,17 +15,17 @@ const SHAKE_COOLDOWN_MS = 700;
 export default function ShakeFace(): VNode {
   const [happy, setHappy] = useState(true);
   const [lastShakeAt, setLastShakeAt] = useState(-Infinity);
-  const sample = useMotion();
+  const motion = useMotion();
 
   useEffect(() => {
-    if (sample === undefined || sample.status !== "ok" || sample.value === undefined) return;
-    if (!isShake(sample.value)) return;
-    if (sample.sampledAtMs - lastShakeAt < SHAKE_COOLDOWN_MS) return;
-    setLastShakeAt(sample.sampledAtMs);
+    if (motion.state.status !== "ready" && motion.state.status !== "stale") return;
+    if (!isShake(motion.state.value)) return;
+    if (motion.state.observedAtMs - lastShakeAt < SHAKE_COOLDOWN_MS) return;
+    setLastShakeAt(motion.state.observedAtMs);
     setHappy((current) => !current);
-  }, [sample]);
+  }, [motion.state]);
 
-  const imuUnavailable = sample !== undefined && sample.status !== "ok";
+  const imuUnavailable = motion.state.status === "unavailable" || motion.state.status === "error" || motion.state.status === "unsupported";
   const status = imuUnavailable
     ? "IMU non disponibile"
     : happy

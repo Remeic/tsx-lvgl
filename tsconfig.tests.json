@@ -11,6 +11,7 @@
   },
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/capabilities" },
     { "path": "packages/sensors" },
     { "path": "packages/runtime" },
     { "path": "packages/bundler" },

@@ -12,6 +12,7 @@ import {
   type RuntimeHostInstance,
 } from "@tsx-lvgl/runtime";
 import type { SensorSchema } from "@tsx-lvgl/sensors";
+import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
 import {
   FakeHost,
   FakeSensor,
@@ -447,6 +448,29 @@ test("effect activation failure restores the previous root and disposes the cand
   assert.equal(candidateText.disposed, true);
   assert.equal(host.removals.some((removal) => removal.parent === candidateRoot && removal.child === candidateText), true);
   runtime.unmount();
+});
+
+test("effect activation rollback fences the candidate board epoch", () => {
+  const host = new FakeHost();
+  const scheduler = new ManualScheduler();
+  const rolledBack: number[] = [];
+  const board: CapabilityRuntime = {
+    getBinding: () => ({ state: { status: "unsupported", reason: "not-implemented" }, instances: [] }),
+    subscribe: (_schema, _options, _context, onState) => { onState({ state: { status: "unsupported", reason: "not-implemented" }, instances: [] }); return { cancel: () => undefined }; },
+    diagnostics: () => ({ effectivePeriodsMs: {}, queueDepth: 0, queueHighWater: 0, droppedEvents: 0, activeOwners: [], resourceUse: { observers: 0 } }),
+    commitEpoch: () => undefined,
+    rollbackEpoch: (epoch) => { rolledBack.push(epoch); },
+    dispose: () => undefined,
+  };
+  const runtime = new Runtime({ host, scheduler, board });
+  runtime.mount(<Screen><Text text="stable" /></Screen>);
+  function Failing(): VNode {
+    useEffect(() => { throw new Error("effect activation failed"); }, []);
+    return <Screen><Text text="candidate" /></Screen>;
+  }
+
+  assert.equal(runtime.reload(<Failing />).status, "rolled_back");
+  assert.deepEqual(rolledBack, [2]);
 });
 
 test("reload works without a previous epoch and advances the epoch after commit", () => {

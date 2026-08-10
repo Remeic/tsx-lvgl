@@ -33,6 +33,26 @@ function provenanceArchive(path, provenance) {
   writeFileSync(path, gzipSync(Buffer.concat([header, content, Buffer.alloc(Math.ceil(content.byteLength / 512) * 512 - content.byteLength), Buffer.alloc(1024)])));
 }
 
+test("SDK pack vendors and rewrites capability-runtime imports", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-sdk-capabilities-pack-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const out = join(sandbox, "artifact");
+  const packed = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--out", out, "--json"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  assert.equal(packed.status, 0, packed.stderr);
+  const extract = join(sandbox, "extract");
+  mkdirSync(extract, { recursive: true });
+  const artifactPath = JSON.parse(packed.stdout).artifactPath;
+  const extracted = spawnSync("tar", ["-xzf", artifactPath, "-C", extract], { encoding: "utf8" });
+  assert.equal(extracted.status, 0, extracted.stderr);
+  assert.equal(existsSync(join(extract, "package", "dist", "vendor", "capabilities", "index.js")), true);
+  const kernel = readFileSync(join(extract, "package", "dist", "vendor", "device", "kernel.js"), "utf8");
+  assert.doesNotMatch(kernel, /from "@tsx-lvgl\/capabilities"/);
+  assert.match(kernel, /capabilities\/index\.js/);
+});
+
 async function assertAsyncCode(action, code) {
   await assert.rejects(action, { code });
 }

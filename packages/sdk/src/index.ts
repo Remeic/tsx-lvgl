@@ -11,22 +11,16 @@ export type { Component, VNode, VNodeChild } from "@tsx-lvgl/core";
 import {
   useEffect,
   useInterval,
+  useMotion,
   useState,
 } from "@tsx-lvgl/runtime";
 export type { StateSetter } from "@tsx-lvgl/runtime";
+export type { CapabilityBinding, CapabilityObserveOptions, CapabilityState } from "@tsx-lvgl/capabilities";
 
 import {
   isShake,
 } from "@tsx-lvgl/sensors";
-export type { MotionSample, SensorSample, SensorStatus } from "@tsx-lvgl/sensors";
-
-import { useSensor } from "@tsx-lvgl/runtime";
-import { motionSchema, type MotionSample, type SensorSample } from "@tsx-lvgl/sensors";
-
-/** The supported high-level sensor hook; applications do not need the sensor workspace. */
-function useMotionImplementation(): SensorSample<MotionSample> | undefined {
-  return useSensor(motionSchema);
-}
+export type { MotionSample } from "@tsx-lvgl/sensors";
 
 // The device resolver builds this same descriptor. Export through it so the
 // parity test guards both runtime module resolution and the public SDK facade.
@@ -39,7 +33,7 @@ const applicationFacade = createApplicationFacade({
   isShake,
   useEffect,
   useInterval,
-  useMotion: useMotionImplementation,
+  useMotion,
   useState,
 }) as Readonly<{
   Button: typeof Button;
@@ -50,7 +44,7 @@ const applicationFacade = createApplicationFacade({
   isShake: typeof isShake;
   useEffect: typeof useEffect;
   useInterval: typeof useInterval;
-  useMotion: typeof useMotionImplementation;
+  useMotion: typeof useMotion;
   useState: typeof useState;
 }>;
 

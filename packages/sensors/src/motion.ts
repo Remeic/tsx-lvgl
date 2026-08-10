@@ -6,7 +6,7 @@ export interface MotionSample {
 }
 
 export const motionSchema: SensorSchema<MotionSample> = {
-  id: "board.qmi8658.motion",
+  id: "device.motion",
   version: 1,
   unit: "m/s2+dps",
   validate: isMotionSample,

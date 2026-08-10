@@ -1,4 +1,5 @@
-import { subscribeSensor, type SensorSample, type SensorSchema } from "@tsx-lvgl/sensors";
+import { motionSchema, subscribeSensor, type MotionSample, type SensorSample, type SensorSchema } from "@tsx-lvgl/sensors";
+import type { CapabilityBinding, CapabilityObserveOptions } from "@tsx-lvgl/capabilities";
 import type { Fiber } from "./fiber.js";
 import type { Session } from "./session.js";
 
@@ -135,6 +136,18 @@ export function useSensor<T>(schema: SensorSchema<T>): SensorSample<T> | undefin
   }, [sensor]);
 
   return sample;
+}
+
+/** Board motion prefers the boot-frozen capability catalog and never starts a provider from render. */
+export function useMotion(options: CapabilityObserveOptions = {}): CapabilityBinding<MotionSample> {
+  requireFiber("useMotion");
+  const session = currentSession as Session;
+  const [binding, setBinding] = useState<CapabilityBinding<MotionSample>>(() => session.board.getBinding(motionSchema, options));
+  useEffect(() => {
+    const subscription = session.board.subscribe(motionSchema, options, { reloadEpoch: session.epoch, isCancelled: () => !session.isActive() }, setBinding);
+    return () => subscription.cancel();
+  }, [options.enabled, options.instanceId, options.periodMs]);
+  return binding;
 }
 
 /** Runs the cleanup of every effect hook a fiber owns, exactly once. */

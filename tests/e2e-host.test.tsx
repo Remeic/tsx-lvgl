@@ -17,7 +17,6 @@ import {
   validateRuntimeBundle,
   type RuntimeBundle,
 } from "@tsx-lvgl/runtime";
-import { motionSchema } from "@tsx-lvgl/sensors";
 import { makeFakeNative } from "./support/fake-native.js";
 
 // Compiled test files live at test-dist/tests/e2e-host.test.js; two hops up
@@ -26,8 +25,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const shakeFaceSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-a.tsx"), "utf8");
 const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
+const embeddedShakeFaceDirectory = join(repoRoot, "examples/esp-idf/runtime_port_probe/main");
 
-const calmMotion = { accelerationMps2: [0, 0, 9.80665] as const, angularVelocityDps: [0, 0, 0] as const };
 const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
 
 function compileShakeFace(generation: number): BundleOutput {
@@ -37,6 +36,18 @@ function compileShakeFace(generation: number): BundleOutput {
     bundleId: "shakeface",
     boardId: BOARD_ID,
     generation,
+  });
+}
+
+/** Mirrors `scripts/bundle-app.mjs`, which publishes the SDK JSX runtime into the embedded generation-one app. */
+function compileEmbeddedShakeFace(generation: number): BundleOutput {
+  return compileTsxBundle({
+    fileName: "ShakeFace.tsx",
+    source: shakeFaceSource,
+    bundleId: "shakeface",
+    boardId: BOARD_ID,
+    generation,
+    jsxImportSource: "@tsx-lvgl/sdk",
   });
 }
 
@@ -54,11 +65,10 @@ function toBundle(output: BundleOutput): RuntimeBundle {
   return { manifest: output.manifest, source: output.bytes };
 }
 
-/** A fresh kernel over a fresh fake native, with a calm sensor reading already scripted. */
+/** A fresh kernel over a fake board transport. */
 function startedKernel() {
   const fake = makeFakeNative(BOARD_ID);
   const kernel = createKernel(fake.native);
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 0, value: calmMotion });
   kernel.start(toBundle(compileShakeFace(1)));
   return { fake, kernel };
 }
@@ -85,7 +95,6 @@ test("bundle A compiles, validates, and mounts: eyes, happy mouth, status, and b
 
   const fake = makeFakeNative(BOARD_ID);
   const kernel = createKernel(fake.native);
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 0, value: calmMotion });
   kernel.start(toBundle(output));
 
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
@@ -103,22 +112,19 @@ test("a shake flips the mouth, a second shake within the cooldown is ignored, an
   // First shake: flips to sad. The state flip is one render cycle behind the
   // sample update (useEffect -> setState is its own deferred render task), so
   // pump twice: once to accept the sample, once to flush the resulting toggle.
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 80, value: shakeMotion });
-  fake.timers.advance(80);
+  fake.emitMotion({ status: "ok", sampledAtMs: 80, value: shakeMotion });
   kernel.pump();
   kernel.pump();
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
 
   // Second shake 80ms later (well within the 700ms cooldown): ignored.
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 160, value: shakeMotion });
-  fake.timers.advance(80);
+  fake.emitMotion({ status: "ok", sampledAtMs: 160, value: shakeMotion });
   kernel.pump();
   kernel.pump();
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
 
   // A shake at t=860ms (>= 80 + 700ms cooldown): accepted, flips back to happy.
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 860, value: shakeMotion });
-  fake.timers.advance(80);
+  fake.emitMotion({ status: "ok", sampledAtMs: 860, value: shakeMotion });
   kernel.pump();
   kernel.pump();
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
@@ -138,8 +144,8 @@ test("clicking the button flips the mood manually", () => {
 test("an unavailable IMU reading reports the Italian unavailable status", async () => {
   const fake = makeFakeNative(BOARD_ID);
   const kernel = createKernel(fake.native);
-  fake.sensors.script(motionSchema.id, { status: "unavailable", sampledAtMs: 0 });
   kernel.start(toBundle(compileShakeFace(1)));
+  fake.emitMotion({ status: "unavailable", sampledAtMs: 0 });
 
   await Promise.resolve();
   await Promise.resolve();
@@ -198,9 +204,8 @@ test("a throwing candidate rolls back and the previous app stays mounted and int
   kernel.pump();
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "/----\\", "triste - scuotimi"]);
 
-  // ...and the sensor's native timer still advances and re-renders.
-  fake.sensors.script(motionSchema.id, { status: "ok", sampledAtMs: 800, value: shakeMotion });
-  fake.timers.advance(80);
+  // ...and the board observation still advances and re-renders.
+  fake.emitMotion({ status: "ok", sampledAtMs: 800, value: shakeMotion });
   kernel.pump();
   kernel.pump();
   assert.deepEqual(fake.lvgl.liveTexts(), ["O    O", "\\____/", "felice - scuotimi"]);
@@ -211,4 +216,13 @@ test("compiling ShakeFace twice is byte-for-byte and manifest-for-manifest deter
   const second = compileShakeFace(1);
   assert.deepEqual([...first.bytes], [...second.bytes]);
   assert.deepEqual(first.manifest, second.manifest);
+});
+
+test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {
+  const generated = compileEmbeddedShakeFace(1);
+  assert.equal(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.js"), "utf8"), generated.code);
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.manifest.json"), "utf8")),
+    generated.manifest,
+  );
 });

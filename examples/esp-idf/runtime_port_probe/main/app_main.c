@@ -44,14 +44,7 @@ static void runtime_probe_boot_task(void *arg)
     (void)arg;
 
     runtime_probe_t *probe = NULL;
-    if (!bsp_display_lock(0)) {
-        ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
-        vTaskDelete(NULL);
-        return;
-    }
-
     const esp_err_t result = runtime_probe_start(&probe);
-    bsp_display_unlock();
     if (result != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=runtime_start status=fail err=%s",
                  esp_err_to_name(result));
@@ -59,12 +52,34 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
+    /* I2C discovery/configuration precedes all QuickJS/kernel reads and never
+     * runs under the LVGL lock. A failed provider is a failed boot, not a
+     * silently degraded app that cannot be retried safely. */
+    if (runtime_probe_start_sensors(probe) != ESP_OK) {
+        ESP_LOGE(TAG, "PROBE checkpoint=imu_init status=fail");
+        runtime_probe_destroy(probe);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (!bsp_display_lock(0)) {
+        ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
+        runtime_probe_destroy(probe);
+        vTaskDelete(NULL);
+        return;
+    }
+    const esp_err_t boot_result = runtime_probe_boot(probe);
+    bsp_display_unlock();
+    if (boot_result != ESP_OK) {
+        ESP_LOGE(TAG, "PROBE checkpoint=kernel_boot status=fail err=%s", esp_err_to_name(boot_result));
+        runtime_probe_destroy(probe);
+        vTaskDelete(NULL);
+        return;
+    }
+
     if (xTaskCreate(runtime_probe_task, "runtime_probe", 8192, probe, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "PROBE checkpoint=runtime_task status=fail");
-        if (bsp_display_lock(100)) {
-            runtime_probe_destroy(probe);
-            bsp_display_unlock();
-        }
+        runtime_probe_destroy(probe);
         vTaskDelete(NULL);
         return;
     }

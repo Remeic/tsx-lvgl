@@ -185,7 +185,7 @@ test("isShake detects either a linear impulse or a fast rotation, but not a stat
 });
 
 test("motionSchema declares the exact id, version, and unit the reload fence keys on", () => {
-  assert.equal(motionSchema.id, "board.qmi8658.motion");
+  assert.equal(motionSchema.id, "device.motion");
   assert.equal(motionSchema.version, 1);
   assert.equal(motionSchema.unit, "m/s2+dps");
 });

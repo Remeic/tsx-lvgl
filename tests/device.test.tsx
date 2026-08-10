@@ -387,7 +387,7 @@ const sdkAliasSource = `
     const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,Text,View,isShake,useEffect,useInterval,useMotion,useState"
       ? "sdk"
       : "sdk-leak";
-    return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample === undefined ? surface : sample.status }) });
+    return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample.state.status === "starting" ? surface : sample.state.status }) });
   };
 `;
 

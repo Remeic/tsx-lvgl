@@ -16,6 +16,7 @@ export type { RuntimeSession } from "./session.js";
 export {
   useEffect,
   useInterval,
+  useMotion,
   useSensor,
   useState,
   type StateSetter,

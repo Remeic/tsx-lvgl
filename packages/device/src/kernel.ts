@@ -23,12 +23,14 @@ import * as runtimeModule from "@tsx-lvgl/runtime";
 import {
   useEffect,
   useInterval,
-  useSensor,
+  useMotion,
   useState,
 } from "@tsx-lvgl/runtime";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
 import * as sensorsModule from "@tsx-lvgl/sensors";
-import { isShake, motionSchema } from "@tsx-lvgl/sensors";
+import { isShake } from "@tsx-lvgl/sensors";
+import * as capabilitiesModule from "@tsx-lvgl/capabilities";
+import { BoardRuntime } from "./board-runtime.js";
 import { createClickRegistry, createLvglHost } from "./lvgl-host.js";
 import { createDeviceScheduler } from "./scheduler.js";
 import { createNativeMotionSensor } from "./sensors.js";
@@ -42,6 +44,7 @@ export interface DeviceKernel {
   /** Drains the scheduler's FIFO of one pump cycle's worth of pending work. */
   pump(): void;
   lastGeneration(): number;
+  dispose(): void;
 }
 
 const MALFORMED_MANIFEST = Symbol("malformed-manifest");
@@ -66,7 +69,7 @@ function resolveModule(specifier: string): Record<string, unknown> {
         View,
         useEffect,
         useInterval,
-        useMotion: () => useSensor(motionSchema),
+        useMotion,
         useState,
         isShake,
       }) as Record<string, unknown>;
@@ -80,6 +83,8 @@ function resolveModule(specifier: string): Record<string, unknown> {
       return runtimeModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/sensors":
       return sensorsModule as unknown as Record<string, unknown>;
+    case "@tsx-lvgl/capabilities":
+      return capabilitiesModule as unknown as Record<string, unknown>;
     default:
       throw new Error(`unknown module: ${specifier}`);
   }
@@ -116,10 +121,12 @@ export function createKernel(native: NativeBindings): DeviceKernel {
   const capabilities: DeviceCapabilities = {
     sensors: createSensorRegistry([createNativeMotionSensor(native.sensors, native.timers)]),
   };
+  const board = native.board === undefined ? undefined : new BoardRuntime(native.board);
   const runtime = new Runtime({
     host,
     scheduler,
     capabilities,
+    ...(board === undefined ? {} : { board }),
     onError: (error: unknown) => native.log(`kernel: error ${String(error)}`),
   });
   native.onClick(clicks.dispatch);
@@ -185,6 +192,11 @@ export function createKernel(native: NativeBindings): DeviceKernel {
 
     lastGeneration(): number {
       return lastGeneration;
+    },
+
+    dispose(): void {
+      runtime.unmount();
+      board?.dispose();
     },
   };
 }

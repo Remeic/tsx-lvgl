@@ -1,5 +1,6 @@
 import type { ElementType } from "@tsx-lvgl/core";
 import type { DeviceCapabilities } from "@tsx-lvgl/sensors";
+import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
 
 export interface RuntimeHostInstance {
   readonly type: ElementType;
@@ -41,6 +42,7 @@ export interface RuntimeContext {
   readonly host: RuntimeHost;
   readonly scheduler: RuntimeScheduler;
   readonly capabilities: DeviceCapabilities;
+  readonly board: CapabilityRuntime;
   reportError(error: unknown): void;
   sessionDisposed(session: object): void;
 }

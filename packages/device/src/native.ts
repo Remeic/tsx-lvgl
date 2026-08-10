@@ -37,11 +37,44 @@ export interface NativeSensors {
   read(sensorId: string): unknown;
 }
 
+/** Bounded, board-owned transport for capability observations. */
+export interface NativeCapabilityDescriptor {
+  readonly familyCode: number;
+  readonly semanticId: string;
+  readonly instanceId: string;
+  readonly version: 1;
+  readonly source: string;
+  readonly isDefault: boolean;
+  readonly delivery: "snapshot";
+  readonly defaultPeriodMs: number;
+  readonly minPeriodMs: number;
+  readonly maxPeriodMs: number;
+  readonly maxFrameBytes: number;
+}
+/** Observation, stream, and correlated command envelopes intentionally remain
+ * separate. This slice implements observations only; later command support
+ * cannot accidentally share an observation handle or sequence domain. */
+export interface NativeBoardObserveRequest { readonly version: 1; readonly kind: "observe"; readonly instanceId: string; readonly periodMs: number; readonly reloadEpoch: number; }
+export interface NativeBoardStreamRequest { readonly version: 1; readonly kind: "stream"; readonly instanceId: string; readonly reloadEpoch: number; }
+export interface NativeBoardCommandRequest { readonly version: 1; readonly kind: "command"; readonly instanceId: string; readonly commandId: string; readonly correlationId: string; readonly reloadEpoch: number; }
+export type NativeBoardRequest = NativeBoardObserveRequest;
+export interface NativeBoardEvent { readonly version: 1; readonly kind: "state"; readonly handle: number; readonly reloadEpoch: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; }
+export interface BoardPlatformAdapter {
+  list(): readonly NativeCapabilityDescriptor[];
+  readCached(instanceId: string): NativeBoardEvent | undefined;
+  submit(request: NativeBoardRequest): number;
+  cancel(handle: number): void;
+  setSink(listener: (event: NativeBoardEvent) => void): void;
+  dispose(): void;
+}
+
 export interface NativeBindings {
   readonly boardId: string;
   readonly lvgl: NativeLvgl;
   readonly timers: NativeTimers;
   readonly sensors: NativeSensors;
+  /** Capability transport is optional while the legacy sensor seam remains supported. */
+  readonly board?: BoardPlatformAdapter;
   /** Registers the single click dispatcher. Called exactly once per kernel. */
   onClick(dispatch: (id: number) => void): void;
   /** Board-side diagnostic log sink (single-line messages). */
