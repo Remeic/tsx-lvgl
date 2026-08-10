@@ -132,9 +132,8 @@ test("artifact-store refuses artifact-directory and final-file symlink escapes w
   writeFileSync(outsideArtifact, "keep this outside value");
   symlinkSync(outside, join(root, ".tsx-lvgl", "artifacts"), "dir");
 
-  const installed = DEFAULT_ARTIFACT_STORE.install(root, sourceArtifact, metadata(sourceArtifact));
+  assert.throws(() => DEFAULT_ARTIFACT_STORE.install(root, sourceArtifact, metadata(sourceArtifact)), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
   assert.equal(readFileSync(outsideArtifact, "utf8"), "keep this outside value");
-  assert.equal(readFileSync(DEFAULT_ARTIFACT_STORE.resolve(root, installed), "utf8"), "new SDK artifact");
 
   rmSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
   mkdirSync(join(root, ".tsx-lvgl", "artifacts"));
@@ -162,9 +161,9 @@ test("artifact-store stage swap cannot be redirected when artifacts is replaced 
     },
   });
 
-  const installed = store.install(root, sourceArtifact, metadata(sourceArtifact));
+  assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
   assert.equal(readFileSync(outsideArtifact, "utf8"), "outside must survive");
-  assert.equal(readFileSync(store.resolve(root, installed), "utf8"), "inside artifact");
+  assert.equal(existsSync(join(root, ".tsx-lvgl", "artifacts")), true);
   assert.equal(existsSync(join(outside, "tsx-lvgl-sdk-0.1.0.tgz")), true);
 });
 

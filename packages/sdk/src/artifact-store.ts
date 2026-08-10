@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, posix, relative, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { valid as validSemver } from "semver";
@@ -28,6 +28,9 @@ export interface ArtifactStoreHooks {
   /** Test seam called after the private staged state is complete, before its
    * path-component-safe rename swaps it into the project. */
   beforeInstallSwap?(): void;
+  afterFirstRename?(): void;
+  beforeSecondRename?(stagePath: string): void;
+  failSecondRename?(): void;
 }
 
 export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactStore {
@@ -65,7 +68,7 @@ export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactSto
     }
     const artifactFile = artifactFileName(provenance.version);
     const bytes = readFileSync(artifactPath);
-    replaceProjectStateAtomically(root, artifactFile, bytes, hooks.beforeInstallSwap);
+    replaceProjectStateAtomically(root, artifactFile, bytes, hooks);
     return {
       formatVersion: LOCK_FORMAT_VERSION,
       package: SDK_PACKAGE_NAME,
@@ -150,7 +153,7 @@ function assertArtifactFile(path: string): void {
   }
 }
 
-function replaceProjectStateAtomically(root: string, artifactFile: string, bytes: Uint8Array, beforeInstallSwap: (() => void) | undefined): void {
+function replaceProjectStateAtomically(root: string, artifactFile: string, bytes: Uint8Array, hooks: ArtifactStoreHooks): void {
   const projectRoot = resolve(root);
   const state = join(projectRoot, ".tsx-lvgl");
   if (existsSync(state)) {
@@ -159,25 +162,71 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
     }
   }
-  const stage = mkdtempSync(join(projectRoot, ".tsx-lvgl-stage-"));
-  const backup = join(projectRoot, `.tsx-lvgl-backup-${process.pid}-${Date.now()}`);
+  mkdirSync(state, { recursive: true });
+  const artifacts = join(state, "artifacts");
+  const backup = join(state, ".artifacts-backup");
+  recoverArtifactSwap(artifacts, backup);
+  const stage = mkdtempSync(join(state, ".artifacts-stage-"));
   let movedPrevious = false;
   try {
-    if (existsSync(state)) cpSync(state, stage, { recursive: true, dereference: false });
-    rmSync(join(stage, "artifacts"), { recursive: true, force: true });
-    mkdirSync(join(stage, "artifacts"));
-    writeFileSync(join(stage, "artifacts", artifactFile), bytes, { mode: 0o600 });
-    beforeInstallSwap?.();
-    if (existsSync(state)) {
-      /* rename moves a raced symlink itself; it never follows into its target. */
-      renameSync(state, backup);
+    if (existsSync(artifacts)) copyAllowedArtifacts(artifacts, stage);
+    writeFileSync(join(stage, artifactFile), bytes, { mode: 0o600 });
+    hooks.beforeInstallSwap?.();
+    if (existsSync(artifacts)) {
+      assertArtifactDirectory(artifacts);
+      renameSync(artifacts, backup);
       movedPrevious = true;
     }
-    renameSync(stage, state);
+    hooks.afterFirstRename?.();
+    hooks.beforeSecondRename?.(stage);
+    hooks.failSecondRename?.();
+    renameSync(stage, artifacts);
+    try {
+      assertArtifactDirectory(artifacts);
+    } catch (error) {
+      /* A substituted stage is a link at this point. Remove the link itself,
+       * then restore the owned backup without ever traversing its target. */
+      rmSync(artifacts, { recursive: true, force: true });
+      if (movedPrevious && existsSync(backup)) renameSync(backup, artifacts);
+      movedPrevious = false;
+      throw error;
+    }
     if (movedPrevious) rmSync(backup, { recursive: true, force: true });
   } finally {
     if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
-    if (movedPrevious && existsSync(backup) && !existsSync(state)) renameSync(backup, state);
+    if (movedPrevious && existsSync(backup) && !existsSync(artifacts)) renameSync(backup, artifacts);
+  }
+}
+
+function recoverArtifactSwap(artifacts: string, backup: string): void {
+  if (!existsSync(backup)) return;
+  assertArtifactDirectory(backup);
+  if (!existsSync(artifacts)) {
+    renameSync(backup, artifacts);
+    return;
+  }
+  assertArtifactDirectory(artifacts);
+  /* The staged directory contains all prior regular artifacts, so current is
+   * complete after the second rename and the backup can be discarded. */
+  rmSync(backup, { recursive: true, force: true });
+}
+
+function copyAllowedArtifacts(source: string, destination: string): void {
+  assertArtifactDirectory(source);
+  for (const entry of readdirSync(source)) {
+    const path = join(source, entry);
+    const details = lstatSync(path);
+    if (!details.isFile() || details.isSymbolicLink()) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory contains an unsupported entry");
+    }
+    writeFileSync(join(destination, entry), readFileSync(path), { mode: 0o600 });
+  }
+}
+
+function assertArtifactDirectory(path: string): void {
+  const details = lstatSync(path);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory must not be a symlink");
   }
 }
 
