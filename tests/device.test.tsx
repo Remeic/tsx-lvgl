@@ -379,6 +379,18 @@ const sourceB = `
   };
 `;
 
+const sdkAliasSource = `
+  const sdk = require("@tsx-lvgl/sdk");
+  const jsx = require("@tsx-lvgl/sdk/jsx-runtime");
+  exports.default = function App() {
+    const sample = sdk.useMotion();
+    const surface = sdk.createVNode === undefined && sdk.useSensor === undefined && sdk.motionSchema === undefined
+      ? "sdk"
+      : "sdk-leak";
+    return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample === undefined ? surface : sample.status }) });
+  };
+`;
+
 function startKernel(): { kernel: DeviceKernel; fake: ReturnType<typeof makeFakeNative> } {
   const fake = makeFakeNative();
   const kernel = createKernel(fake.native);
@@ -399,6 +411,14 @@ test("kernel.start mounts the initial bundle and throws on an invalid one", () =
   kernel.start(bundleA);
   assert.deepEqual(fake.lvgl.liveTexts(), ["A:0"]);
   assert.equal(kernel.lastGeneration(), 1);
+});
+
+test("kernel resolves the stable SDK and JSX runtime aliases", () => {
+  const fake = makeFakeNative();
+  const kernel = createKernel(fake.native);
+  fake.sensors.script(motionSchema.id, { status: "unavailable", sampledAtMs: 0 });
+  kernel.start({ manifest: manifest({ generation: 1, byteLength: sdkAliasSource.length }), source: encode(sdkAliasSource) });
+  assert.deepEqual(fake.lvgl.liveTexts(), ["sdk"]);
 });
 
 test("kernel.start propagates the exact 'unknown module' message uncaught for an unresolved require", () => {

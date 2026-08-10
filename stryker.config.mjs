@@ -4,14 +4,26 @@ const config = {
   commandRunner: {
     // Compile each mutant, then run the already-compiled suite. The public
     // test command cleans first, which would discard Stryker's sandbox output.
-    command: "npx tsc -b --noCheck --pretty false && npm run test:compiled",
+    command: "npx tsc -b --noCheck --pretty false && npm run test:mutation",
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
   buildCommand: "npm ci --ignore-scripts --no-audit --no-fund --engine-strict=false && npx tsc -b --noCheck --pretty false",
   inPlace: false,
   symlinkNodeModules: false,
-  mutate: ["packages/*/src/**/*.ts"],
+  // Keep per-mutant evidence focused on deterministic framework code and the
+  // public facade. The CLI/artifact workflow runs once as the dedicated
+  // test:consumer-contract gate after Stryker; its npm-install sandbox must not
+  // be repeated for every mutant.
+  mutate: [
+    "packages/core/src/**/*.ts",
+    "packages/sensors/src/**/*.ts",
+    "packages/runtime/src/**/*.ts",
+    "packages/bundler/src/**/*.ts",
+    "packages/device/src/**/*.ts",
+    "packages/sdk/src/index.ts",
+    "packages/sdk/src/package-manager.ts",
+  ],
   // The ESP-IDF probe is validated by its own firmware gate. Its generated
   // managed_components tree is not part of the host mutation project.
   ignorePatterns: [

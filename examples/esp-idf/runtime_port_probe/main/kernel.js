@@ -925,10 +925,13 @@ exports.encodeAsciiSource = encodeAsciiSource;
 exports.createKernel = createKernel;
 const coreModule = require("@tsx-lvgl/core");
 const jsxRuntimeModule = require("@tsx-lvgl/core/jsx-runtime");
+const core_1 = require("@tsx-lvgl/core");
 const runtime_1 = require("@tsx-lvgl/runtime");
 const runtimeModule = require("@tsx-lvgl/runtime");
+const runtime_2 = require("@tsx-lvgl/runtime");
 const sensors_1 = require("@tsx-lvgl/sensors");
 const sensorsModule = require("@tsx-lvgl/sensors");
+const sensors_2 = require("@tsx-lvgl/sensors");
 const lvgl_host_js_1 = require("@tsx-lvgl/device/lvgl-host.js");
 const scheduler_js_1 = require("@tsx-lvgl/device/scheduler.js");
 const sensors_js_1 = require("@tsx-lvgl/device/sensors.js");
@@ -943,6 +946,21 @@ function parseManifestJson(manifestJson) {
 }
 function resolveModule(specifier) {
     switch (specifier) {
+        case "@tsx-lvgl/sdk":
+            return {
+                Button: core_1.Button,
+                Fragment: core_1.Fragment,
+                Screen: core_1.Screen,
+                Text: core_1.Text,
+                View: core_1.View,
+                useEffect: runtime_2.useEffect,
+                useInterval: runtime_2.useInterval,
+                useMotion: () => (0, runtime_2.useSensor)(sensors_2.motionSchema),
+                useState: runtime_2.useState,
+                isShake: sensors_2.isShake,
+            };
+        case "@tsx-lvgl/sdk/jsx-runtime":
+            return jsxRuntimeModule;
         case "@tsx-lvgl/core":
             return coreModule;
         case "@tsx-lvgl/core/jsx-runtime":

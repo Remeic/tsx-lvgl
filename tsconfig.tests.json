@@ -14,7 +14,8 @@
     { "path": "packages/sensors" },
     { "path": "packages/runtime" },
     { "path": "packages/bundler" },
-    { "path": "packages/device" }
+    { "path": "packages/device" },
+    { "path": "packages/sdk" }
   ],
   "include": ["tests/**/*.ts", "tests/**/*.tsx"]
 }

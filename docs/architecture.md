@@ -27,6 +27,32 @@ product features.
 
 ## Deep modules and seams
 
+### `@tsx-lvgl/sdk`
+
+Owns the only application-facing interface: the supported TSX tags, hooks and
+high-level motion hook, plus the `tsx-lvgl` CLI. The CLI owns project metadata,
+artifact verification, TypeScript checks, deterministic bundle production and
+the headless kernel check. It deliberately does not expose the internal
+workspace graph. The SDK npm-pack artifact vendors the compiled internal
+packages and TypeScript under its own distribution directory, so an app can
+work from a copied local artifact without a registry or a framework checkout.
+
+The package-source seam is the artifact reference in
+`.tsx-lvgl/framework.lock.json`. The lock records package version, source Git
+SHA, artifact SHA-256 and byte length. `sync` installs that exact artifact;
+`update` is the explicit source-to-artifact operation and rejects a dirty source
+checkout. The CLI delegates installation to the consumer's declared or
+detected package manager (npm, pnpm, Yarn Classic v1 or bun), so package-manager choice is
+not part of the application source contract. `dev` and `build` only verify the
+lock and never resolve a newer source. The package remains private,
+so `npm pack` is a deliberate local distribution action and `npm publish` is
+not part of the workflow.
+
+Package-manager discovery and base command grammar delegate to the pinned,
+zero-dependency `package-manager-detector` library. The SDK adapter owns only
+product policy: supported-manager filtering, ambiguous-lock diagnostics,
+offline/script-safety flags and Bun's fresh cache for same-version artifacts.
+
 ### `@tsx-lvgl/core`
 
 Owns the small TSX vocabulary and immutable VNode model. The widget vocabulary
@@ -65,6 +91,11 @@ The simulator and ESP-IDF host select concrete scheduler, host and sensor
 adapters. They must satisfy the same contracts. QuickJS-NG lifecycle, job
 pumping, memory limits and serialized ownership are explicit host concerns;
 LVGL mutation occurs only through the owner task or its documented lock.
+
+Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
+only; the SDK facade adapts the app bundle's public module specifiers to the
+same device-kernel aliases. Core/runtime/sensors/bundler/device workspace
+imports remain framework-internal implementation details.
 
 ## First vertical slice
 
