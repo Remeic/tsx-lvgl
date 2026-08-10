@@ -152,11 +152,9 @@ function requireNode(nodes: ReadonlyMap<number, HeadlessNode>, id: number): Head
 
 function detach(nodes: ReadonlyMap<number, HeadlessNode>, child: HeadlessNode): void {
   if (child.parent === null) return;
-  const parent = nodes.get(child.parent);
-  if (parent !== undefined) {
-    const index = parent.children.indexOf(child.id);
-    if (index >= 0) parent.children.splice(index, 1);
-  }
+  const parent = requireNode(nodes, child.parent);
+  const index = parent.children.indexOf(child.id);
+  if (index >= 0) parent.children.splice(index, 1);
   child.parent = null;
 }
 

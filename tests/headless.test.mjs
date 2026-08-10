@@ -44,8 +44,6 @@ test("headless native exercises lifecycle, hierarchy, sensors, timers and edge c
   host.native.lvgl.dispose(999);
   host.native.lvgl.dispose(screen);
   assert.deepEqual(host.activeTexts(), []);
-  const replacement = host.native.lvgl.create("screen");
-  host.native.lvgl.insert(replacement, first, 0);
   host.native.lvgl.loadScreen(999);
   assert.deepEqual(host.activeTexts(), []);
 });
