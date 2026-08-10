@@ -558,7 +558,8 @@ async function runPackageManagerInstall(root: string, artifactPath: string): Pro
   if (packageManager.name === "npm" && hasPackageLock) synchronizePackageLock(packageLockPath, root, artifactPath);
 }
 
-function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
+/** Normalize npm lockfile records after a successful local-artifact install. */
+export function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
   const packageLock = readJson(packageLockPath, DIAGNOSTIC_CODES.INSTALL_FAILED);
   const relativeArtifact = relative(root, artifactPath).split(sep).join("/");
   const integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
