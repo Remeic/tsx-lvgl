@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export interface FileSnapshot {
   readonly path: string;
@@ -17,7 +17,7 @@ export interface FileSnapshot {
 
 export interface InstallTransactionFs {
   exists(path: string): boolean;
-  makeTemporaryDirectory(prefix: string): string;
+  makeSiblingTemporaryDirectory(root: string, prefix: string): string;
   readFile(path: string): Buffer;
   rename(from: string, to: string): void;
   remove(path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }): void;
@@ -27,7 +27,7 @@ export interface InstallTransactionFs {
 
 export const DEFAULT_INSTALL_TRANSACTION_FS: InstallTransactionFs = {
   exists: existsSync,
-  makeTemporaryDirectory: mkdtempSync,
+  makeSiblingTemporaryDirectory: (root, prefix) => mkdtempSync(join(dirname(root), prefix)),
   readFile: readFileSync,
   rename: renameSync,
   remove: rmSync,
@@ -44,40 +44,76 @@ const METADATA_PATHS = [
   "yarn.lock",
   "bun.lock",
   "bun.lockb",
+  ".npmrc",
+  ".yarnrc",
+  ".yarnrc.yml",
+  ".pnp.cjs",
+  ".pnp.js",
   ".tsx-lvgl/framework.lock.json",
 ] as const;
 
+const TRANSACTION_DIRECTORIES = ["node_modules", ".tsx-lvgl/artifacts"] as const;
+
 /**
- * Make a package-manager operation all-or-nothing. node_modules is moved as
- * one opaque directory so every manager-specific entry, including unrelated
- * dependencies and symlinks, is restored after a failed install.
+ * Make a package-manager operation all-or-nothing. Mutable dependency and
+ * artifact directories are moved as opaque trees to a sibling on the project
+ * filesystem, so manager-specific entries, symlinks and old artifacts return
+ * byte-for-byte after a failed install without relying on a cross-device move.
  */
 export async function withInstallTransaction<T>(
   root: string,
   action: () => Promise<T>,
   filesystem: InstallTransactionFs = DEFAULT_INSTALL_TRANSACTION_FS,
 ): Promise<T> {
-  const rollbackRoot = filesystem.makeTemporaryDirectory(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-install-rollback-"));
-  const metadata = METADATA_PATHS.map((path) => snapshotFile(join(root, path), filesystem));
-  const nodeModules = join(root, "node_modules");
-  const nodeModulesBackup = join(rollbackRoot, "node_modules");
-  const hadNodeModules = filesystem.exists(nodeModules);
-
-  if (hadNodeModules) filesystem.rename(nodeModules, nodeModulesBackup);
+  let rollbackRoot: string | undefined;
+  let metadata: readonly FileSnapshot[] = [];
+  let directories: readonly DirectorySnapshot[] = [];
   try {
+    const activeRollbackRoot = filesystem.makeSiblingTemporaryDirectory(root, `.${basename(root)}.tsx-lvgl-install-rollback-`);
+    rollbackRoot = activeRollbackRoot;
+    metadata = METADATA_PATHS.map((path) => snapshotFile(join(root, path), filesystem));
+    directories = TRANSACTION_DIRECTORIES.map((path) => snapshotDirectory(root, activeRollbackRoot, path, filesystem));
+    for (const directory of directories) {
+      if (directory.existed) {
+        filesystem.makeDirectory(dirname(directory.backupPath));
+        filesystem.rename(directory.path, directory.backupPath);
+      }
+    }
     const result = await action();
-    filesystem.remove(rollbackRoot, { recursive: true, force: true });
     return result;
   } catch (error) {
-    filesystem.remove(nodeModules, { recursive: true, force: true });
-    if (hadNodeModules) {
-      filesystem.makeDirectory(dirname(nodeModules));
-      filesystem.rename(nodeModulesBackup, nodeModules);
+    for (const directory of directories) {
+      filesystem.remove(directory.path, { recursive: true, force: true });
+      if (directory.existed && filesystem.exists(directory.backupPath)) {
+        filesystem.makeDirectory(dirname(directory.path));
+        filesystem.rename(directory.backupPath, directory.path);
+      }
     }
     restoreFiles(metadata, filesystem);
-    filesystem.remove(rollbackRoot, { recursive: true, force: true });
     throw error;
+  } finally {
+    if (rollbackRoot !== undefined) filesystem.remove(rollbackRoot, { recursive: true, force: true });
   }
+}
+
+interface DirectorySnapshot {
+  readonly path: string;
+  readonly backupPath: string;
+  readonly existed: boolean;
+}
+
+function snapshotDirectory(
+  root: string,
+  rollbackRoot: string,
+  path: string,
+  filesystem: InstallTransactionFs,
+): DirectorySnapshot {
+  const destination = join(root, path);
+  return {
+    path: destination,
+    backupPath: join(rollbackRoot, path),
+    existed: filesystem.exists(destination),
+  };
 }
 
 function snapshotFile(path: string, filesystem: InstallTransactionFs): FileSnapshot {

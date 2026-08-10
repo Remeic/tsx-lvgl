@@ -1,18 +1,14 @@
-import { createHash } from "node:crypto";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gunzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 
 import { compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
@@ -25,8 +21,11 @@ import {
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 import { runDoctor, type DoctorResult } from "./doctor.js";
 import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
-import { buildInstallInvocation, resolvePackageManager } from "./package-manager.js";
 import { withInstallTransaction } from "./install-transaction.js";
+import { DEFAULT_ARTIFACT_STORE, validateArtifactReference } from "./artifact-store.js";
+import { DEFAULT_INSTALL_EXECUTOR } from "./install-executor.js";
+import type { FrameworkLock } from "./framework-lock.js";
+import { DEFAULT_SOURCE_PACK_ADAPTER } from "./source-pack.js";
 import ts from "typescript";
 
 export interface ProjectConfig {
@@ -37,19 +36,8 @@ export interface ProjectConfig {
   readonly generation: number;
 }
 
-export interface FrameworkArtifact {
-  readonly file: string;
-  readonly sha256: string;
-  readonly byteLength: number;
-}
-
-export interface FrameworkLock {
-  readonly formatVersion: 1;
-  readonly package: typeof SDK_PACKAGE_NAME;
-  readonly version: string;
-  readonly sourceSha: string;
-  readonly artifact: FrameworkArtifact;
-}
+export type { FrameworkArtifact, FrameworkLock } from "./framework-lock.js";
+export { synchronizePackageLock } from "./install-executor.js";
 
 export interface Project {
   readonly root: string;
@@ -71,24 +59,6 @@ export interface CheckResult {
 
 export interface DevResult extends HeadlessResult {
   readonly bundleId: string;
-}
-
-interface PackProvenance {
-  readonly formatVersion: 1;
-  readonly packageName: typeof SDK_PACKAGE_NAME;
-  readonly version: string;
-  readonly sourceSha: string;
-  readonly sourceDirty: false;
-}
-
-interface SourcePackResult {
-  readonly artifactPath: string;
-  readonly packageName: typeof SDK_PACKAGE_NAME;
-  readonly version: string;
-  readonly sourceSha: string;
-  readonly sourceDirty: boolean;
-  readonly sha256: string;
-  readonly byteLength: number;
 }
 
 export interface InstalledSdkPackRuntime {
@@ -166,7 +136,7 @@ export async function createProject(
   const artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument);
   try {
     return await withInstallTransaction(root, async () => {
-      const lock = installArtifactIntoProject(root, artifactPath);
+      const lock = DEFAULT_ARTIFACT_STORE.install(root, artifactPath);
       await installLockedArtifact(root, lock);
       return { root, lock };
     });
@@ -177,7 +147,7 @@ export async function createProject(
 
 export async function syncProject(root: string): Promise<{ readonly lock: FrameworkLock }> {
   const project = readProjectFiles(root);
-  verifyArtifact(project);
+  DEFAULT_ARTIFACT_STORE.verify(project.artifactPath, project.lock);
   return withInstallTransaction(project.root, async () => {
     await installLockedArtifact(project.root, project.lock);
     return { lock: project.lock };
@@ -186,29 +156,20 @@ export async function syncProject(root: string): Promise<{ readonly lock: Framew
 
 export async function updateProject(root: string, explicitSource?: string): Promise<{ readonly lock: FrameworkLock }> {
   const projectRoot = resolve(root);
-  const sourceRoot = resolveFrameworkSource(explicitSource);
-  const tempRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-update-"));
+  const sourceRoot = DEFAULT_SOURCE_PACK_ADAPTER.resolveSource(explicitSource);
+  const tempRoot = DEFAULT_SOURCE_PACK_ADAPTER.createOutputDirectory();
   try {
-    const packScript = join(sourceRoot, "scripts", "pack-sdk.mjs");
-    const packed = spawnSync(process.execPath, [packScript, "--out", tempRoot, "--json"], {
-      cwd: sourceRoot,
-      encoding: "utf8",
-      stdio: "pipe",
-    });
-    if (packed.status !== 0) {
-      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "framework source SDK packaging failed");
-    }
-    const metadata = parseSourcePackResult(packed.stdout);
+    const metadata = DEFAULT_SOURCE_PACK_ADAPTER.pack(sourceRoot, tempRoot);
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
     return await withInstallTransaction(projectRoot, async () => {
-      const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
+      const lock = DEFAULT_ARTIFACT_STORE.install(projectRoot, metadata.artifactPath, metadata);
       await installLockedArtifact(projectRoot, lock);
       return { lock };
     });
   } finally {
-    rmSync(tempRoot, { recursive: true, force: true });
+    DEFAULT_SOURCE_PACK_ADAPTER.removeOutputDirectory(tempRoot);
   }
 }
 
@@ -268,7 +229,7 @@ export function doctorProject(
     },
     artifact: () => {
       if (lock === undefined || config === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
-      verifyArtifact({ artifactPath: resolveArtifactPath(projectRoot, lock), lock });
+      DEFAULT_ARTIFACT_STORE.verify(DEFAULT_ARTIFACT_STORE.resolve(projectRoot, lock), lock);
       return "artifact digest and byte length match";
     },
     package: () => {
@@ -294,14 +255,14 @@ export function readProjectFiles(root: string): Project {
   const projectRoot = resolve(root);
   const config = readProjectConfig(projectRoot);
   const lock = readFrameworkLock(projectRoot);
-  const artifactPath = resolveArtifactPath(projectRoot, lock);
+  const artifactPath = DEFAULT_ARTIFACT_STORE.resolve(projectRoot, lock);
   const entryPath = resolveEntryPath(projectRoot, config);
   return { root: projectRoot, config, lock, artifactPath, entryPath };
 }
 
 export function verifyProject(root: string): Project {
   const project = readProjectFiles(root);
-  verifyArtifact(project);
+  DEFAULT_ARTIFACT_STORE.verify(project.artifactPath, project.lock);
   verifyPackageDependency(project.root, project.lock);
   verifyInstalledSdk(project.root, project.lock);
   verifyPortableConfig(project.root);
@@ -350,9 +311,7 @@ function readFrameworkLock(root: string): FrameworkLock {
   ) {
     throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "framework.lock.json has an invalid provenance or artifact record");
   }
-  if (isAbsolute(artifact.file) || !artifact.file.startsWith(".tsx-lvgl/artifacts/")) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
-  }
+  validateArtifactReference(artifact.file);
   return {
     formatVersion: 1,
     package: SDK_PACKAGE_NAME,
@@ -366,10 +325,6 @@ function readFrameworkLock(root: string): FrameworkLock {
   };
 }
 
-function resolveArtifactPath(root: string, lock: FrameworkLock): string {
-  return resolve(root, lock.artifact.file);
-}
-
 function resolveEntryPath(root: string, config: ProjectConfig): string {
   if (isAbsolute(config.entry)) throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "entry must be project-relative");
   const entryPath = resolve(root, config.entry);
@@ -378,18 +333,6 @@ function resolveEntryPath(root: string, config: ProjectConfig): string {
   }
   if (!existsSync(entryPath)) throw new CliError(DIAGNOSTIC_CODES.CONFIG_INVALID, `entry does not exist: ${config.entry}`);
   return entryPath;
-}
-
-function verifyArtifact(project: Pick<Project, "artifactPath" | "lock">): void {
-  if (!existsSync(project.artifactPath)) {
-    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "framework artifact is missing");
-  }
-  const bytes = readFileSync(project.artifactPath);
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  const byteLength = statSync(project.artifactPath).size;
-  if (digest !== project.lock.artifact.sha256 || byteLength !== project.lock.artifact.byteLength) {
-    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "framework artifact digest or byte length does not match the lock");
-  }
 }
 
 function verifyPackageDependency(root: string, lock: FrameworkLock): void {
@@ -485,178 +428,14 @@ function compileProject(project: Project): BundleOutput {
   });
 }
 
-function installArtifactIntoProject(root: string, artifactPath: string, metadata?: SourcePackResult): FrameworkLock {
-  if (!existsSync(artifactPath)) throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "SDK artifact does not exist");
-  const provenance = metadata === undefined ? readPackProvenance(artifactPath) : {
-    formatVersion: 1 as const,
-    packageName: metadata.packageName,
-    version: metadata.version,
-    sourceSha: metadata.sourceSha,
-    sourceDirty: false as const,
-  };
-  if (
-    provenance.sourceDirty !== false
-    || provenance.packageName !== SDK_PACKAGE_NAME
-    || !/^[0-9a-f]{40}$/.test(provenance.sourceSha)
-  ) {
-    if (provenance.sourceDirty !== false) {
-      throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "SDK artifact was packed from a dirty framework checkout");
-    }
-    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
-  }
-  const artifactFile = `tsx-lvgl-sdk-${provenance.version}.tgz`;
-  const destination = join(root, ".tsx-lvgl", "artifacts", artifactFile);
-  mkdirSync(dirname(destination), { recursive: true });
-  copyFileSync(artifactPath, destination);
-  const bytes = readFileSync(destination);
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  return {
-    formatVersion: 1,
-    package: SDK_PACKAGE_NAME,
-    version: provenance.version,
-    sourceSha: provenance.sourceSha,
-    artifact: {
-      file: `.tsx-lvgl/artifacts/${artifactFile}`,
-      sha256,
-      byteLength: bytes.byteLength,
-    },
-  };
-}
-
-function writeSdkDependency(root: string, lock: FrameworkLock): void {
-  const packagePath = join(root, "package.json");
-  const value = readJson(packagePath, DIAGNOSTIC_CODES.PACKAGE_INVALID);
-  const dependencies = isRecord(value.dependencies) ? { ...value.dependencies } : {};
-  dependencies[SDK_PACKAGE_NAME] = `file:${lock.artifact.file}`;
-  value.dependencies = dependencies;
-  writeFileSync(packagePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  writeFileSync(
-    join(root, ".tsx-lvgl", "framework.lock.json"),
-    `${JSON.stringify(lock, null, 2)}\n`,
-    "utf8",
-  );
-}
-
 /** Keep create, sync and update on the same write-install-verify lifecycle. */
 async function installLockedArtifact(root: string, lock: FrameworkLock): Promise<void> {
-  writeSdkDependency(root, lock);
-  await runPackageManagerInstall(root, resolveArtifactPath(root, lock));
-  verifyInstalledSdk(root, lock);
-}
-
-async function runPackageManagerInstall(root: string, artifactPath: string): Promise<void> {
-  const packageJson = readJson(join(root, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
-  const packageManager = await resolvePackageManager(root, packageJson);
-  const packageLockPath = join(root, "package-lock.json");
-  const hasPackageLock = existsSync(packageLockPath);
-  const bunCacheRoot = packageManager.name === "bun"
-    ? mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-bun-cache-"))
-    : undefined;
-  const invocation = buildInstallInvocation(packageManager, hasPackageLock, bunCacheRoot);
-  const result = (() => {
-    try {
-      return spawnSync(invocation.command, invocation.args, { cwd: root, encoding: "utf8", stdio: "pipe" });
-    } finally {
-      if (bunCacheRoot !== undefined) rmSync(bunCacheRoot, { recursive: true, force: true });
-    }
-  })();
-  const errorCode = result.error !== undefined && "code" in result.error ? result.error.code : undefined;
-  if (errorCode === "ENOENT") {
-    throw new CliError(
-      DIAGNOSTIC_CODES.PACKAGE_MANAGER_NOT_FOUND,
-      `package manager is not installed: ${packageManager.name}`,
-    );
-  }
-  if (result.status !== 0) {
-    throw new CliError(
-      DIAGNOSTIC_CODES.INSTALL_FAILED,
-      `${packageManager.name} could not install the locked local SDK artifact`,
-    );
-  }
-  if (packageManager.name === "npm" && hasPackageLock) synchronizePackageLock(packageLockPath, root, artifactPath);
-}
-
-/** Normalize npm lockfile records after a successful local-artifact install. */
-export function synchronizePackageLock(packageLockPath: string, root: string, artifactPath: string): void {
-  const packageLock = readJson(packageLockPath, DIAGNOSTIC_CODES.INSTALL_FAILED);
-  const relativeArtifact = relative(root, artifactPath).split(sep).join("/");
-  const integrity = `sha512-${createHash("sha512").update(readFileSync(artifactPath)).digest("base64")}`;
-  const packages = isRecord(packageLock.packages) ? packageLock.packages : undefined;
-  if (packages !== undefined) {
-    const rootPackage = isRecord(packages[""]) ? packages[""] : undefined;
-    const sdkPackage = isRecord(packages[`node_modules/${SDK_PACKAGE_NAME}`])
-      ? packages[`node_modules/${SDK_PACKAGE_NAME}`]
-      : undefined;
-    if (rootPackage === undefined || sdkPackage === undefined) {
-      throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
-    }
-    const rootDependencies = isRecord(rootPackage.dependencies) ? { ...rootPackage.dependencies } : {};
-    rootDependencies[SDK_PACKAGE_NAME] = `file:${relativeArtifact}`;
-    rootPackage.dependencies = rootDependencies;
-    sdkPackage.resolved = `file:${relativeArtifact}`;
-    sdkPackage.integrity = integrity;
-  } else {
-    const dependencies = isRecord(packageLock.dependencies) ? packageLock.dependencies : {};
-    const sdkPackage = isRecord(dependencies[SDK_PACKAGE_NAME]) ? dependencies[SDK_PACKAGE_NAME] : undefined;
-    if (sdkPackage === undefined) {
-      throw new CliError(DIAGNOSTIC_CODES.INSTALL_FAILED, "package-lock.json has no installed SDK entry");
-    }
-    sdkPackage.resolved = `file:${relativeArtifact}`;
-    sdkPackage.integrity = integrity;
-  }
-  writeFileSync(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`, "utf8");
-}
-
-function resolveFrameworkSource(explicitSource?: string): string {
-  const configured = explicitSource
-    ?? process.env.TSX_LVGL_SOURCE
-    ?? readMachineSourceConfig();
-  if (configured === undefined || configured.length === 0) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED, "set TSX_LVGL_SOURCE or configure ~/.config/tsx-lvgl/config.json");
-  }
-  const sourceRoot = resolve(configured);
-  if (!existsSync(join(sourceRoot, "package.json")) || !existsSync(join(sourceRoot, "scripts", "pack-sdk.mjs"))) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED, "configured framework source is not a TSX-LVGL checkout");
-  }
-  return sourceRoot;
-}
-
-function readMachineSourceConfig(): string | undefined {
-  const configPath = process.env.TSX_LVGL_CONFIG
-    ?? join(process.env.HOME ?? "/tmp", ".config", "tsx-lvgl", "config.json");
-  if (!existsSync(configPath)) return undefined;
-  const value = readJson(configPath, DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
-  return typeof value.sourcePath === "string" ? value.sourcePath : undefined;
-}
-
-function parseSourcePackResult(stdout: string): SourcePackResult {
-  const line = stdout.trim().split(/\r?\n/).at(-1) as string;
-  let value: Record<string, unknown>;
-  try {
-    value = JSON.parse(line) as Record<string, unknown>;
-  } catch {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "framework source returned malformed packaging metadata");
-  }
-  if (
-    value.packageName !== SDK_PACKAGE_NAME
-    || typeof value.artifactPath !== "string"
-    || typeof value.version !== "string"
-    || typeof value.sourceSha !== "string"
-    || typeof value.sourceDirty !== "boolean"
-    || typeof value.sha256 !== "string"
-    || typeof value.byteLength !== "number"
-  ) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "framework source returned malformed packaging metadata");
-  }
-  return {
-    artifactPath: value.artifactPath,
-    packageName: SDK_PACKAGE_NAME,
-    version: value.version,
-    sourceSha: value.sourceSha,
-    sourceDirty: value.sourceDirty,
-    sha256: value.sha256,
-    byteLength: value.byteLength,
-  };
+  await DEFAULT_INSTALL_EXECUTOR.install(
+    root,
+    lock,
+    DEFAULT_ARTIFACT_STORE.resolve(root, lock),
+    () => verifyInstalledSdk(root, lock),
+  );
 }
 
 export function packInstalledSdk(
@@ -685,49 +464,6 @@ export function packInstalledSdk(
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "the installed SDK returned no artifact");
   }
   return join(outputRoot, metadata.filename);
-}
-
-function readPackProvenance(artifactPath: string): PackProvenance {
-  let dirtyArtifact = false;
-  try {
-    const archive = gunzipSync(readFileSync(artifactPath));
-    let offset = 0;
-    while (offset + 512 <= archive.byteLength) {
-      const name = archive.subarray(offset, offset + 100).toString("utf8").replace(/\0.*$/, "");
-      if (name.length === 0) break;
-      const sizeText = archive.subarray(offset + 124, offset + 136).toString("utf8").replace(/\0.*$/, "").trim();
-      const size = Number.parseInt(sizeText || "0", 8);
-      const dataStart = offset + 512;
-      if (name === "package/provenance.json") {
-        const value = JSON.parse(archive.subarray(dataStart, dataStart + size).toString("utf8")) as Record<string, unknown>;
-        if (
-          value.formatVersion !== 1
-          || value.packageName !== SDK_PACKAGE_NAME
-          || typeof value.version !== "string"
-          || typeof value.sourceSha !== "string"
-          || typeof value.sourceDirty !== "boolean"
-        ) throw new Error("invalid provenance");
-        if (value.sourceDirty === true) {
-          dirtyArtifact = true;
-          break;
-        }
-        return {
-          formatVersion: 1,
-          packageName: SDK_PACKAGE_NAME,
-          version: value.version,
-          sourceSha: value.sourceSha,
-          sourceDirty: false,
-        };
-      }
-      offset = dataStart + Math.ceil(size / 512) * 512;
-    }
-  } catch {
-    // The stable external error below intentionally does not expose archive internals.
-  }
-  if (dirtyArtifact) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "SDK artifact was packed from a dirty framework checkout");
-  }
-  throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact does not contain valid provenance");
 }
 
 function writeText(root: string, path: string, content: string): void {

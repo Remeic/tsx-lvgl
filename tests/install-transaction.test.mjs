@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { withInstallTransaction } from "../packages/sdk/dist/install-transaction.js";
@@ -12,23 +12,30 @@ test("failed install restores all prior dependency and metadata state atomically
   t.after(() => rm(root, { recursive: true, force: true }));
   const packagePath = join(root, "package.json");
   const lockPath = join(root, "pnpm-lock.yaml");
+  const artifactPath = join(root, ".tsx-lvgl", "artifacts", "sdk.tgz");
   const unrelatedDependency = join(root, "node_modules", "unrelated", "marker.txt");
   const originalPackage = '{"dependencies":{"unrelated":"1.0.0"}}\n';
   const originalLock = "lockfileVersion: '9.0'\n";
-  await mkdir(join(root, "node_modules", "unrelated"), { recursive: true });
+  await Promise.all([
+    mkdir(join(root, "node_modules", "unrelated"), { recursive: true }),
+    mkdir(join(root, ".tsx-lvgl", "artifacts"), { recursive: true }),
+  ]);
   await Promise.all([
     writeFile(packagePath, originalPackage),
     writeFile(lockPath, originalLock),
     writeFile(unrelatedDependency, "preserve me\n"),
+    writeFile(artifactPath, "old artifact bytes\n"),
   ]);
 
   await assert.rejects(
     withInstallTransaction(root, async () => {
       await mkdir(join(root, "node_modules", "new-dependency"), { recursive: true });
+      await mkdir(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
       await Promise.all([
         writeFile(packagePath, '{"dependencies":{"new-dependency":"2.0.0"}}\n'),
         writeFile(lockPath, "mutated lock\n"),
         writeFile(join(root, "node_modules", "new-dependency", "marker.txt"), "new\n"),
+        writeFile(artifactPath, "replacement artifact bytes\n"),
       ]);
       throw new Error("install failed");
     }),
@@ -38,6 +45,7 @@ test("failed install restores all prior dependency and metadata state atomically
   assert.equal(await readFile(packagePath, "utf8"), originalPackage);
   assert.equal(await readFile(lockPath, "utf8"), originalLock);
   assert.equal(await readFile(unrelatedDependency, "utf8"), "preserve me\n");
+  assert.equal(await readFile(artifactPath, "utf8"), "old artifact bytes\n");
   await assert.rejects(readFile(join(root, "node_modules", "new-dependency", "marker.txt")), { code: "ENOENT" });
 });
 
@@ -64,7 +72,7 @@ test("transaction accepts an explicitly injected filesystem adapter", async (t) 
   t.after(() => rm(root, { recursive: true, force: true }));
   const filesystem = {
     exists: existsSync,
-    makeTemporaryDirectory: mkdtempSync,
+    makeSiblingTemporaryDirectory: (projectRoot, prefix) => mkdtempSync(join(dirname(projectRoot), prefix)),
     readFile: readFileSync,
     rename: renameSync,
     remove: rmSync,
@@ -74,12 +82,22 @@ test("transaction accepts an explicitly injected filesystem adapter", async (t) 
   assert.equal(await withInstallTransaction(root, async () => "adapter", filesystem), "adapter");
 });
 
-test("transaction uses a portable temporary-directory fallback", async () => {
-  const original = process.env.TMPDIR;
-  delete process.env.TMPDIR;
-  try {
-    assert.equal(await withInstallTransaction(await mkdtemp(join(tmpdir(), "tsx-lvgl-install-fallback-")), async () => "fallback"), "fallback");
-  } finally {
-    if (original === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = original;
-  }
+test("transaction keeps its backup beside the project to avoid cross-device rename", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-sibling-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let backupRoot;
+  await withInstallTransaction(root, async () => "sibling", {
+    exists: existsSync,
+    makeSiblingTemporaryDirectory: (projectRoot, prefix) => {
+      backupRoot = mkdtempSync(join(dirname(projectRoot), prefix));
+      return backupRoot;
+    },
+    readFile: readFileSync,
+    rename: renameSync,
+    remove: rmSync,
+    makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+    writeFile: writeFileSync,
+  });
+  assert.equal(dirname(backupRoot), dirname(root));
+  assert.equal(existsSync(backupRoot), false);
 });
