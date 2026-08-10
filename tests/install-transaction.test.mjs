@@ -73,3 +73,13 @@ test("transaction accepts an explicitly injected filesystem adapter", async (t) 
   };
   assert.equal(await withInstallTransaction(root, async () => "adapter", filesystem), "adapter");
 });
+
+test("transaction uses a portable temporary-directory fallback", async () => {
+  const original = process.env.TMPDIR;
+  delete process.env.TMPDIR;
+  try {
+    assert.equal(await withInstallTransaction(await mkdtemp(join(tmpdir(), "tsx-lvgl-install-fallback-")), async () => "fallback"), "fallback");
+  } finally {
+    if (original === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = original;
+  }
+});

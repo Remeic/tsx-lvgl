@@ -66,6 +66,9 @@ test("CLI runtime emits help, doctor failures, usage failures and operation erro
   assert.equal(await runCli(["help"], "/cwd", operations(), output.writer), 0);
   assert.match(output.logs[0], /Usage:/);
   output = recorder();
+  assert.equal(await runCli(["doctor"], "/cwd", operations({ doctorProject: () => ({ ok: true, resultCode: "DOCTOR_OK", checks: [{ ok: true, id: "SDK", successCode: "SDK_OK", detail: "ready" }] }) }), output.writer), 0);
+  assert.match(output.logs[0], /PASS SDK SDK_OK: ready/);
+  output = recorder();
   assert.equal(await runCli(["doctor"], "/cwd", operations({ doctorProject: () => ({ ok: false, resultCode: "DOCTOR_FAILED", checks: [{ ok: false, id: "SDK", diagnosticCode: "SDK_BAD", detail: "bad" }] }) }), output.writer), 1);
   assert.match(output.logs[0], /FAIL SDK SDK_BAD: bad/);
   output = recorder();

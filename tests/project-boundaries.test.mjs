@@ -85,11 +85,32 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   writeFileSync(configPath, '{"version":1,"entry":"src/missing.tsx","bundleId":"app"}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, config);
+  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"app"}\n');
+  assert.equal(readProjectFiles(root).config.boardId, "waveshare.esp32s3.touch-amoled-1.8");
+  assert.equal(readProjectFiles(root).config.generation, 1);
+  writeFileSync(configPath, config);
 
   rmSync(lockPath);
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.LOCK_NOT_FOUND);
   writeFileSync(lockPath, '{"formatVersion":1}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.LOCK_INVALID);
+  const validLock = JSON.parse(lock);
+  for (const mutate of [
+    (candidate) => { candidate.package = "wrong"; },
+    (candidate) => { candidate.version = 1; },
+    (candidate) => { candidate.sourceSha = "bad"; },
+    (candidate) => { candidate.artifact = {}; },
+    (candidate) => { candidate.artifact.file = 1; },
+    (candidate) => { candidate.artifact.sha256 = 1; },
+    (candidate) => { candidate.artifact.sha256 = "bad"; },
+    (candidate) => { candidate.artifact.byteLength = 1.5; },
+    (candidate) => { candidate.artifact.byteLength = 0; },
+  ]) {
+    const candidate = structuredClone(validLock);
+    mutate(candidate);
+    writeFileSync(lockPath, `${JSON.stringify(candidate)}\n`);
+    assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.LOCK_INVALID);
+  }
   const escapedLock = JSON.parse(lock);
   escapedLock.artifact.file = "../escaped.tgz";
   writeFileSync(lockPath, `${JSON.stringify(escapedLock)}\n`);
