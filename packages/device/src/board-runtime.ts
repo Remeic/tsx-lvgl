@@ -190,6 +190,9 @@ export class BoardRuntime implements CapabilityRuntime {
     };
   }
 
+  /** Advances bounded command deadlines from the kernel owner tick. */
+  public expire(): void { this.wifi.expire(); }
+
   public commitEpoch(epoch: number): void {
     if (!isEpoch(epoch) || epoch <= this.committedEpoch) return;
     const pending: Array<{ producer: Producer; handle: number }> = [];

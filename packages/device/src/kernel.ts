@@ -193,6 +193,7 @@ export function createKernel(native: NativeBindings): DeviceKernel {
     },
 
     pump(): void {
+      board?.expire();
       scheduler.drain();
     },
 

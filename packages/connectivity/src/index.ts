@@ -25,7 +25,6 @@ export type WifiLink =
 export interface WifiNetwork {
   /** Boot-scoped opaque identity; it is deliberately not a BSSID. */
   readonly id: string;
-  readonly ssid: string;
   readonly rssiDbm: number;
   readonly channel: number;
   readonly authKind: WifiAuthKind;
@@ -34,12 +33,6 @@ export interface WifiNetwork {
 export interface WifiScanRequest {
   readonly maxResults?: number;
   readonly active?: boolean;
-}
-
-/** The passphrase is used only to submit this command and is never retained. */
-export interface EphemeralWifiConnectRequest {
-  readonly ssid: string;
-  readonly passphrase: string;
 }
 
 export interface WifiOperation<T> {
@@ -52,7 +45,8 @@ export interface WifiService {
   getState(): CapabilityState<WifiLink>;
   subscribe(listener: (state: CapabilityState<WifiLink>) => void, context: ConnectivityContext): () => void;
   scan(request: WifiScanRequest, context: ConnectivityContext): WifiOperation<readonly WifiNetwork[]>;
-  connect(request: EphemeralWifiConnectRequest, context: ConnectivityContext): WifiOperation<void>;
+  /** Connects with station credentials supplied only by the board's local build configuration. */
+  connect(context: ConnectivityContext): WifiOperation<void>;
   disconnect(context: ConnectivityContext): WifiOperation<void>;
   diagnostics(): WifiDiagnostics;
 }
@@ -63,7 +57,8 @@ export interface WifiController {
   readonly connection: OperationState<void>;
   scanNetworks(request?: WifiScanRequest): OperationId;
   cancelScan(): void;
-  connect(request: EphemeralWifiConnectRequest): OperationId;
+  /** Starts the locally configured station connection; applications cannot supply credentials. */
+  connect(): OperationId;
   disconnect(): OperationId;
 }
 
@@ -78,8 +73,6 @@ export interface WifiDiagnostics {
 export const WIFI_MAX_SCAN_RESULTS = 64;
 export const WIFI_MAX_PENDING_COMMANDS = 32;
 export const WIFI_MAX_TERMINAL_HISTORY = 32;
-export const WIFI_SSID_MAX_BYTES = 32;
-export const WIFI_PASSPHRASE_MAX_BYTES = 64;
 
 export function validateWifiScanRequest(value: unknown): value is WifiScanRequest {
   if (typeof value !== "object" || value === null) return false;
@@ -89,21 +82,10 @@ export function validateWifiScanRequest(value: unknown): value is WifiScanReques
     && (request.active === undefined || typeof request.active === "boolean");
 }
 
-export function validateEphemeralWifiConnectRequest(value: unknown): value is EphemeralWifiConnectRequest {
-  if (typeof value !== "object" || value === null) return false;
-  const request = value as Record<string, unknown>;
-  return typeof request.ssid === "string" && byteLength(request.ssid) > 0 && byteLength(request.ssid) <= WIFI_SSID_MAX_BYTES
-    && typeof request.passphrase === "string" && byteLength(request.passphrase) <= WIFI_PASSPHRASE_MAX_BYTES;
-}
-
-export function redactWifiConnectRequest(_request: EphemeralWifiConnectRequest): { readonly ssid: "<redacted>"; readonly passphrase: "<redacted>" } {
-  return Object.freeze({ ssid: "<redacted>" as const, passphrase: "<redacted>" as const });
-}
-
 export function isWifiNetwork(value: unknown): value is WifiNetwork {
   if (typeof value !== "object" || value === null) return false;
   const network = value as Record<string, unknown>;
-  return isText(network.id) && isText(network.ssid) && isRssi(network.rssiDbm) && isChannel(network.channel) && isAuthKind(network.authKind);
+  return isText(network.id) && isRssi(network.rssiDbm) && isChannel(network.channel) && isAuthKind(network.authKind);
 }
 
 export function isWifiStationTelemetry(value: unknown): value is WifiStationTelemetry {
@@ -192,8 +174,7 @@ export class MemoryWifiService implements WifiService {
     return operation;
   }
 
-  public connect(request: EphemeralWifiConnectRequest, context: ConnectivityContext): WifiOperation<void> {
-    if (!validateEphemeralWifiConnectRequest(request)) return this.reject("invalid-input", "wifi-connect-request");
+  public connect(context: ConnectivityContext): WifiOperation<void> {
     if (this.connection?.state().status === "running") return this.reject("busy", "wifi-connect-busy");
     const operation = this.start<void>(context);
     if (operation.state().status === "running") {
@@ -333,7 +314,6 @@ export class MemoryWifiService implements WifiService {
 }
 
 function ready<T>(value: T): CapabilityState<T> { return Object.freeze({ status: "ready" as const, value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
-function byteLength(value: string): number { return new TextEncoder().encode(value).byteLength; }
 function isText(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= 96 && !value.includes("\0"); }
 function isRssi(value: unknown): value is number { return typeof value === "number" && Number.isInteger(value) && value >= -127 && value <= 0; }
 function isChannel(value: unknown): value is number { return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 196; }

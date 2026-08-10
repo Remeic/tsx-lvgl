@@ -31,6 +31,7 @@ static const char *TAG = "tsx_runtime_probe";
 #define ENGINE_SMOKE_CYCLES 10U
 #define TIMER_SLOT_COUNT 8U
 #define WIFI_OPERATION_SLOT_COUNT 4U
+#define WIFI_OWNER_OPERATION_TIMEOUT_MS 16000U
 
 typedef enum {
     RUNTIME_PROBE_EVENT_INTERVAL,
@@ -63,6 +64,7 @@ typedef struct {
     int32_t handle;
     uint32_t reload_epoch;
     uint32_t correlation_id;
+    TickType_t deadline;
     bool active;
 } wifi_operation_slot_t;
 
@@ -568,12 +570,17 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
         if (!valid) return JS_ThrowTypeError(context, "board.submit: invalid Wi-Fi command");
         wifi_operation_slot_t *slot = NULL;
         for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) if (!probe->wifi_operations[index].active) { slot = &probe->wifi_operations[index]; break; }
-        if (slot == NULL || waveshare_v1_wifi_submit(probe->wifi, native_command, (uint32_t)parsed_correlation) != ESP_OK) {
-            return JS_ThrowInternalError(context, "board.submit: Wi-Fi command unavailable");
+        if (slot == NULL) return JS_ThrowInternalError(context, "board.submit: wifi-command-queue-full");
+        const esp_err_t submit_result = waveshare_v1_wifi_submit(probe->wifi, native_command, (uint32_t)parsed_correlation);
+        if (submit_result != ESP_OK) {
+            return JS_ThrowInternalError(context, submit_result == ESP_ERR_TIMEOUT
+                                         ? "board.submit: wifi-command-queue-full"
+                                         : "board.submit: Wi-Fi command unavailable");
         }
         slot->handle = ++probe->next_board_handle;
         slot->reload_epoch = (uint32_t)reload_epoch;
         slot->correlation_id = (uint32_t)parsed_correlation;
+        slot->deadline = xTaskGetTickCount() + pdMS_TO_TICKS(WIFI_OWNER_OPERATION_TIMEOUT_MS);
         slot->active = true;
         return JS_NewInt32(context, slot->handle);
     }
@@ -712,7 +719,8 @@ static JSValue new_wifi_board_event(JSContext *context, int32_t handle, uint32_t
     } else {
         const char *diagnostic_id = wifi_event->diagnostic_id == NULL ? "wifi-provider" : wifi_event->diagnostic_id;
         const char *code = strcmp(diagnostic_id, "wifi-disabled") == 0 ? "unsupported" :
-                           strcmp(diagnostic_id, "wifi-command-timeout") == 0 ? "timeout" : "hardware-failure";
+                           strcmp(diagnostic_id, "wifi-command-timeout") == 0 || strcmp(diagnostic_id, "wifi-owner-timeout") == 0 ? "timeout" :
+                           strcmp(diagnostic_id, "wifi-event-queue-full") == 0 ? "resource-exhausted" : "hardware-failure";
         snprintf(json, sizeof(json),
                  "{\"status\":\"failed\",\"correlationId\":\"%u\",\"issue\":{\"code\":\"%s\",\"retry\":\"never\",\"diagnosticId\":\"%s\"}}",
                  (unsigned)wifi_event->correlation_id, code, diagnostic_id);
@@ -744,6 +752,38 @@ static void emit_wifi_events(runtime_probe_t *probe)
         if (JS_IsException(result)) dump_exception(probe->context, "wifi_board_event");
         JS_FreeValue(probe->context, result);
         if (slot != NULL && wifi_event.kind != WAVESHARE_V1_WIFI_EVENT_STATE) slot->active = false;
+    }
+}
+
+/* The provider may lose an event only by exhausting its bounded queue. The
+ * owner clock still terminalizes the correlated JS operation without logging
+ * identity or credentials. */
+static void expire_wifi_operations(runtime_probe_t *probe)
+{
+    if (probe->wifi == NULL || JS_IsUndefined(probe->board_sink)) return;
+    const TickType_t now = xTaskGetTickCount();
+    for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
+        wifi_operation_slot_t *slot = &probe->wifi_operations[index];
+        if (!slot->active || (int32_t)(now - slot->deadline) < 0) continue;
+        const waveshare_v1_wifi_event_t state = waveshare_v1_wifi_state(probe->wifi);
+        const waveshare_v1_wifi_event_t timeout = {
+            .kind = WAVESHARE_V1_WIFI_EVENT_FAILED,
+            .phase = state.phase,
+            .command = WAVESHARE_V1_WIFI_SCAN,
+            .correlation_id = slot->correlation_id,
+            .sequence = state.sequence + 1U,
+            .rssi_dbm = -127,
+            .channel = 1,
+            .auth_kind = 5,
+            .diagnostic_id = "wifi-owner-timeout",
+        };
+        waveshare_v1_wifi_cancel(probe->wifi, slot->correlation_id);
+        JSValue event = new_wifi_board_event(probe->context, slot->handle, slot->reload_epoch, &timeout);
+        JSValue result = JS_Call(probe->context, probe->board_sink, JS_UNDEFINED, 1, &event);
+        JS_FreeValue(probe->context, event);
+        if (JS_IsException(result)) dump_exception(probe->context, "wifi_owner_timeout");
+        JS_FreeValue(probe->context, result);
+        slot->active = false;
     }
 }
 
@@ -1108,6 +1148,7 @@ void runtime_probe_task(void *arg)
             JS_UpdateStackTop(probe->runtime);
             process_pending_events(probe);
             emit_board_reading(probe);
+            expire_wifi_operations(probe);
             emit_wifi_events(probe);
             call_kernel_pump(probe);
             process_pending_jobs(probe);

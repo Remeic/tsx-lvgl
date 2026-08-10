@@ -3,10 +3,8 @@ import {
   WIFI_MAX_PENDING_COMMANDS,
   WIFI_MAX_TERMINAL_HISTORY,
   isWifiStationTelemetry,
-  validateEphemeralWifiConnectRequest,
   validateWifiScanRequest,
   type ConnectivityContext,
-  type EphemeralWifiConnectRequest,
   type WifiDiagnostics,
   type WifiLink,
   type WifiNetwork,
@@ -24,8 +22,15 @@ interface RecordState<T> {
   readonly handle: number;
   readonly commandId: "scan" | "connect" | "disconnect";
   readonly context: ConnectivityContext;
+  readonly createdAtMs: number;
   readonly listeners: Set<(state: OperationState<T>) => void>;
   state: OperationState<T>;
+}
+
+export interface NativeBoardWifiOptions {
+  /** Injectable clock keeps deadline conformance deterministic on host and QuickJS. */
+  readonly now?: () => number;
+  readonly commandTimeoutMs?: number;
 }
 
 class NativeOperation<T> implements WifiOperation<T> {
@@ -61,8 +66,13 @@ export class NativeBoardWifiService implements WifiService {
   private terminalHistory = 0;
   private lastIssue: BoardIssue | undefined;
   private disposed = false;
+  private readonly now: () => number;
+  private readonly commandTimeoutMs: number;
 
-  public constructor(private readonly adapter: BoardPlatformAdapter) {
+  public constructor(private readonly adapter: BoardPlatformAdapter, options: NativeBoardWifiOptions = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.commandTimeoutMs = options.commandTimeoutMs ?? 16_000;
+    if (!Number.isSafeInteger(this.commandTimeoutMs) || this.commandTimeoutMs <= 0) throw new Error("Wi-Fi command timeout must be a positive integer");
     this.state = decodeWifiState(adapter.readCached(WIFI_INSTANCE_ID)) ?? ready({ phase: "disabled" });
   }
 
@@ -77,10 +87,7 @@ export class NativeBoardWifiService implements WifiService {
     if (!validateWifiScanRequest(request)) return this.reject("invalid-input", "wifi-scan-request");
     return this.start<readonly WifiNetwork[]>("scan", context);
   }
-  public connect(request: EphemeralWifiConnectRequest, context: ConnectivityContext): WifiOperation<void> {
-    if (!validateEphemeralWifiConnectRequest(request)) return this.reject("invalid-input", "wifi-connect-request");
-    return this.start<void>("connect", context);
-  }
+  public connect(context: ConnectivityContext): WifiOperation<void> { return this.start<void>("connect", context); }
   public disconnect(context: ConnectivityContext): WifiOperation<void> { return this.start<void>("disconnect", context); }
   public diagnostics(): WifiDiagnostics {
     return Object.freeze({ pendingCommands: this.pending(), queueHighWater: this.highWater, terminalHistory: Math.min(this.terminalHistory, WIFI_MAX_TERMINAL_HISTORY), ...(this.lastIssue === undefined ? {} : { lastIssue: this.lastIssue }) });
@@ -90,6 +97,19 @@ export class NativeBoardWifiService implements WifiService {
     this.disposed = true;
     for (const operation of [...this.operations.values()]) this.cancel(operation);
     this.listeners.clear();
+  }
+  /** Called from every kernel pump, so a lost native event cannot strand an operation. */
+  public expire(): void {
+    for (const record of [...this.records.values()]) {
+      if (record.context.isCancelled()) {
+        const operation = this.operations.get(record.handle);
+        if (operation !== undefined) this.cancel(operation);
+        continue;
+      }
+      if (this.now() - record.createdAtMs < this.commandTimeoutMs) continue;
+      this.adapter.cancel(record.handle);
+      this.finish(record, { status: "failed", id: record.id, issue: issue("timeout", "manual", "wifi-command-timeout") });
+    }
   }
   /** Called only by BoardRuntime's single adapter sink. */
   public accept(event: NativeBoardEvent): boolean {
@@ -102,7 +122,8 @@ export class NativeBoardWifiService implements WifiService {
     }
     const record = this.records.get(event.handle);
     if (record === undefined || record.context.reloadEpoch !== event.reloadEpoch || record.context.isCancelled()) {
-      if (record !== undefined) this.cancel(this.operations.get(event.handle)!);
+      const operation = record === undefined ? undefined : this.operations.get(event.handle);
+      if (operation !== undefined) this.cancel(operation);
       return true;
     }
     const payload = decodeBoardPayload(event.payload);
@@ -124,10 +145,10 @@ export class NativeBoardWifiService implements WifiService {
     let handle: number;
     try {
       handle = this.adapter.submit({ version: 1, kind: "command", instanceId: WIFI_INSTANCE_ID, commandId, correlationId: String(id), reloadEpoch: context.reloadEpoch });
-    } catch {
-      return this.reject("hardware-failure", "wifi-command-submit");
+    } catch (error) {
+      return this.reject(isQueueFull(error) ? "resource-exhausted" : "hardware-failure", isQueueFull(error) ? "wifi-command-queue-full" : "wifi-command-submit");
     }
-    const record: RecordState<T> = { id, handle, commandId, context, state: { status: "running", id }, listeners: new Set() };
+    const record: RecordState<T> = { id, handle, commandId, context, createdAtMs: this.now(), state: { status: "running", id }, listeners: new Set() };
     const operation = new NativeOperation(record, () => this.cancel(operation));
     this.records.set(handle, record as RecordState<any>);
     this.operations.set(handle, operation as NativeOperation<any>);
@@ -136,7 +157,10 @@ export class NativeBoardWifiService implements WifiService {
   }
   private reject<T>(code: BoardIssue["code"], diagnosticId: string): WifiOperation<T> {
     const id = this.nextId++ as OperationId;
-    const state: OperationState<T> = { status: "failed", id, issue: issue(code, code === "timeout" ? "manual" : "never", diagnosticId) };
+    const nextIssue = issue(code, code === "timeout" ? "manual" : "never", diagnosticId);
+    const state: OperationState<T> = { status: "failed", id, issue: nextIssue };
+    this.terminalHistory += 1;
+    this.lastIssue = nextIssue;
     return { id, cancel: () => undefined, subscribe(listener) { listener(state); return () => undefined; } };
   }
   private cancel(operation: NativeOperation<any>): void {
@@ -173,3 +197,4 @@ function validIssue(value: unknown): value is { code: BoardIssue["code"]; retry:
   try { issue(candidate.code as BoardIssue["code"], candidate.retry as BoardIssue["retry"], candidate.diagnosticId as string); return true; } catch { return false; }
 }
 function ready<T>(value: T): CapabilityState<T> { return Object.freeze({ status: "ready" as const, value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
+function isQueueFull(error: unknown): boolean { return error instanceof Error && error.message === "board.submit: wifi-command-queue-full"; }

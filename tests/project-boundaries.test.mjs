@@ -50,10 +50,13 @@ test("SDK pack vendors and rewrites capability and connectivity runtime imports"
   assert.equal(existsSync(join(extract, "package", "dist", "vendor", "capabilities", "index.js")), true);
   assert.equal(existsSync(join(extract, "package", "dist", "vendor", "connectivity", "index.js")), true);
   const kernel = readFileSync(join(extract, "package", "dist", "vendor", "device", "kernel.js"), "utf8");
+  const connectivity = readFileSync(join(extract, "package", "dist", "vendor", "connectivity", "index.js"), "utf8");
   assert.doesNotMatch(kernel, /from "@tsx-lvgl\/capabilities"/);
   assert.doesNotMatch(kernel, /from "@tsx-lvgl\/connectivity"/);
   assert.match(kernel, /capabilities\/index\.js/);
   assert.match(kernel, /connectivity\/index\.js/);
+  assert.doesNotMatch(connectivity, /EphemeralWifiConnectRequest|validateEphemeralWifiConnectRequest|redactWifiConnectRequest/);
+  assert.doesNotMatch(connectivity, /\bssid\b|\bpassphrase\b/i);
 });
 
 async function assertAsyncCode(action, code) {

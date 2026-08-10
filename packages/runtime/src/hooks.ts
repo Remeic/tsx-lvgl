@@ -1,7 +1,7 @@
 import { motionSchema, subscribeSensor, type MotionSample, type SensorSample, type SensorSchema } from "@tsx-lvgl/sensors";
 import type { CapabilityBinding, CapabilityObserveOptions } from "@tsx-lvgl/capabilities";
 import type { CapabilityState, OperationId, OperationState } from "@tsx-lvgl/capabilities";
-import type { ConnectivityContext, EphemeralWifiConnectRequest, WifiController, WifiLink, WifiNetwork, WifiOperation, WifiScanRequest, WifiService } from "@tsx-lvgl/connectivity";
+import type { ConnectivityContext, WifiController, WifiLink, WifiNetwork, WifiOperation, WifiScanRequest, WifiService } from "@tsx-lvgl/connectivity";
 import type { Fiber } from "./fiber.js";
 import type { Session } from "./session.js";
 
@@ -194,7 +194,7 @@ function createWifiController(holder: WifiHolder, session: Session, fiber: Fiber
     get state(): CapabilityState<WifiLink> { return holder.state; }, get scan(): OperationState<readonly WifiNetwork[]> { return holder.scan; }, get connection(): OperationState<void> { return holder.connection; },
     scanNetworks(request: WifiScanRequest = {}): OperationId { const wifi = holder.wifi; return attachScan(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.scan(request, wifiContext(session, fiber))); },
     cancelScan(): void { holder.scanOperation?.cancel(); },
-    connect(request: EphemeralWifiConnectRequest): OperationId { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.connect(request, wifiContext(session, fiber))); },
+    connect(): OperationId { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.connect(wifiContext(session, fiber))); },
     disconnect(): OperationId { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.disconnect(wifiContext(session, fiber))); },
   });
 }

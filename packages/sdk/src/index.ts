@@ -17,7 +17,7 @@ import {
 } from "@tsx-lvgl/runtime";
 export type { StateSetter } from "@tsx-lvgl/runtime";
 export type { CapabilityBinding, CapabilityObserveOptions, CapabilityState } from "@tsx-lvgl/capabilities";
-export type { EphemeralWifiConnectRequest, WifiController, WifiLink, WifiNetwork, WifiScanRequest } from "@tsx-lvgl/connectivity";
+export type { WifiController, WifiLink, WifiNetwork, WifiScanRequest } from "@tsx-lvgl/connectivity";
 
 import {
   isShake,

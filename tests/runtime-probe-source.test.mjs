@@ -38,4 +38,23 @@ test("Wi-Fi provider keeps build-local credentials redacted and joins its worker
   assert.match(component, /vTaskDelete\(NULL\)/);
   assert.doesNotMatch(component, /ESP_LOG[IEW].*CONFIG_TSX_LVGL_WIFI_STATION_/);
   assert.match(source, /credentials=redacted/);
+  const destroy = component.match(/void waveshare_v1_wifi_destroy\([\s\S]*?\n}\n\nesp_err_t waveshare_v1_wifi_submit/);
+  assert.ok(destroy, "Wi-Fi destroy implementation must remain present");
+  assert.ok(destroy[0].indexOf("wifi->active = false") < destroy[0].indexOf("xSemaphoreTake"));
+  assert.ok(destroy[0].indexOf("xSemaphoreTake") < destroy[0].indexOf("esp_event_handler_unregister"));
+  assert.ok(destroy[0].indexOf("esp_event_handler_unregister") < destroy[0].indexOf("vQueueDelete"));
+});
+
+test("Wi-Fi queue exhaustion and lost events remain bounded and terminal without identity data", () => {
+  assert.match(component, /WIFI_OVERFLOW_QUEUE_DEPTH/);
+  assert.match(component, /xQueueOverwrite\(wifi->overflows/);
+  assert.match(component, /wifi-event-queue-full/);
+  assert.match(component, /ESP_ERR_TIMEOUT/);
+  assert.match(source, /wifi-command-queue-full/);
+  assert.match(source, /WIFI_OWNER_OPERATION_TIMEOUT_MS/);
+  assert.match(source, /static void expire_wifi_operations/);
+  assert.match(source, /expire_wifi_operations\(probe\);/);
+  assert.match(source, /wifi-owner-timeout/);
+  assert.match(source, /"resource-exhausted"/);
+  assert.doesNotMatch(source, /"ssid"|"passphrase"/i);
 });

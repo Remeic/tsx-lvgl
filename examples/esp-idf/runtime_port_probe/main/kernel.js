@@ -180,7 +180,7 @@ function selectCapabilityInstance(instances, instanceId) {
     const defaults = instances.filter((instance) => instance.isDefault);
     return defaults.length === 1 ? { status: "selected", instance: defaults[0] } : { status: "ambiguous", instances };
 }
-const ISSUE_CODES = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "hardware-failure", "protocol-error", "internal"];
+const ISSUE_CODES = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "resource-exhausted", "hardware-failure", "protocol-error", "internal"];
 const ISSUE_RETRIES = ["automatic", "manual", "after-reconfigure", "never"];
 const MAX_DIAGNOSTIC_ID_LENGTH = 96;
 function issue(code, retry, diagnosticId) {
@@ -201,18 +201,14 @@ function isText(value) { return value.length > 0 && !value.includes("\0"); }
 __tsxDefine("@tsx-lvgl/connectivity/index.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryWifiService = exports.WIFI_PASSPHRASE_MAX_BYTES = exports.WIFI_SSID_MAX_BYTES = exports.WIFI_MAX_TERMINAL_HISTORY = exports.WIFI_MAX_PENDING_COMMANDS = exports.WIFI_MAX_SCAN_RESULTS = void 0;
+exports.MemoryWifiService = exports.WIFI_MAX_TERMINAL_HISTORY = exports.WIFI_MAX_PENDING_COMMANDS = exports.WIFI_MAX_SCAN_RESULTS = void 0;
 exports.validateWifiScanRequest = validateWifiScanRequest;
-exports.validateEphemeralWifiConnectRequest = validateEphemeralWifiConnectRequest;
-exports.redactWifiConnectRequest = redactWifiConnectRequest;
 exports.isWifiNetwork = isWifiNetwork;
 exports.isWifiStationTelemetry = isWifiStationTelemetry;
 const capabilities_1 = require("@tsx-lvgl/capabilities");
 exports.WIFI_MAX_SCAN_RESULTS = 64;
 exports.WIFI_MAX_PENDING_COMMANDS = 32;
 exports.WIFI_MAX_TERMINAL_HISTORY = 32;
-exports.WIFI_SSID_MAX_BYTES = 32;
-exports.WIFI_PASSPHRASE_MAX_BYTES = 64;
 function validateWifiScanRequest(value) {
     if (typeof value !== "object" || value === null)
         return false;
@@ -221,21 +217,11 @@ function validateWifiScanRequest(value) {
     return (maxResults === undefined || (typeof maxResults === "number" && Number.isSafeInteger(maxResults) && maxResults > 0 && maxResults <= exports.WIFI_MAX_SCAN_RESULTS))
         && (request.active === undefined || typeof request.active === "boolean");
 }
-function validateEphemeralWifiConnectRequest(value) {
-    if (typeof value !== "object" || value === null)
-        return false;
-    const request = value;
-    return typeof request.ssid === "string" && byteLength(request.ssid) > 0 && byteLength(request.ssid) <= exports.WIFI_SSID_MAX_BYTES
-        && typeof request.passphrase === "string" && byteLength(request.passphrase) <= exports.WIFI_PASSPHRASE_MAX_BYTES;
-}
-function redactWifiConnectRequest(_request) {
-    return Object.freeze({ ssid: "<redacted>", passphrase: "<redacted>" });
-}
 function isWifiNetwork(value) {
     if (typeof value !== "object" || value === null)
         return false;
     const network = value;
-    return isText(network.id) && isText(network.ssid) && isRssi(network.rssiDbm) && isChannel(network.channel) && isAuthKind(network.authKind);
+    return isText(network.id) && isRssi(network.rssiDbm) && isChannel(network.channel) && isAuthKind(network.authKind);
 }
 function isWifiStationTelemetry(value) {
     if (typeof value !== "object" || value === null)
@@ -306,9 +292,7 @@ class MemoryWifiService {
             this.scanOperation = operation;
         return operation;
     }
-    connect(request, context) {
-        if (!validateEphemeralWifiConnectRequest(request))
-            return this.reject("invalid-input", "wifi-connect-request");
+    connect(context) {
         if (this.connection?.state().status === "running")
             return this.reject("busy", "wifi-connect-busy");
         const operation = this.start(context);
@@ -458,7 +442,6 @@ class MemoryWifiService {
 }
 exports.MemoryWifiService = MemoryWifiService;
 function ready(value) { return Object.freeze({ status: "ready", value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
-function byteLength(value) { return new TextEncoder().encode(value).byteLength; }
 function isText(value) { return typeof value === "string" && value.length > 0 && value.length <= 96 && !value.includes("\0"); }
 function isRssi(value) { return typeof value === "number" && Number.isInteger(value) && value >= -127 && value <= 0; }
 function isChannel(value) { return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 196; }
@@ -1002,7 +985,7 @@ function createWifiController(holder, session, fiber, invalidate) {
         get state() { return holder.state; }, get scan() { return holder.scan; }, get connection() { return holder.connection; },
         scanNetworks(request = {}) { const wifi = holder.wifi; return attachScan(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.scan(request, wifiContext(session, fiber))); },
         cancelScan() { holder.scanOperation?.cancel(); },
-        connect(request) { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.connect(request, wifiContext(session, fiber))); },
+        connect() { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.connect(wifiContext(session, fiber))); },
         disconnect() { const wifi = holder.wifi; return attachConnection(wifi === undefined ? unsupportedOperation(holder, "wifi-unavailable") : wifi.disconnect(wifiContext(session, fiber))); },
     });
 }
@@ -1511,6 +1494,7 @@ class BoardRuntime {
             ...(this.lastIssue === undefined ? {} : { lastIssue: this.lastIssue }),
         };
     }
+    expire() { this.wifi.expire(); }
     commitEpoch(epoch) {
         if (!isEpoch(epoch) || epoch <= this.committedEpoch)
             return;
@@ -1800,7 +1784,7 @@ class NativeOperation {
     }
 }
 class NativeBoardWifiService {
-    constructor(adapter) {
+    constructor(adapter, options = {}) {
         this.adapter = adapter;
         this.operations = new Map();
         this.records = new Map();
@@ -1809,6 +1793,10 @@ class NativeBoardWifiService {
         this.highWater = 0;
         this.terminalHistory = 0;
         this.disposed = false;
+        this.now = options.now ?? (() => Date.now());
+        this.commandTimeoutMs = options.commandTimeoutMs ?? 16000;
+        if (!Number.isSafeInteger(this.commandTimeoutMs) || this.commandTimeoutMs <= 0)
+            throw new Error("Wi-Fi command timeout must be a positive integer");
         this.state = decodeWifiState(adapter.readCached(WIFI_INSTANCE_ID)) ?? ready({ phase: "disabled" });
     }
     getState() { return this.state; }
@@ -1824,11 +1812,7 @@ class NativeBoardWifiService {
             return this.reject("invalid-input", "wifi-scan-request");
         return this.start("scan", context);
     }
-    connect(request, context) {
-        if (!(0, connectivity_1.validateEphemeralWifiConnectRequest)(request))
-            return this.reject("invalid-input", "wifi-connect-request");
-        return this.start("connect", context);
-    }
+    connect(context) { return this.start("connect", context); }
     disconnect(context) { return this.start("disconnect", context); }
     diagnostics() {
         return Object.freeze({ pendingCommands: this.pending(), queueHighWater: this.highWater, terminalHistory: Math.min(this.terminalHistory, connectivity_1.WIFI_MAX_TERMINAL_HISTORY), ...(this.lastIssue === undefined ? {} : { lastIssue: this.lastIssue }) });
@@ -1840,6 +1824,20 @@ class NativeBoardWifiService {
         for (const operation of [...this.operations.values()])
             this.cancel(operation);
         this.listeners.clear();
+    }
+    expire() {
+        for (const record of [...this.records.values()]) {
+            if (record.context.isCancelled()) {
+                const operation = this.operations.get(record.handle);
+                if (operation !== undefined)
+                    this.cancel(operation);
+                continue;
+            }
+            if (this.now() - record.createdAtMs < this.commandTimeoutMs)
+                continue;
+            this.adapter.cancel(record.handle);
+            this.finish(record, { status: "failed", id: record.id, issue: (0, capabilities_1.issue)("timeout", "manual", "wifi-command-timeout") });
+        }
     }
     accept(event) {
         if (event.instanceId !== WIFI_INSTANCE_ID)
@@ -1853,8 +1851,9 @@ class NativeBoardWifiService {
         }
         const record = this.records.get(event.handle);
         if (record === undefined || record.context.reloadEpoch !== event.reloadEpoch || record.context.isCancelled()) {
-            if (record !== undefined)
-                this.cancel(this.operations.get(event.handle));
+            const operation = record === undefined ? undefined : this.operations.get(event.handle);
+            if (operation !== undefined)
+                this.cancel(operation);
             return true;
         }
         const payload = (0, board_adapter_js_1.decodeBoardPayload)(event.payload);
@@ -1880,10 +1879,10 @@ class NativeBoardWifiService {
         try {
             handle = this.adapter.submit({ version: 1, kind: "command", instanceId: WIFI_INSTANCE_ID, commandId, correlationId: String(id), reloadEpoch: context.reloadEpoch });
         }
-        catch {
-            return this.reject("hardware-failure", "wifi-command-submit");
+        catch (error) {
+            return this.reject(isQueueFull(error) ? "resource-exhausted" : "hardware-failure", isQueueFull(error) ? "wifi-command-queue-full" : "wifi-command-submit");
         }
-        const record = { id, handle, commandId, context, state: { status: "running", id }, listeners: new Set() };
+        const record = { id, handle, commandId, context, createdAtMs: this.now(), state: { status: "running", id }, listeners: new Set() };
         const operation = new NativeOperation(record, () => this.cancel(operation));
         this.records.set(handle, record);
         this.operations.set(handle, operation);
@@ -1892,7 +1891,10 @@ class NativeBoardWifiService {
     }
     reject(code, diagnosticId) {
         const id = this.nextId++;
-        const state = { status: "failed", id, issue: (0, capabilities_1.issue)(code, code === "timeout" ? "manual" : "never", diagnosticId) };
+        const nextIssue = (0, capabilities_1.issue)(code, code === "timeout" ? "manual" : "never", diagnosticId);
+        const state = { status: "failed", id, issue: nextIssue };
+        this.terminalHistory += 1;
+        this.lastIssue = nextIssue;
         return { id, cancel: () => undefined, subscribe(listener) { listener(state); return () => undefined; } };
     }
     cancel(operation) {
@@ -1943,6 +1945,7 @@ function validIssue(value) {
     }
 }
 function ready(value) { return Object.freeze({ status: "ready", value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
+function isQueueFull(error) { return error instanceof Error && error.message === "board.submit: wifi-command-queue-full"; }
 
 });
 __tsxDefine("@tsx-lvgl/device/index.js", function (require, module, exports) {
@@ -2115,6 +2118,7 @@ function createKernel(native) {
             return log(`rejected ${result.reason}`);
         },
         pump() {
+            board?.expire();
             scheduler.drain();
         },
         lastGeneration() {

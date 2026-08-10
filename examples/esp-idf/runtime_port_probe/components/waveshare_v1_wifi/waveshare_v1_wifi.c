@@ -13,6 +13,7 @@
 
 #define WIFI_COMMAND_QUEUE_DEPTH 4U
 #define WIFI_EVENT_QUEUE_DEPTH 8U
+#define WIFI_OVERFLOW_QUEUE_DEPTH 1U
 #define WIFI_TASK_STOP_TIMEOUT_MS 1000U
 #define WIFI_CONNECT_TIMEOUT_MS 15000U
 
@@ -30,6 +31,7 @@ typedef struct {
 struct waveshare_v1_wifi {
     QueueHandle_t commands;
     QueueHandle_t events;
+    QueueHandle_t overflows;
     SemaphoreHandle_t stopped;
     TaskHandle_t task;
     esp_netif_t *station;
@@ -43,7 +45,7 @@ struct waveshare_v1_wifi {
     TickType_t connect_deadline;
 };
 
-static void send_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_kind_t kind,
+static bool send_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_kind_t kind,
                        waveshare_v1_wifi_command_t command, uint32_t correlation_id,
                        const char *diagnostic_id)
 {
@@ -58,7 +60,13 @@ static void send_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_kind_t
         .auth_kind = 5,
         .diagnostic_id = diagnostic_id,
     };
-    (void)xQueueSend(wifi->events, &event, 0);
+    if (xQueueSend(wifi->events, &event, 0) == pdTRUE) return true;
+    /* This one-item queue is a bounded, thread-safe loss notification. It
+     * contains only the numeric correlation and a fixed diagnostic string. */
+    event.kind = WAVESHARE_V1_WIFI_EVENT_FAILED;
+    event.diagnostic_id = "wifi-event-queue-full";
+    (void)xQueueOverwrite(wifi->overflows, &event);
+    return false;
 }
 
 static void on_station_event(void *argument, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -155,10 +163,11 @@ esp_err_t waveshare_v1_wifi_create(waveshare_v1_wifi_t **out_wifi)
     if (wifi == NULL) return ESP_ERR_NO_MEM;
     wifi->commands = xQueueCreate(WIFI_COMMAND_QUEUE_DEPTH, sizeof(wifi_command_t));
     wifi->events = xQueueCreate(WIFI_EVENT_QUEUE_DEPTH, sizeof(waveshare_v1_wifi_event_t));
+    wifi->overflows = xQueueCreate(WIFI_OVERFLOW_QUEUE_DEPTH, sizeof(waveshare_v1_wifi_event_t));
     wifi->stopped = xSemaphoreCreateBinary();
     wifi->configured = TSX_WIFI_STATION_CONFIGURED;
     wifi->phase = wifi->configured ? WAVESHARE_V1_WIFI_IDLE : WAVESHARE_V1_WIFI_DISABLED;
-    if (wifi->commands == NULL || wifi->events == NULL || wifi->stopped == NULL) { waveshare_v1_wifi_destroy(wifi); return ESP_ERR_NO_MEM; }
+    if (wifi->commands == NULL || wifi->events == NULL || wifi->overflows == NULL || wifi->stopped == NULL) { waveshare_v1_wifi_destroy(wifi); return ESP_ERR_NO_MEM; }
     const esp_err_t netif_result = esp_netif_init();
     if (netif_result != ESP_OK && netif_result != ESP_ERR_INVALID_STATE) { waveshare_v1_wifi_destroy(wifi); return netif_result; }
     const esp_err_t loop_result = esp_event_loop_create_default();
@@ -197,6 +206,7 @@ void waveshare_v1_wifi_destroy(waveshare_v1_wifi_t *wifi)
     if (wifi->station != NULL) esp_netif_destroy_default_wifi(wifi->station);
     if (wifi->commands != NULL) vQueueDelete(wifi->commands);
     if (wifi->events != NULL) vQueueDelete(wifi->events);
+    if (wifi->overflows != NULL) vQueueDelete(wifi->overflows);
     if (wifi->stopped != NULL) vSemaphoreDelete(wifi->stopped);
     free(wifi);
 }
@@ -206,7 +216,7 @@ esp_err_t waveshare_v1_wifi_submit(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_
 {
     if (wifi == NULL || !wifi->active || correlation_id == 0U) return ESP_ERR_INVALID_STATE;
     const wifi_command_t entry = { .command = command, .correlation_id = correlation_id };
-    return xQueueSend(wifi->commands, &entry, 0) == pdTRUE ? ESP_OK : ESP_ERR_NO_MEM;
+    return xQueueSend(wifi->commands, &entry, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 void waveshare_v1_wifi_cancel(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
@@ -220,7 +230,9 @@ void waveshare_v1_wifi_cancel(waveshare_v1_wifi_t *wifi, uint32_t correlation_id
 
 bool waveshare_v1_wifi_take_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_t *out_event)
 {
-    return wifi != NULL && out_event != NULL && xQueueReceive(wifi->events, out_event, 0) == pdTRUE;
+    if (wifi == NULL || out_event == NULL) return false;
+    if (xQueueReceive(wifi->overflows, out_event, 0) == pdTRUE) return true;
+    return xQueueReceive(wifi->events, out_event, 0) == pdTRUE;
 }
 
 waveshare_v1_wifi_event_t waveshare_v1_wifi_state(waveshare_v1_wifi_t *wifi)

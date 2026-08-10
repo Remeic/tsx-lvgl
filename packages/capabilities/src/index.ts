@@ -89,7 +89,7 @@ export function selectCapabilityInstance(instances: readonly CapabilityInstance[
   if (instanceId !== undefined) { const instance = instances.find((entry) => entry.id === instanceId); return instance === undefined ? { status: "unsupported", reason: "invalid-instance" } : { status: "selected", instance }; }
   const defaults = instances.filter((instance) => instance.isDefault); return defaults.length === 1 ? { status: "selected", instance: defaults[0]! } : { status: "ambiguous", instances };
 }
-const ISSUE_CODES: readonly BoardIssueCode[] = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "hardware-failure", "protocol-error", "internal"];
+const ISSUE_CODES: readonly BoardIssueCode[] = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "resource-exhausted", "hardware-failure", "protocol-error", "internal"];
 const ISSUE_RETRIES: readonly BoardIssueRetry[] = ["automatic", "manual", "after-reconfigure", "never"];
 const MAX_DIAGNOSTIC_ID_LENGTH = 96;
 
