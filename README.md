@@ -126,6 +126,22 @@ cd my-app
 <package-manager> run build
 ```
 
+When a development runtime is already running on a locally attached board,
+one command builds and pushes the app bundle without reflashing firmware:
+
+```bash
+<package-manager> run dev -- --device --port /dev/cu.usbmodemXXX --json
+<package-manager> run doctor -- --device --port /dev/cu.usbmodemXXX --json
+```
+
+`dev --device` uses the TSXB development transport, negotiates one monotonic
+generation from the board's `RDY lastGeneration` reply, and makes at most one
+retry. The port and negotiated generation stay in memory for that invocation;
+they are never written to `tsx-lvgl.json`, the framework lock, or other
+portable project files. `doctor --device` only validates local port syntax and
+does not open, reset, flash, or otherwise touch a board. Physical push,
+rollback and soak evidence remain separate, explicitly authorized gates.
+
 The application commands use the package manager declared in the app's
 `package.json`, selected by its lockfile or inherited from the invoking package
 manager. The framework checkout commands above remain npm workspace commands.

@@ -39,6 +39,39 @@ test("CLI parser normalizes supported options and rejects malformed input", () =
   assert.throws(() => parseArgs(["create", "--artifact"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["update", "--source", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--wat"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.deepEqual(parseArgs(["dev", "--device", "--port", "/dev/cu.fake", "--json"]), { command: "dev", positional: [], device: true, port: "/dev/cu.fake", json: true });
+});
+
+test("CLI routes device dev and doctor through existing command names with deterministic JSON", async () => {
+  const calls = [];
+  const ops = operations({
+    devProject: async (_root, options) => {
+      calls.push(["dev", options]);
+      return { bundleId: "app", generation: 7, texts: [], logs: [], device: { bundleId: "app", generation: 7, epoch: 3, retryCount: 1 } };
+    },
+    doctorProject: (_root, options) => {
+      calls.push(["doctor", options]);
+      return { ok: true, resultCode: "DOCTOR_OK", checks: [] };
+    },
+  });
+  let output = recorder();
+  assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", ops, output.writer), 0);
+  assert.deepEqual(JSON.parse(output.logs[0]), { ok: true, bundleId: "app", generation: 7, epoch: 3, retryCount: 1, code: "DEV_DEVICE_OK" });
+  output = recorder();
+  assert.equal(await runCli(["doctor", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", ops, output.writer), 0);
+  assert.deepEqual(calls, [["dev", { device: true, port: "/dev/cu.fake" }], ["doctor", { device: true, port: "/dev/cu.fake" }]]);
+  output = recorder();
+  assert.equal(await runCli(["dev", "--device"], "/cwd", ops, output.writer), 2);
+  assert.match(output.errors[0], /requires --port/);
+  output = recorder();
+  assert.equal(await runCli(["dev", "--port", "/dev/cu.fake"], "/cwd", ops, output.writer), 2);
+  assert.match(output.errors[0], /requires dev --device/);
+  output = recorder();
+  const failingOps = operations({
+    devProject: async () => { throw new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial disconnected"); },
+  });
+  assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", failingOps, output.writer), 1);
+  assert.deepEqual(JSON.parse(output.errors[0]), { ok: false, code: "DEVICE_PUSH_FAILED", message: "serial disconnected" });
 });
 
 test("CLI runtime routes every command and preserves machine-readable outcomes", async () => {

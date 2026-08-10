@@ -217,6 +217,22 @@ Rules:
 - Non-`TSXB` lines in either direction are noise (device logs interleave on
   the same console) and must be ignored, never treated as protocol errors.
 
+### Consumer device development command
+
+`tsx-lvgl dev --device --port <serial-port> [--json]` compiles the same app
+bundle as headless `dev` and sends it through the line-channel adapter. The
+TSXB session remains pure and testable; Node serial streams are injected at the
+CLI edge. On an initial `RDY` whose `lastGeneration` is not below the configured
+generation, the host sends `ABORT` and retries exactly once with
+`lastGeneration + 1`. It never persists that negotiated value or the local
+port. A second stale generation, bad protocol identity, device error or either
+timeout fails deterministically and closes the channel.
+
+`tsx-lvgl doctor --device --port <serial-port>` checks only serial-port syntax;
+it never opens a serial device. Neither command calls a flashing, reset, reload
+or firmware/security mutation path. Device push/rollback/soak is therefore a
+separate physical acceptance gate.
+
 ## M1 tracer bullet
 
 The deterministic host path proves the slice diagrammed in

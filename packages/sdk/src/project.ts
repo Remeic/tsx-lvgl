@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 
 import { compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
 import { runHeadless, type HeadlessResult } from "./headless.js";
+import { doctorDevicePort, runDeviceDev, type DeviceDevResult } from "./device-dev.js";
 import {
   DEFAULT_BOARD_ID,
   LOCK_FORMAT_VERSION,
@@ -64,6 +65,7 @@ export interface CheckResult {
 
 export interface DevResult extends HeadlessResult {
   readonly bundleId: string;
+  readonly device?: DeviceDevResult;
 }
 
 export interface InstalledSdkPackRuntime {
@@ -197,25 +199,37 @@ export function buildProject(root: string): BuildResult {
   };
 }
 
-export async function devProject(root: string): Promise<DevResult> {
+export async function devProject(
+  root: string,
+  options: { readonly device: boolean; readonly port?: string } = { device: false },
+): Promise<DevResult> {
   recoverConsumerProjectState(root);
   const project = verifyProject(root);
   typecheckProject(project.root);
   const bundle = compileProject(project);
   try {
+    if (options.device) {
+      const device = await runDeviceDev(bundle, options.port ?? "");
+      return { bundleId: project.config.bundleId, generation: device.generation, texts: [], logs: [], device };
+    }
     const result = await runHeadless(
       { manifest: bundle.manifest, source: bundle.bytes },
       project.config.boardId,
     );
     return { ...result, bundleId: project.config.bundleId };
   } catch (error) {
+    if (error instanceof CliError) throw error;
     throw new CliError(DIAGNOSTIC_CODES.DEV_FAILED, error instanceof Error ? error.message : String(error));
   }
 }
 
 export function doctorProject(
   root: string,
-  { nodeVersion = process.versions.node }: { readonly nodeVersion?: string } = {},
+  {
+    nodeVersion = process.versions.node,
+    device = false,
+    port,
+  }: { readonly nodeVersion?: string; readonly device?: boolean; readonly port?: string } = {},
 ): DoctorResult {
   const projectRoot = resolve(root);
   recoverConsumerProjectState(projectRoot);
@@ -251,6 +265,7 @@ export function doctorProject(
     },
     consumerNodeEngine: () => validateNodeEngine(readJson(join(projectRoot, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID), nodeVersion),
     sdkNodeEngine: () => validateInstalledSdkNodeEngine(projectRoot, nodeVersion),
+    ...(device ? { devicePort: () => doctorDevicePort(port ?? "") } : {}),
   });
 }
 

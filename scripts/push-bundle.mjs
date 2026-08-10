@@ -1,16 +1,14 @@
-import { createReadStream, createWriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createInterface } from "node:readline";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { ACK_TIMEOUT_MS, COMMIT_TIMEOUT_MS, createPushSession, parseDeviceLine } from "@tsx-lvgl/bundler";
+import { ACK_TIMEOUT_MS, COMMIT_TIMEOUT_MS } from "@tsx-lvgl/bundler";
+import { runDevicePush } from "../packages/sdk/dist/device-dev.js";
 
 import { readFlagValue } from "./lib/cli.mjs";
 
 // Mirrors SERIAL_PORT_PATTERN in scripts/board-reload-plan.mjs (not exported there).
-const SERIAL_PORT_PATTERN = /^\/dev\/(?:cu|tty)\.[A-Za-z0-9._-]+$/;
+const SERIAL_PORT_PATTERN = /^(?:\/dev\/(?:cu|tty)\.[A-Za-z0-9._-]+|COM[1-9][0-9]*)$/i;
 
 class UsageError extends Error {}
 
@@ -19,7 +17,7 @@ function usage() {
   node scripts/push-bundle.mjs --port /dev/cu.usbmodemXXX --bundle <path.js> --manifest <path.json> [options]
 
 Options:
-  --port PATH             Serial device, /dev/cu.* or /dev/tty.* (required).
+  --port PATH             Serial device, /dev/cu.*, /dev/tty.* or COM<n> (required).
   --bundle PATH            Compiled JS bundle file (required).
   --manifest PATH          Bundle manifest JSON file (required).
   --ack-timeout MS         Override ACK_TIMEOUT_MS (default ${ACK_TIMEOUT_MS}).
@@ -76,7 +74,7 @@ function parseCli(argv) {
   }
 
   if (!SERIAL_PORT_PATTERN.test(options.port)) {
-    throw new UsageError("--port must be a /dev/cu.* or /dev/tty.* device");
+    throw new UsageError("--port must be a local /dev/cu.*, /dev/tty.* or COM<n> serial device");
   }
   if (!options.bundle) throw new UsageError("--bundle is required");
   if (!options.manifest) throw new UsageError("--manifest is required");
@@ -87,13 +85,6 @@ function parseCli(argv) {
     throw new UsageError("--commit-timeout must be a positive number");
   }
   return { help: false, options };
-}
-
-function configurePort(port) {
-  const result = spawnSync("stty", ["-f", port, "115200", "raw", "-echo"], { stdio: "inherit" });
-  if (result.error || result.status !== 0) {
-    throw new Error(`stty configuration failed for ${port}: ${result.error ?? `exit ${result.status}`}`);
-  }
 }
 
 async function run() {
@@ -117,74 +108,13 @@ async function run() {
   const { options } = parsed;
   const manifest = JSON.parse(await readFile(options.manifest, "utf8"));
   const bytes = new Uint8Array(await readFile(options.bundle));
-
-  configurePort(options.port);
-
-  const session = createPushSession(manifest, bytes);
-  const output = createWriteStream(options.port);
-  const input = createReadStream(options.port);
-  const rl = createInterface({ input, crlfDelay: Infinity });
-
-  let timer;
-  let settled = false;
-
-  const clearTimer = () => {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-  };
-
-  const armTimer = (state) => {
-    clearTimer();
-    if (state === "awaiting-rdy" || state === "sending") {
-      timer = setTimeout(() => onEvent({ kind: "timeout" }), options.ackTimeoutMs);
-    } else if (state === "awaiting-commit") {
-      timer = setTimeout(() => onEvent({ kind: "timeout" }), options.commitTimeoutMs);
-    }
-  };
-
-  const finish = (progress) => {
-    if (settled) return;
-    settled = true;
-    clearTimer();
-    rl.close();
-    input.destroy();
-    output.end();
-    if (progress.state === "done" && progress.result) {
-      console.log(`OK bundle=${manifest.bundleId} generation=${progress.result.generation} epoch=${progress.result.epoch}`);
-      process.exitCode = 0;
-    } else {
-      console.error(`push-bundle: failed: ${progress.failure ?? "unknown"}`);
-      process.exitCode = 1;
-    }
-  };
-
-  const applyProgress = (progress) => {
-    for (const frame of progress.send) {
-      output.write(`${frame}\n`);
-    }
-    console.log(`chunk ${progress.acked}/${progress.total} acked (${progress.state})`);
-    if (progress.state === "done" || progress.state === "failed") {
-      finish(progress);
-      return;
-    }
-    armTimer(progress.state);
-  };
-
-  function onEvent(event) {
-    if (settled) return;
-    applyProgress(session.handle(event));
-  }
-
-  rl.on("line", (rawLine) => {
-    if (parseDeviceLine(rawLine).kind === "noise") {
-      console.error(`device: ${rawLine}`);
-    }
-    onEvent({ kind: "line", line: rawLine });
-  });
-
-  applyProgress(session.begin());
+  const result = await runDevicePush(
+    { manifest, bytes },
+    options.port,
+    undefined,
+    { ackTimeoutMs: options.ackTimeoutMs, commitTimeoutMs: options.commitTimeoutMs },
+  );
+  console.log(`OK bundle=${result.bundleId} generation=${result.generation} epoch=${result.epoch}`);
 }
 
 const isDirectExecution = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

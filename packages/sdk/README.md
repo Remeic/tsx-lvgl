@@ -17,3 +17,9 @@ Discovery and base command construction use the pinned, zero-dependency
 `package-manager-detector` library. The SDK adds only TSX-LVGL policy: stable
 diagnostics, offline and lifecycle-script flags, lock conflict handling, and a
 fresh Bun cache for same-version local artifacts.
+
+`tsx-lvgl dev --device --port <serial-port> [--json]` is an optional
+development-only bundle push. It never flashes or resets firmware. The port is
+machine-local and the generation negotiated from the board is invocation-only;
+neither is stored in application configuration. `doctor --device --port ...`
+performs only the same syntax preflight and does not open the port.
