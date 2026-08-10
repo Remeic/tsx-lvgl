@@ -4,7 +4,7 @@ const config = {
   commandRunner: {
     // Compile each mutant, then run the already-compiled suite. The public
     // test command cleans first, which would discard Stryker's sandbox output.
-    command: "npx tsc -b --noCheck --pretty false && node --test 'test-dist/tests/**/*.test.js' tests/*.test.mjs",
+    command: "npx tsc -b --noCheck --pretty false && node --test --test-concurrency=1 'test-dist/tests/**/*.test.js' tests/*.test.mjs",
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
