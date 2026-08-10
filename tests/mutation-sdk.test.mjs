@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { DEFAULT_ARTIFACT_STORE } from "../packages/sdk/dist/artifact-store.js";
+import { DEFAULT_ARTIFACT_STORE, validateArtifactReference } from "../packages/sdk/dist/artifact-store.js";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import { createInstallExecutor } from "../packages/sdk/dist/install-executor.js";
 import { createProject, updateProject } from "../packages/sdk/dist/project.js";
@@ -117,6 +117,18 @@ test("artifact-store rejects escaped lock paths and unsafe provenance versions",
     { code: DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH },
   );
   assert.equal(existsSync(join(root, "escaped.tgz")), false);
+});
+
+test("artifact references reject every non-canonical persisted path shape", () => {
+  for (const file of [
+    "/tmp/sdk.tgz",
+    ".tsx-lvgl\\artifacts\\sdk.tgz",
+    "artifacts/sdk.tgz",
+    ".tsx-lvgl/artifacts/",
+    ".tsx-lvgl/artifacts/../sdk.tgz",
+  ]) {
+    assert.throws(() => validateArtifactReference(file), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  }
 });
 
 test("project lifecycle uses injected source, artifact and install boundaries in-process", async (t) => {

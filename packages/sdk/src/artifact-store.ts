@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, posix, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { valid as validSemver } from "semver";
 
@@ -89,23 +89,16 @@ export function validateArtifactReference(file: string): void {
 
 function resolveProjectArtifact(root: string, file: string): string {
   validateArtifactReference(file);
-  const artifactDirectory = resolve(root, ".tsx-lvgl", "artifacts");
-  const destination = resolve(root, file);
-  if (destination === artifactDirectory || !destination.startsWith(`${artifactDirectory}${sep}`)) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
-  }
-  return destination;
+  // `validateArtifactReference` accepts only canonical descendants of this
+  // fixed relative directory, so lexical resolution cannot leave it.
+  return resolve(root, file);
 }
 
 function artifactFileName(version: string): string {
   if (validSemver(version) !== version) {
     throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
   }
-  const file = `tsx-lvgl-sdk-${version}.tgz`;
-  if (basename(file) !== file) {
-    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
-  }
-  return file;
+  return `tsx-lvgl-sdk-${version}.tgz`;
 }
 
 function readPackProvenance(artifactPath: string): PackProvenance {
