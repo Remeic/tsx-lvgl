@@ -2,8 +2,9 @@
 const config = {
   testRunner: "command",
   commandRunner: {
-    // Single source of truth for "the tests"; only the build differs from CI.
-    command: "npx tsc -b --noCheck --pretty false && npm run test:fast",
+    // Compile each mutant, then run the already-compiled suite. The public
+    // test command cleans first, which would discard Stryker's sandbox output.
+    command: "npx tsc -b --noCheck --pretty false && npm run test:compiled",
   },
   // Install workspace links inside the sandbox before building. This keeps
   // mutation runs isolated from the checkout while preserving package exports.
