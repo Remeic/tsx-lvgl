@@ -66,6 +66,12 @@ test("CLI routes device dev and doctor through existing command names with deter
   output = recorder();
   assert.equal(await runCli(["dev", "--port", "/dev/cu.fake"], "/cwd", ops, output.writer), 2);
   assert.match(output.errors[0], /requires dev --device/);
+  output = recorder();
+  const failingOps = operations({
+    devProject: async () => { throw new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial disconnected"); },
+  });
+  assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", failingOps, output.writer), 1);
+  assert.deepEqual(JSON.parse(output.errors[0]), { ok: false, code: "DEVICE_PUSH_FAILED", message: "serial disconnected" });
 });
 
 test("CLI runtime routes every command and preserves machine-readable outcomes", async () => {

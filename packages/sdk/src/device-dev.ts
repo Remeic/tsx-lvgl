@@ -4,6 +4,7 @@ import {
   createPushSession,
   parseDeviceLine,
   type PushProgress,
+  type PushState,
 } from "@tsx-lvgl/bundler";
 import type { RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 
@@ -56,37 +57,80 @@ export async function runDevicePush(
   const ackTimeoutMs = validTimeout(timeouts.ackTimeoutMs, ACK_TIMEOUT_MS, "ackTimeoutMs");
   const commitTimeoutMs = validTimeout(timeouts.commitTimeoutMs, COMMIT_TIMEOUT_MS, "commitTimeoutMs");
   const channel = runtime.serial.open(port);
-  return await new Promise<DeviceDevResult>((resolve, reject) => {
-    let closed = false;
+  return new Promise<DeviceDevResult>((resolve, reject) => {
+    let settled = false;
     let retryCount = 0;
     let manifest = bundle.manifest;
     let session = createPushSession(manifest, bundle.bytes);
+    let state: PushState = "awaiting-rdy";
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timerToken = 0;
     let unsubscribeLine: (() => void) | undefined;
     let unsubscribeError: (() => void) | undefined;
+    let eventQueue = Promise.resolve();
 
-    const cleanup = () => {
-      if (closed) return;
-      closed = true;
-      if (timer !== undefined) runtime.clearTimer(timer);
-      unsubscribeLine?.();
-      unsubscribeError?.();
-      channel.close();
+    const cancelTimer = () => {
+      timerToken += 1;
+      if (timer === undefined) return;
+      try {
+        runtime.clearTimer(timer);
+      } catch {
+        // A stale callback is still fenced by timerToken.
+      }
+      timer = undefined;
     };
-    const fail = (error: unknown) => {
-      cleanup();
-      reject(error instanceof CliError
-        ? error
-        : new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, error instanceof Error ? error.message : String(error)));
+    const detach = () => {
+      cancelTimer();
+      try {
+        unsubscribeLine?.();
+      } catch {
+        // Best-effort listener cleanup; settlement must still complete.
+      }
+      try {
+        unsubscribeError?.();
+      } catch {
+        // Best-effort listener cleanup; settlement must still complete.
+      }
     };
-    const arm = (progress: PushProgress) => {
-      if (timer !== undefined) runtime.clearTimer(timer);
-      const timeoutMs = progress.state === "awaiting-commit" ? commitTimeoutMs : ackTimeoutMs;
-      timer = runtime.setTimer(() => apply(session.handle({ kind: "timeout" })), timeoutMs);
+    const asDeviceError = (error: unknown): CliError => error instanceof CliError
+      ? error
+      : new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, error instanceof Error ? error.message : String(error));
+    const closeBestEffort = async (): Promise<unknown> => {
+      try {
+        await channel.close();
+        return undefined;
+      } catch (error) {
+        return error;
+      }
     };
-    const succeed = (progress: PushProgress) => {
-      if (progress.result === undefined) return fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "device push ended without a result"));
-      cleanup();
+    const fail = async (error: unknown, abortAlreadySent = false): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      const primaryError = asDeviceError(error);
+      detach();
+      if (!abortAlreadySent) {
+        try {
+          await channel.write("TSXB ABORT");
+        } catch {
+          // The primary failure wins; ABORT is explicitly best-effort.
+        }
+      }
+      await closeBestEffort();
+      reject(primaryError);
+    };
+    const succeed = async (progress: PushProgress): Promise<void> => {
+      if (settled) return;
+      if (progress.result === undefined) {
+        await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "device push ended without a result"));
+        return;
+      }
+      settled = true;
+      detach();
+      const closeError = await closeBestEffort();
+      if (closeError !== undefined) {
+        reject(asDeviceError(closeError));
+        return;
+      }
       resolve({
         bundleId: manifest.bundleId,
         generation: progress.result.generation,
@@ -94,38 +138,86 @@ export async function runDevicePush(
         retryCount,
       });
     };
-    const apply = (progress: PushProgress) => {
-      if (closed) return;
-      for (const frame of progress.send) channel.write(frame);
-      if (progress.state === "done") return succeed(progress);
-      if (progress.state === "failed") return fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, progress.failure ?? "device push failed"));
+    const arm = (progress: PushProgress): void => {
+      cancelTimer();
+      const token = timerToken;
+      const timeoutMs = progress.state === "awaiting-commit" ? commitTimeoutMs : ackTimeoutMs;
+      timer = runtime.setTimer(() => {
+        if (settled || token !== timerToken) return;
+        enqueue(async () => {
+          if (token !== timerToken) return;
+          await apply(session.handle({ kind: "timeout" }));
+        });
+      }, timeoutMs);
+    };
+    const apply = async (progress: PushProgress): Promise<void> => {
+      if (settled) return;
+      state = progress.state;
+      let abortSent = false;
+      for (const frame of progress.send) {
+        await channel.write(frame);
+        if (frame === "TSXB ABORT") abortSent = true;
+      }
+      if (progress.state === "done") {
+        await succeed(progress);
+        return;
+      }
+      if (progress.state === "failed") {
+        await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, progress.failure ?? "device push failed"), abortSent);
+        return;
+      }
       arm(progress);
     };
-    const retryWith = (lastGeneration: number) => {
+    const retryWith = async (lastGeneration: number): Promise<void> => {
       if (retryCount >= 1 || !Number.isSafeInteger(lastGeneration) || lastGeneration >= Number.MAX_SAFE_INTEGER) {
-        apply(session.handle({ kind: "line", line: `TSXB RDY maxBytes=${manifest.byteLength} protocol=${manifest.protocolVersion} board=${manifest.boardId} lastGeneration=${lastGeneration}` }));
+        await apply(session.handle({ kind: "line", line: `TSXB RDY maxBytes=${manifest.byteLength} protocol=${manifest.protocolVersion} board=${manifest.boardId} lastGeneration=${lastGeneration}` }));
         return;
       }
       // The current device state owns the staging buffer. Abort before the
       // next BEGIN, then immediately make the one fresh, monotonic attempt.
-      channel.write("TSXB ABORT");
+      cancelTimer();
+      await channel.write("TSXB ABORT");
       retryCount += 1;
       manifest = { ...manifest, generation: lastGeneration + 1 };
       session = createPushSession(manifest, bundle.bytes);
-      apply(session.begin());
+      await apply(session.begin());
+    };
+    const handleProtocolLine = async (line: string, parsed: Exclude<ReturnType<typeof parseDeviceLine>, { readonly kind: "noise" }>): Promise<void> => {
+      if (parsed.kind === "rdy") {
+        // createPushSession deliberately ignores RDY outside its handshake.
+        // Check the wrapper's generation negotiation under the same rule.
+        if (state !== "awaiting-rdy") return;
+        if (manifest.generation <= parsed.lastGeneration) {
+          await retryWith(parsed.lastGeneration);
+          return;
+        }
+      }
+      await apply(session.handle({ kind: "line", line }));
+    };
+    const enqueue = (action: () => Promise<void>): void => {
+      eventQueue = eventQueue
+        .then(async () => {
+          if (!settled) await action();
+        })
+        .catch(async (error: unknown) => {
+          await fail(error);
+        });
     };
 
-    unsubscribeLine = channel.onLine((line) => {
-      if (closed) return;
-      const parsed = parseDeviceLine(line);
-      if (parsed.kind === "rdy" && manifest.generation <= parsed.lastGeneration) {
-        retryWith(parsed.lastGeneration);
-        return;
-      }
-      apply(session.handle({ kind: "line", line }));
-    });
-    unsubscribeError = channel.onError(fail);
-    apply(session.begin());
+    try {
+      unsubscribeLine = channel.onLine((line) => {
+        if (settled) return;
+        const parsed = parseDeviceLine(line);
+        // Noise is ignored before queueing, so it cannot extend a deadline or
+        // grow the protocol work queue under a continuous device log stream.
+        if (parsed.kind === "noise") return;
+        enqueue(async () => handleProtocolLine(line, parsed));
+      });
+      unsubscribeError = channel.onError((error) => enqueue(async () => fail(error)));
+      enqueue(async () => apply(session.begin()));
+    } catch (error) {
+      void fail(error);
+    }
   });
 }
 

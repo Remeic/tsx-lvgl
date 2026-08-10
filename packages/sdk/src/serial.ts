@@ -10,10 +10,10 @@ import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
  * handle so tests can supply an in-memory channel.
  */
 export interface SerialLineChannel {
-  write(line: string): void;
+  write(line: string): void | Promise<void>;
   onLine(listener: (line: string) => void): () => void;
   onError(listener: (error: unknown) => void): () => void;
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 export interface SerialRuntime {
@@ -58,8 +58,11 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
     });
 
     return {
-      write(line: string): void {
-        if (!closed) output.write(`${line}\n`);
+      write(line: string): Promise<void> {
+        if (closed) return Promise.resolve();
+        return new Promise<void>((resolve, reject) => {
+          output.write(`${line}\n`, (error) => error === null || error === undefined ? resolve() : reject(error));
+        });
       },
       onLine(listener: (line: string) => void): () => void {
         lineListeners.add(listener);
@@ -69,12 +72,31 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
         errorListeners.add(listener);
         return () => errorListeners.delete(listener);
       },
-      close(): void {
-        if (closed) return;
+      close(): Promise<void> {
+        if (closed) return Promise.resolve();
         closed = true;
-        lines.close();
-        input.destroy();
-        output.end();
+        return new Promise<void>((resolve, reject) => {
+          let synchronousError: unknown;
+          try {
+            lines.close();
+          } catch (error) {
+            synchronousError = error;
+          }
+          try {
+            input.destroy();
+          } catch (error) {
+            synchronousError ??= error;
+          }
+          try {
+            if (output.destroyed) {
+              synchronousError === undefined ? resolve() : reject(synchronousError);
+            } else {
+              output.end(() => synchronousError === undefined ? resolve() : reject(synchronousError));
+            }
+          } catch (error) {
+            reject(synchronousError ?? error);
+          }
+        });
       },
     };
   },
