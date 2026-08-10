@@ -397,6 +397,56 @@ test("recovery persists restored directories and metadata before its cleanup che
   assert.equal(await readFile(packagePath, "utf8"), "{\"name\":\"before\"}\n");
 });
 
+test("restarted recovery persists a completed rename before advancing restored", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-restarted-rename-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "node_modules", "before"), { recursive: true });
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "action-completed") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+
+  let renamed = false;
+  assert.throws(
+    () => recoverInterruptedInstall(root, {
+      ...DEFAULT_INSTALL_TRANSACTION_FS,
+      rename: (from, to) => {
+        renameSync(from, to);
+        renamed = true;
+      },
+      syncDirectory: () => {
+        if (renamed) throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+
+  const rollbackRoot = readdirSync(dirname(root))
+    .find((entry) => entry.startsWith(`.${basename(root)}.tsx-lvgl-install-rollback-`));
+  assert.notEqual(rollbackRoot, undefined);
+  const events = [];
+  recoverInterruptedInstall(root, {
+    ...DEFAULT_INSTALL_TRANSACTION_FS,
+    syncFile: (path) => {
+      if (basename(path).startsWith(".install-transaction.json.")) {
+        const journal = JSON.parse(readFileSync(path, "utf8"));
+        events.push(`journal:${journal.status}:${journal.directories[0].recovery}`);
+      }
+    },
+    syncDirectory: (path) => events.push(`sync-directory:${basename(path)}`),
+  });
+  const sourceSync = events.indexOf(`sync-directory:${rollbackRoot}`);
+  const destinationSync = events.indexOf(`sync-directory:${basename(root)}`);
+  const restoredJournal = events.indexOf("journal:active:restored");
+  assert.ok(sourceSync >= 0 && sourceSync < restoredJournal);
+  assert.ok(destinationSync >= 0 && destinationSync < restoredJournal);
+});
+
 test("recovery cleans a pending owned rollback after interruption before first journal publication", async (t) => {
   const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-pending-rollback-"));
   t.after(() => rm(sandbox, { recursive: true, force: true }));

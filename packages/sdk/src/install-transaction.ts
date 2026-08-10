@@ -356,6 +356,10 @@ function restoreDirectory(
   }
 
   if (directory.recovery === "restoring" && directory.existed && !backupExists && destinationExists) {
+    /* A prior recovery may have stopped after its rename but before fsync. Do
+     * not make `restored` durable until both rename parent entries are too. */
+    persistDirectory(dirname(backup), filesystem);
+    persistDirectory(dirname(destination), filesystem);
     directory.recovery = "restored";
     writeJournal(root, journal, filesystem);
     return;
