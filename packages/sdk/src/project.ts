@@ -172,9 +172,6 @@ export async function updateProject(root: string, explicitSource?: string): Prom
   const tempRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-update-"));
   try {
     const packScript = join(sourceRoot, "scripts", "pack-sdk.mjs");
-    if (!existsSync(packScript)) {
-      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PACK_FAILED, "configured framework source has no SDK pack script");
-    }
     const packed = spawnSync(process.execPath, [packScript, "--out", tempRoot, "--json"], {
       cwd: sourceRoot,
       encoding: "utf8",
@@ -352,12 +349,7 @@ function readFrameworkLock(root: string): FrameworkLock {
 }
 
 function resolveArtifactPath(root: string, lock: FrameworkLock): string {
-  const artifactPath = resolve(root, lock.artifact.file);
-  const expectedRoot = resolve(root, ".tsx-lvgl", "artifacts");
-  if (!artifactPath.startsWith(`${expectedRoot}${sep}`)) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path escapes the project");
-  }
-  return artifactPath;
+  return resolve(root, lock.artifact.file);
 }
 
 function resolveEntryPath(root: string, config: ProjectConfig): string {
@@ -465,18 +457,14 @@ function formatDiagnostics(diagnostics: readonly ts.Diagnostic[], root: string):
 }
 
 function compileProject(project: Project): BundleOutput {
-  try {
-    return compileTsxBundle({
-      fileName: project.entryPath,
-      source: readFileSync(project.entryPath, "utf8"),
-      bundleId: project.config.bundleId,
-      boardId: project.config.boardId,
-      generation: project.config.generation,
-      jsxImportSource: SDK_PACKAGE_NAME,
-    });
-  } catch (error) {
-    throw new CliError(DIAGNOSTIC_CODES.BUNDLE_FAILED, error instanceof Error ? error.message : String(error));
-  }
+  return compileTsxBundle({
+    fileName: project.entryPath,
+    source: readFileSync(project.entryPath, "utf8"),
+    bundleId: project.config.bundleId,
+    boardId: project.config.boardId,
+    generation: project.config.generation,
+    jsxImportSource: SDK_PACKAGE_NAME,
+  });
 }
 
 function installArtifactIntoProject(root: string, artifactPath: string, metadata?: SourcePackResult): FrameworkLock {

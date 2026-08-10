@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,7 +74,11 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_NOT_FOUND);
   writeFileSync(configPath, '{"version":2}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
+  writeFileSync(configPath, '{ not json');
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"bad space","generation":0}\n');
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
+  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"bad space"}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, '{"version":1,"entry":"../outside.tsx","bundleId":"app"}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
@@ -110,6 +114,17 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
   mkdirSync(dirname(installed), { recursive: true });
   cpSync(installedSnapshot, installed, { recursive: true });
+  const installedPackagePath = join(installed, "package.json");
+  const installedPackage = readFileSync(installedPackagePath);
+  writeFileSync(installedPackagePath, '{"name":"wrong","version":"0.1.0"}\n');
+  assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
+  writeFileSync(installedPackagePath, installedPackage);
+  const provenancePath = join(installed, "provenance.json");
+  const provenance = JSON.parse(readFileSync(provenancePath));
+  provenance.sourceDirty = true;
+  writeFileSync(provenancePath, `${JSON.stringify(provenance)}\n`);
+  assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED);
+  cpSync(installedSnapshot, installed, { recursive: true, force: true });
   writeFileSync(tsconfigPath, '{ invalid json');
   assertCode(() => checkProject(root), DIAGNOSTIC_CODES.TYPECHECK_FAILED);
   rmSync(tsconfigPath);
@@ -118,6 +133,21 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   writeFileSync(entryPath, "export default 42 as any;\n");
   await assertAsyncCode(() => devProject(root), DIAGNOSTIC_CODES.DEV_FAILED);
   writeFileSync(entryPath, entry);
+  const originalPath = process.env.PATH;
+  const fakeBin = join(sandbox, "fake-bin");
+  mkdirSync(fakeBin);
+  const fakeNpm = join(fakeBin, "npm");
+  writeFileSync(fakeNpm, "#!/bin/sh\nexit 7\n");
+  chmodSync(fakeNpm, 0o755);
+  const managerPackage = JSON.parse(consumerPackage);
+  managerPackage.packageManager = "npm@11.0.0";
+  writeFileSync(packagePath, `${JSON.stringify(managerPackage)}\n`);
+  process.env.PATH = fakeBin;
+  await assertAsyncCode(() => syncProject(root), DIAGNOSTIC_CODES.INSTALL_FAILED);
+  process.env.PATH = "";
+  await assertAsyncCode(() => syncProject(root), DIAGNOSTIC_CODES.PACKAGE_MANAGER_NOT_FOUND);
+  process.env.PATH = originalPath;
+  writeFileSync(packagePath, consumerPackage);
   assert.equal((await syncProject(root)).lock.sourceSha.length, 40);
 });
 
@@ -143,5 +173,7 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "${"a".repeat(40)}", sourceDirty: true, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_DIRTY);
+  writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
   assert.equal(existsSync(join(root, ".tsx-lvgl", "framework.lock.json")), true);
 });
