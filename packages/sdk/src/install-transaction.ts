@@ -1,16 +1,21 @@
+import { randomBytes } from "node:crypto";
 import {
+  closeSync,
   cpSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 
@@ -29,6 +34,8 @@ export interface InstallTransactionFs {
   remove(path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }): void;
   makeDirectory(path: string): void;
   writeFile(path: string, bytes: Buffer): void;
+  syncFile?(path: string): void;
+  syncDirectory?(path: string): void;
   validateArtifactDirectory?(path: string): void;
 }
 
@@ -41,6 +48,8 @@ export const DEFAULT_INSTALL_TRANSACTION_FS: InstallTransactionFs = {
   remove: rmSync,
   makeDirectory: (path) => mkdirSync(path, { recursive: true }),
   writeFile: writeFileSync,
+  syncFile: syncFile,
+  syncDirectory: syncDirectory,
   validateArtifactDirectory: validateFlatArtifactDirectory,
 };
 
@@ -67,13 +76,15 @@ const TRANSACTION_DIRECTORIES = [
 ] as const;
 
 const JOURNAL_FILE = "install-transaction.json";
+const ROLLBACK_OWNER_FILE = ".tsx-lvgl-install-owner.json";
 const JOURNAL_VERSION = 1;
 
 export type InstallTransactionTransition =
   | "journal-created"
   | "node_modules-captured"
   | "artifacts-captured"
-  | "action-completed";
+  | "action-completed"
+  | "cleanup-recorded";
 
 /** Test-only failure injection which behaves like an abruptly terminated process. */
 export class InstallTransactionInterruptedError extends Error {
@@ -85,6 +96,7 @@ export class InstallTransactionInterruptedError extends Error {
 
 export interface InstallTransactionHooks {
   afterTransition?(transition: InstallTransactionTransition): void;
+  beforeJournalPersist?(stateDirectory: string): void;
 }
 
 interface DirectorySnapshot {
@@ -98,9 +110,10 @@ interface DirectorySnapshot {
 interface TransactionJournal {
   readonly version: typeof JOURNAL_VERSION;
   readonly rollbackDirectory: string;
+  readonly rollbackToken: string;
   readonly metadata: readonly JournalFileSnapshot[];
   readonly directories: JournalDirectorySnapshot[];
-  status: "active" | "committed";
+  status: "active" | "committed" | "cleanup";
 }
 
 interface JournalFileSnapshot {
@@ -139,8 +152,8 @@ export async function withInstallTransaction<T>(
   try {
     const metadata = METADATA_PATHS.map((path) => snapshotFile(join(projectRoot, path), filesystem));
     const directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(projectRoot, rollbackRoot, definition.path, definition.move, filesystem));
-    journal = createJournal(projectRoot, rollbackRoot, metadata, directories);
-    writeJournal(projectRoot, journal);
+    journal = createJournal(projectRoot, rollbackRoot, metadata, directories, filesystem);
+    writeJournal(projectRoot, journal, filesystem, hooks);
     hooks.afterTransition?.("journal-created");
 
     captureDirectories(directories, filesystem, (directory) => {
@@ -149,19 +162,18 @@ export async function withInstallTransaction<T>(
         : ".tsx-lvgl/artifacts";
       const entry = journal!.directories.find((candidate) => candidate.path === path) as JournalDirectorySnapshot;
       entry.captured = directory.captured;
-      writeJournal(projectRoot, journal!);
+      writeJournal(projectRoot, journal!, filesystem, hooks);
       hooks.afterTransition?.(directory.path === join(projectRoot, "node_modules") ? "node_modules-captured" : "artifacts-captured");
     });
     const result = await action();
     hooks.afterTransition?.("action-completed");
     journal.status = "committed";
-    writeJournal(projectRoot, journal);
-    cleanupJournal(projectRoot, rollbackRoot, filesystem);
+    writeJournal(projectRoot, journal, filesystem, hooks);
+    cleanupJournal(projectRoot, rollbackRoot, journal, filesystem, hooks);
     return result;
   } catch (error) {
     if (error instanceof InstallTransactionInterruptedError) throw error;
     if (journal !== undefined) recoverInterruptedInstall(projectRoot, filesystem);
-    else cleanupOwnedRollbackDirectory(projectRoot, rollbackRoot, filesystem);
     throw error;
   }
 }
@@ -175,20 +187,18 @@ export function recoverInterruptedInstall(
   if (!existsSync(projectRoot)) return;
   const journal = readJournal(projectRoot);
   if (journal === undefined) {
-    cleanupStaleRollbackDirectories(projectRoot, undefined, filesystem);
     cleanupStaleJournalFiles(projectRoot);
     return;
   }
   const rollbackRoot = resolveRollbackRoot(projectRoot, journal.rollbackDirectory);
-  cleanupStaleRollbackDirectories(projectRoot, journal.rollbackDirectory, filesystem);
-  if (journal.status === "committed") {
-    cleanupJournal(projectRoot, rollbackRoot, filesystem);
+  if (journal.status === "committed" || journal.status === "cleanup") {
+    cleanupJournal(projectRoot, rollbackRoot, journal, filesystem);
     return;
   }
 
   for (const directory of journal.directories) restoreDirectory(projectRoot, rollbackRoot, directory, journal, filesystem);
   restoreFiles(readMetadataSnapshots(projectRoot, rollbackRoot, journal), filesystem);
-  cleanupJournal(projectRoot, rollbackRoot, filesystem);
+  cleanupJournal(projectRoot, rollbackRoot, journal, filesystem);
 }
 
 function createJournal(
@@ -196,20 +206,28 @@ function createJournal(
   rollbackRoot: string,
   metadata: readonly FileSnapshot[],
   directories: readonly DirectorySnapshot[],
+  filesystem: InstallTransactionFs,
 ): TransactionJournal {
   const rollbackDirectory = basename(rollbackRoot);
   resolveRollbackRoot(root, rollbackDirectory);
+  const rollbackToken = randomBytes(32).toString("hex");
+  writeRollbackOwnership(rollbackRoot, rollbackToken, filesystem);
   const snapshots = metadata.map((snapshot, index) => {
     const backup = `metadata/${index}`;
     if (snapshot.existed) {
       mkdirSync(dirname(join(rollbackRoot, backup)), { recursive: true });
-      writeFileSync(join(rollbackRoot, backup), snapshot.bytes as Buffer, { mode: 0o600 });
+      const backupPath = join(rollbackRoot, backup);
+      writeFileSync(backupPath, snapshot.bytes as Buffer, { mode: 0o600 });
+      persistFile(backupPath, filesystem);
     }
     return { path: METADATA_PATHS[index]!, existed: snapshot.existed, backup };
   });
+  persistDirectory(join(rollbackRoot, "metadata"), filesystem);
+  persistDirectory(rollbackRoot, filesystem);
   return {
     version: JOURNAL_VERSION,
     rollbackDirectory,
+    rollbackToken,
     metadata: snapshots,
     directories: directories.map((directory, index) => ({
       path: TRANSACTION_DIRECTORIES[index]!.path,
@@ -267,8 +285,14 @@ function captureDirectories(
     }
     if (!directory.move) (filesystem.validateArtifactDirectory ?? validateFlatArtifactDirectory)(directory.path);
     filesystem.makeDirectory(dirname(directory.backupPath));
-    if (directory.move) filesystem.rename(directory.path, directory.backupPath);
-    else filesystem.copy(directory.path, directory.backupPath);
+    if (directory.move) {
+      filesystem.rename(directory.path, directory.backupPath);
+      persistDirectory(dirname(directory.path), filesystem);
+      persistDirectory(dirname(directory.backupPath), filesystem);
+    } else {
+      filesystem.copy(directory.path, directory.backupPath);
+      persistDirectoryTree(directory.backupPath, filesystem);
+    }
     directory.captured = true;
     captured(directory);
   }
@@ -291,24 +315,24 @@ function restoreDirectory(
     // termination occurred after the rename but before the checkpoint write.
     if (directory.move && !destinationExists && backupExists) {
       directory.recovery = "restoring";
-      writeJournal(root, journal);
+      writeJournal(root, journal, filesystem);
       filesystem.makeDirectory(dirname(destination));
       filesystem.rename(backup, destination);
     } else if (!destinationExists || (directory.move && backupExists)) {
       throw recoveryFailure(`rollback capture is ambiguous for ${directory.path}`);
     }
     directory.recovery = "restored";
-    writeJournal(root, journal);
+    writeJournal(root, journal, filesystem);
     return;
   }
 
   if (directory.recovery === "restoring" && directory.existed && !backupExists && destinationExists) {
     directory.recovery = "restored";
-    writeJournal(root, journal);
+    writeJournal(root, journal, filesystem);
     return;
   }
   directory.recovery = "restoring";
-  writeJournal(root, journal);
+  writeJournal(root, journal, filesystem);
   filesystem.remove(destination, { recursive: true, force: true });
   if (directory.existed) {
     if (!filesystem.exists(backup)) {
@@ -318,7 +342,7 @@ function restoreDirectory(
     filesystem.rename(backup, destination);
   }
   directory.recovery = "restored";
-  writeJournal(root, journal);
+  writeJournal(root, journal, filesystem);
 }
 
 function snapshotFile(path: string, filesystem: InstallTransactionFs): FileSnapshot {
@@ -337,12 +361,22 @@ function restoreFiles(snapshots: readonly FileSnapshot[], filesystem: InstallTra
   }
 }
 
-function writeJournal(root: string, journal: TransactionJournal): void {
+function writeJournal(
+  root: string,
+  journal: TransactionJournal,
+  filesystem: InstallTransactionFs,
+  hooks: InstallTransactionHooks = {},
+): void {
   const state = stateDirectory(root, true)!;
   const target = join(state, JOURNAL_FILE);
   const temporary = join(state, `.${JOURNAL_FILE}.${process.pid}.tmp`);
+  hooks.beforeJournalPersist?.(state);
+  assertProjectStateDirectory(root, state);
   writeFileSync(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
+  persistFile(temporary, filesystem);
+  assertProjectStateDirectory(root, state);
   renameSync(temporary, target);
+  persistDirectory(state, filesystem);
 }
 
 function readJournal(root: string): TransactionJournal | undefined {
@@ -361,7 +395,14 @@ function readJournal(root: string): TransactionJournal | undefined {
 }
 
 function validateJournal(root: string, value: unknown): TransactionJournal {
-  if (!isRecord(value) || value.version !== JOURNAL_VERSION || typeof value.rollbackDirectory !== "string" || (value.status !== "active" && value.status !== "committed")) {
+  if (
+    !isRecord(value)
+    || value.version !== JOURNAL_VERSION
+    || typeof value.rollbackDirectory !== "string"
+    || typeof value.rollbackToken !== "string"
+    || !/^[a-f0-9]{64}$/.test(value.rollbackToken)
+    || (value.status !== "active" && value.status !== "committed" && value.status !== "cleanup")
+  ) {
     throw recoveryFailure("install transaction journal is invalid");
   }
   resolveRollbackRoot(root, value.rollbackDirectory);
@@ -392,7 +433,14 @@ function validateJournal(root: string, value: unknown): TransactionJournal {
       recovery: entry.recovery as JournalDirectorySnapshot["recovery"],
     };
   });
-  return { version: JOURNAL_VERSION, rollbackDirectory: value.rollbackDirectory, metadata, directories, status: value.status };
+  return {
+    version: JOURNAL_VERSION,
+    rollbackDirectory: value.rollbackDirectory,
+    rollbackToken: value.rollbackToken,
+    metadata,
+    directories,
+    status: value.status,
+  };
 }
 
 function stateDirectory(root: string, create: boolean): string | undefined {
@@ -401,10 +449,7 @@ function stateDirectory(root: string, create: boolean): string | undefined {
     if (!create) return undefined;
     mkdirSync(state, { recursive: true });
   }
-  const details = lstatSync(state);
-  if (!details.isDirectory() || details.isSymbolicLink()) {
-    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
-  }
+  assertProjectStateDirectory(root, state);
   return state;
 }
 
@@ -418,27 +463,128 @@ function resolveRollbackRoot(root: string, rollbackDirectory: string): string {
   return join(dirname(resolve(root)), rollbackDirectory);
 }
 
-function cleanupJournal(root: string, rollbackRoot: string, filesystem: InstallTransactionFs): void {
-  const journal = join(stateDirectory(root, true)!, JOURNAL_FILE);
-  filesystem.remove(journal, { force: true });
-  cleanupOwnedRollbackDirectory(root, rollbackRoot, filesystem);
-  cleanupStaleRollbackDirectories(root, undefined, filesystem);
-  cleanupStaleJournalFiles(root);
+function writeRollbackOwnership(root: string, rollbackToken: string, filesystem: InstallTransactionFs): void {
+  const marker = join(root, ROLLBACK_OWNER_FILE);
+  writeFileSync(marker, `${JSON.stringify({ version: 1, rollbackToken })}\n`, { mode: 0o600 });
+  persistFile(marker, filesystem);
+  persistDirectory(root, filesystem);
+  persistDirectory(dirname(root), filesystem);
 }
 
-function cleanupOwnedRollbackDirectory(root: string, rollbackRoot: string, filesystem: InstallTransactionFs): void {
-  if (dirname(rollbackRoot) !== dirname(resolve(root))) throw recoveryFailure("rollback directory escapes the project sibling");
-  const details = existsSync(rollbackRoot) ? lstatSync(rollbackRoot) : undefined;
-  if (details !== undefined && details.isDirectory() && !details.isSymbolicLink()) {
-    filesystem.remove(rollbackRoot, { recursive: true, force: true });
+function isOwnedRollbackDirectory(root: string, expectedToken: string): boolean {
+  const marker = join(root, ROLLBACK_OWNER_FILE);
+  try {
+    const details = lstatSync(marker);
+    if (!details.isFile() || details.isSymbolicLink()) return false;
+    const value = JSON.parse(readFileSync(marker, "utf8")) as unknown;
+    return isRecord(value) && value.version === 1 && value.rollbackToken === expectedToken;
+  } catch {
+    return false;
   }
 }
 
-function cleanupStaleRollbackDirectories(root: string, keep: string | undefined, filesystem: InstallTransactionFs): void {
-  const prefix = `.${basename(resolve(root))}.tsx-lvgl-install-rollback-`;
-  for (const entry of readdirSync(dirname(resolve(root)))) {
-    if (entry === keep || !entry.startsWith(prefix) || entry.length === prefix.length) continue;
-    cleanupOwnedRollbackDirectory(root, join(dirname(resolve(root)), entry), filesystem);
+function assertProjectStateDirectory(root: string, state: string): void {
+  const rootCanonical = canonicalDirectory(root, "project root is unavailable");
+  const details = lstatSync(state);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
+  }
+  const stateCanonical = canonicalDirectory(state, "project state directory is unavailable");
+  if (!isContained(rootCanonical, stateCanonical)) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory escapes the project");
+  }
+}
+
+function canonicalDirectory(path: string, message: string): string {
+  try {
+    if (!lstatSync(path).isDirectory()) throw new Error("not a directory");
+    return realpathSync(path);
+  } catch {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, message);
+  }
+}
+
+function isContained(parent: string, child: string): boolean {
+  const difference = relative(parent, child);
+  return difference === "" || (!difference.startsWith("..") && !isAbsolute(difference));
+}
+
+function persistFile(path: string, filesystem: InstallTransactionFs): void {
+  filesystem.syncFile?.(path);
+}
+
+function persistDirectory(path: string, filesystem: InstallTransactionFs): void {
+  if (existsSync(path)) filesystem.syncDirectory?.(path);
+}
+
+function persistDirectoryTree(path: string, filesystem: InstallTransactionFs): void {
+  const details = lstatSync(path);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw recoveryFailure("rollback artifact snapshot is not a regular directory");
+  }
+  for (const entry of readdirSync(path)) {
+    const entryPath = join(path, entry);
+    const entryDetails = lstatSync(entryPath);
+    if (!entryDetails.isFile() || entryDetails.isSymbolicLink()) {
+      throw recoveryFailure("rollback artifact snapshot contains an unsupported entry");
+    }
+    persistFile(entryPath, filesystem);
+  }
+  persistDirectory(path, filesystem);
+  persistDirectory(dirname(path), filesystem);
+}
+
+function syncFile(path: string): void {
+  syncPath(path);
+}
+
+function syncDirectory(path: string): void {
+  syncPath(path);
+}
+
+function syncPath(path: string): void {
+  const descriptor = openSync(path, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function cleanupJournal(
+  root: string,
+  rollbackRoot: string,
+  transaction: TransactionJournal,
+  filesystem: InstallTransactionFs,
+  hooks: InstallTransactionHooks = {},
+): void {
+  if (transaction.status !== "cleanup") {
+    transaction.status = "cleanup";
+    writeJournal(root, transaction, filesystem, hooks);
+    hooks.afterTransition?.("cleanup-recorded");
+  }
+  cleanupOwnedRollbackDirectory(root, rollbackRoot, transaction.rollbackToken, filesystem);
+  const journal = join(stateDirectory(root, true)!, JOURNAL_FILE);
+  assertProjectStateDirectory(root, dirname(journal));
+  filesystem.remove(journal, { force: true });
+  persistDirectory(dirname(journal), filesystem);
+  cleanupStaleJournalFiles(root);
+}
+
+function cleanupOwnedRollbackDirectory(
+  root: string,
+  rollbackRoot: string,
+  rollbackToken: string,
+  filesystem: InstallTransactionFs,
+): void {
+  if (dirname(rollbackRoot) !== dirname(resolve(root))) throw recoveryFailure("rollback directory escapes the project sibling");
+  const details = existsSync(rollbackRoot) ? lstatSync(rollbackRoot) : undefined;
+  if (details !== undefined) {
+    if (!details.isDirectory() || details.isSymbolicLink() || !isOwnedRollbackDirectory(rollbackRoot, rollbackToken)) {
+      throw recoveryFailure("rollback directory ownership cannot be verified");
+    }
+    filesystem.remove(rollbackRoot, { recursive: true, force: true });
+    persistDirectory(dirname(rollbackRoot), filesystem);
   }
 }
 

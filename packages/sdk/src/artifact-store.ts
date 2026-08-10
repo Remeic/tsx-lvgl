@@ -96,12 +96,13 @@ export function recoverProjectArtifactState(root: string): void {
   const projectRoot = resolve(root);
   const state = join(projectRoot, ".tsx-lvgl");
   if (!existsSync(state)) return;
-  assertStateDirectory(state);
+  assertStateDirectory(state, projectRoot);
   const artifacts = join(state, "artifacts");
   const backup = join(state, ".artifacts-backup");
   recoverArtifactSwap(artifacts, backup);
   for (const entry of readdirSync(state)) {
     if (!entry.startsWith(".artifacts-stage-")) continue;
+    assertStateDirectory(state, projectRoot);
     const stage = join(state, entry);
     const details = lstatSync(stage);
     if (details.isDirectory() && !details.isSymbolicLink()) rmSync(stage, { recursive: true, force: true });
@@ -179,12 +180,14 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
   const projectRoot = resolve(root);
   const state = join(projectRoot, ".tsx-lvgl");
   if (existsSync(state)) {
-    assertStateDirectory(state);
+    assertStateDirectory(state, projectRoot);
   }
   mkdirSync(state, { recursive: true });
+  assertStateDirectory(state, projectRoot);
   const artifacts = join(state, "artifacts");
   const backup = join(state, ".artifacts-backup");
   recoverProjectArtifactState(projectRoot);
+  assertStateDirectory(state, projectRoot);
   const stage = mkdtempSync(join(state, ".artifacts-stage-"));
   let movedPrevious = false;
   let interrupted = false;
@@ -192,6 +195,7 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
     if (existsSync(artifacts)) copyAllowedArtifacts(artifacts, stage);
     writeFileSync(join(stage, artifactFile), bytes, { mode: 0o600 });
     hooks.beforeInstallSwap?.();
+    assertStateDirectory(state, projectRoot);
     if (existsSync(artifacts)) {
       assertArtifactDirectory(artifacts);
       renameSync(artifacts, backup);
@@ -224,9 +228,13 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
   }
 }
 
-function assertStateDirectory(path: string): void {
+function assertStateDirectory(path: string, projectRoot: string): void {
   const details = lstatSync(path);
-  if (!details.isDirectory() || details.isSymbolicLink()) {
+  if (
+    !details.isDirectory()
+    || details.isSymbolicLink()
+    || !isContained(canonicalDirectory(projectRoot), canonicalDirectory(path))
+  ) {
     throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
   }
 }

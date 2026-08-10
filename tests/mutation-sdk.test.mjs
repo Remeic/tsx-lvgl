@@ -173,6 +173,26 @@ test("artifact-store stage swap cannot be redirected when artifacts is replaced 
   assert.equal(existsSync(join(outside, "tsx-lvgl-sdk-0.1.0.tgz")), true);
 });
 
+test("artifact-store rejects a replaced project-state parent before any swap mutation", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-state-swap-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(sourceArtifact, "inside artifact");
+  const store = createArtifactStore({
+    beforeInstallSwap: () => {
+      rmSync(join(root, ".tsx-lvgl"), { recursive: true, force: true });
+      symlinkSync(outside, join(root, ".tsx-lvgl"), "dir");
+    },
+  });
+
+  assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  assert.equal(existsSync(join(outside, "artifacts")), false);
+});
+
 test("artifact-store restart recovery completes both interrupted rename states idempotently", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-restart-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));

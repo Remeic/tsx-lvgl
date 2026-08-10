@@ -3,10 +3,11 @@ import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+  DEFAULT_INSTALL_TRANSACTION_FS,
   InstallTransactionInterruptedError,
   recoverInterruptedInstall,
   withInstallTransaction,
@@ -242,4 +243,83 @@ test("restart recovery restores every durable transaction checkpoint idempotentl
       false,
     );
   }
+});
+
+test("journal durability is acknowledged before a mutable directory rename", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-durability-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "node_modules", "keep"), { recursive: true });
+  const events = [];
+  const filesystem = {
+    ...DEFAULT_INSTALL_TRANSACTION_FS,
+    rename: (from, to) => {
+      events.push(`rename:${from}`);
+      renameSync(from, to);
+    },
+    syncFile: (path) => events.push(`sync-file:${basename(path)}`),
+    syncDirectory: (path) => events.push(`sync-directory:${basename(path)}`),
+  };
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, filesystem, {
+      afterTransition: (transition) => {
+        if (transition !== "journal-created") return;
+        assert.equal(events.some((event) => event === "sync-file:.tsx-lvgl-install-owner.json"), true);
+        assert.equal(events.some((event) => event.startsWith("sync-file:.install-transaction.json.")), true);
+        assert.equal(events.some((event) => event.endsWith("node_modules")), false);
+        throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  recoverInterruptedInstall(root);
+});
+
+test("recovery preserves an unjournaled sibling directory and rejects a swapped state parent", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-ownership-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const unrelated = join(sandbox, ".project.tsx-lvgl-install-rollback-unrelated");
+  const outside = join(sandbox, "outside");
+  await mkdir(join(root, ".tsx-lvgl"), { recursive: true });
+  await mkdir(unrelated);
+  await mkdir(outside);
+  await writeFile(join(unrelated, "keep.txt"), "unrelated\n");
+
+  recoverInterruptedInstall(root);
+  assert.equal(await readFile(join(unrelated, "keep.txt"), "utf8"), "unrelated\n");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      beforeJournalPersist: (state) => {
+        rmSync(state, { recursive: true, force: true });
+        symlinkSync(outside, state, "dir");
+      },
+    }),
+    { code: "SOURCE_PATH_LEAK" },
+  );
+  assert.equal(existsSync(join(outside, "install-transaction.json")), false);
+});
+
+test("recovery keeps a committed transaction when interruption follows its cleanup checkpoint", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-committed-recovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const packagePath = join(root, "package.json");
+  await writeFile(packagePath, "{\"name\":\"before\"}\n");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {
+      await writeFile(packagePath, "{\"name\":\"after\"}\n");
+    }, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "cleanup-recorded") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+
+  recoverInterruptedInstall(root);
+  recoverInterruptedInstall(root);
+  assert.equal(await readFile(packagePath, "utf8"), "{\"name\":\"after\"}\n");
+  assert.equal(existsSync(join(root, ".tsx-lvgl", "install-transaction.json")), false);
 });
