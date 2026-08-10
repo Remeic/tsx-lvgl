@@ -12,14 +12,23 @@ export interface InstallExecutor {
   install(root: string, lock: FrameworkLock, artifactPath: string, verifyInstalled: () => void): Promise<void>;
 }
 
+/** Injectable package-manager boundary used by the project lifecycle. */
+export type PackageManagerInstaller = (root: string, artifactPath: string) => Promise<void>;
+
 /** Narrow boundary for the package manager side effect of a project update. */
-export const DEFAULT_INSTALL_EXECUTOR: InstallExecutor = {
-  async install(root, lock, artifactPath, verifyInstalled) {
-    writeSdkDependency(root, lock);
-    await runPackageManagerInstall(root, artifactPath);
-    verifyInstalled();
-  },
-};
+export function createInstallExecutor(
+  installPackageManager: PackageManagerInstaller = runPackageManagerInstall,
+): InstallExecutor {
+  return {
+    async install(root, lock, artifactPath, verifyInstalled) {
+      writeSdkDependency(root, lock);
+      await installPackageManager(root, artifactPath);
+      verifyInstalled();
+    },
+  };
+}
+
+export const DEFAULT_INSTALL_EXECUTOR = createInstallExecutor();
 
 function writeSdkDependency(root: string, lock: FrameworkLock): void {
   const packagePath = join(root, "package.json");

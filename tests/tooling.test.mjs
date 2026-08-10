@@ -26,6 +26,10 @@ import {
   VALIDATION_GIT_STATE_ENV,
 } from "../scripts/validation-context.mjs";
 import { emitMutationOutput } from "../scripts/build-mutation-output.mjs";
+import {
+  assertMutationDryRunBudget,
+  MUTATION_DRY_RUN_BUDGET_MS,
+} from "../scripts/run-mutation-dry-run.mjs";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -109,10 +113,20 @@ test("Stryker dry run uses the declaration-preserving mutation harness", async (
     readFile(join(repositoryRoot, "package.json"), "utf8"),
     readFile(join(repositoryRoot, "stryker.config.mjs"), "utf8"),
   ]);
-  assert.match(manifest, /"mutation:dry-run": "npm run test:prepare && stryker run --dryRunOnly"/);
+  assert.match(manifest, /"mutation:dry-run": "node scripts\/run-mutation-dry-run\.mjs"/);
+  assert.match(manifest, /"test:mutation": ".*tests\/mutation-sdk\.test\.mjs/);
+  assert.match(manifest, /"mutation": "npm test && stryker run && npm test"/);
   assert.match(config, /TSX_LVGL_MUTATION_BUILD=1 TSX_LVGL_VALIDATION_GIT_SHA/);
   assert.match(config, /node scripts\/build-mutation-output\.mjs/);
+  assert.match(config, /npm run test:mutation/);
+  assert.doesNotMatch(config, /project-lifecycle\.test\.mjs/);
   assert.doesNotMatch(config, /buildCommand: ".*tsc -b/);
+});
+
+test("mutation dry-run budget fails closed above ten seconds", () => {
+  assert.equal(MUTATION_DRY_RUN_BUDGET_MS, 10_000);
+  assert.doesNotThrow(() => assertMutationDryRunBudget(9_999));
+  assert.throws(() => assertMutationDryRunBudget(10_001), /exceeded 10000ms/);
 });
 
 test("validation context has stable machine-readable fields", () => {

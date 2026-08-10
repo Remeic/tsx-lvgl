@@ -22,10 +22,14 @@ import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 import { runDoctor, type DoctorResult } from "./doctor.js";
 import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
 import { withInstallTransaction } from "./install-transaction.js";
-import { DEFAULT_ARTIFACT_STORE, validateArtifactReference } from "./artifact-store.js";
-import { DEFAULT_INSTALL_EXECUTOR } from "./install-executor.js";
+import {
+  DEFAULT_ARTIFACT_STORE,
+  type ArtifactStore,
+  validateArtifactReference,
+} from "./artifact-store.js";
+import { DEFAULT_INSTALL_EXECUTOR, type InstallExecutor } from "./install-executor.js";
 import type { FrameworkLock } from "./framework-lock.js";
-import { DEFAULT_SOURCE_PACK_ADAPTER } from "./source-pack.js";
+import { DEFAULT_SOURCE_PACK_ADAPTER, type SourcePackAdapter } from "./source-pack.js";
 import ts from "typescript";
 
 export interface ProjectConfig {
@@ -68,6 +72,23 @@ export interface InstalledSdkPackRuntime {
   run(command: string, args: readonly string[], cwd: string): { readonly status: number | null; readonly stdout: string };
 }
 
+/**
+ * The narrow external seams used by create/update. Keeping them explicit lets
+ * the lifecycle be exercised in-process while package-manager contracts keep
+ * validating the production implementations separately.
+ */
+export interface ProjectLifecycleAdapters {
+  readonly artifactStore: ArtifactStore;
+  readonly installExecutor: InstallExecutor;
+  readonly sourcePackAdapter: SourcePackAdapter;
+}
+
+export const DEFAULT_PROJECT_LIFECYCLE_ADAPTERS: ProjectLifecycleAdapters = {
+  artifactStore: DEFAULT_ARTIFACT_STORE,
+  installExecutor: DEFAULT_INSTALL_EXECUTOR,
+  sourcePackAdapter: DEFAULT_SOURCE_PACK_ADAPTER,
+};
+
 export const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
   exists: existsSync,
   makeTemporaryDirectory: mkdtempSync,
@@ -82,6 +103,7 @@ export async function createProject(
   target: string,
   artifactArgument?: string,
   packArtifact: () => string = packInstalledSdk,
+  adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
 ): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
   const root = resolve(target);
   if (existsSync(root) && readdirSync(root).length > 0) {
@@ -136,8 +158,8 @@ export async function createProject(
   const artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument);
   try {
     return await withInstallTransaction(root, async () => {
-      const lock = DEFAULT_ARTIFACT_STORE.install(root, artifactPath);
-      await installLockedArtifact(root, lock);
+      const lock = adapters.artifactStore.install(root, artifactPath);
+      await installLockedArtifact(root, lock, adapters);
       return { root, lock };
     });
   } finally {
@@ -154,22 +176,26 @@ export async function syncProject(root: string): Promise<{ readonly lock: Framew
   });
 }
 
-export async function updateProject(root: string, explicitSource?: string): Promise<{ readonly lock: FrameworkLock }> {
+export async function updateProject(
+  root: string,
+  explicitSource?: string,
+  adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
+): Promise<{ readonly lock: FrameworkLock }> {
   const projectRoot = resolve(root);
-  const sourceRoot = DEFAULT_SOURCE_PACK_ADAPTER.resolveSource(explicitSource);
-  const tempRoot = DEFAULT_SOURCE_PACK_ADAPTER.createOutputDirectory();
+  const sourceRoot = adapters.sourcePackAdapter.resolveSource(explicitSource);
+  const tempRoot = adapters.sourcePackAdapter.createOutputDirectory();
   try {
-    const metadata = DEFAULT_SOURCE_PACK_ADAPTER.pack(sourceRoot, tempRoot);
+    const metadata = adapters.sourcePackAdapter.pack(sourceRoot, tempRoot);
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
     return await withInstallTransaction(projectRoot, async () => {
-      const lock = DEFAULT_ARTIFACT_STORE.install(projectRoot, metadata.artifactPath, metadata);
-      await installLockedArtifact(projectRoot, lock);
+      const lock = adapters.artifactStore.install(projectRoot, metadata.artifactPath, metadata);
+      await installLockedArtifact(projectRoot, lock, adapters);
       return { lock };
     });
   } finally {
-    DEFAULT_SOURCE_PACK_ADAPTER.removeOutputDirectory(tempRoot);
+    adapters.sourcePackAdapter.removeOutputDirectory(tempRoot);
   }
 }
 
@@ -429,11 +455,15 @@ function compileProject(project: Project): BundleOutput {
 }
 
 /** Keep create, sync and update on the same write-install-verify lifecycle. */
-async function installLockedArtifact(root: string, lock: FrameworkLock): Promise<void> {
-  await DEFAULT_INSTALL_EXECUTOR.install(
+async function installLockedArtifact(
+  root: string,
+  lock: FrameworkLock,
+  adapters: Pick<ProjectLifecycleAdapters, "artifactStore" | "installExecutor"> = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
+): Promise<void> {
+  await adapters.installExecutor.install(
     root,
     lock,
-    DEFAULT_ARTIFACT_STORE.resolve(root, lock),
+    adapters.artifactStore.resolve(root, lock),
     () => verifyInstalledSdk(root, lock),
   );
 }
