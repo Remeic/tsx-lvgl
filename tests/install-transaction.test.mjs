@@ -265,6 +265,10 @@ test("journal durability is acknowledged before a mutable directory rename", asy
       afterTransition: (transition) => {
         if (transition !== "journal-created") return;
         assert.equal(events.some((event) => event === "sync-file:.tsx-lvgl-install-owner.json"), true);
+        const projectRootSync = events.findIndex((event) => event === `sync-directory:${basename(root)}`);
+        const journalSync = events.findIndex((event) => event.startsWith("sync-file:.install-transaction.json."));
+        assert.ok(projectRootSync >= 0, "a fresh .tsx-lvgl entry is durable in its project root");
+        assert.ok(projectRootSync < journalSync, "the project root is durable before its journal is published");
         assert.equal(events.some((event) => event.startsWith("sync-file:.install-transaction.json.")), true);
         assert.equal(events.some((event) => event.endsWith("node_modules")), false);
         throw new InstallTransactionInterruptedError();
@@ -299,6 +303,50 @@ test("recovery preserves an unjournaled sibling directory and rejects a swapped 
     { code: "SOURCE_PATH_LEAK" },
   );
   assert.equal(existsSync(join(outside, "install-transaction.json")), false);
+});
+
+test("transaction rejects a swapped rollback root without writing outside the project sibling", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-rollback-swap-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  await Promise.all([mkdir(root), mkdir(outside)]);
+  await writeFile(join(outside, "keep.txt"), "outside state\n");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      beforeRollbackPersist: (rollbackRoot) => {
+        rmSync(rollbackRoot, { recursive: true, force: true });
+        symlinkSync(outside, rollbackRoot, "dir");
+      },
+    }),
+    { code: "INSTALL_RECOVERY_FAILED" },
+  );
+
+  assert.equal(await readFile(join(outside, "keep.txt"), "utf8"), "outside state\n");
+  assert.equal(existsSync(join(outside, ".tsx-lvgl-install-owner.json")), false);
+  recoverInterruptedInstall(root);
+});
+
+test("transaction refuses a preexisting journal temporary symlink", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-journal-symlink-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  await Promise.all([mkdir(join(root, ".tsx-lvgl"), { recursive: true }), mkdir(outside)]);
+  const sentinel = join(outside, "sentinel.json");
+  await writeFile(sentinel, "outside journal\n");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      beforeJournalTemporaryOpen: (temporary) => symlinkSync(sentinel, temporary),
+    }),
+    { code: "EEXIST" },
+  );
+
+  assert.equal(await readFile(sentinel, "utf8"), "outside journal\n");
+  recoverInterruptedInstall(root);
+  assert.equal(await readFile(sentinel, "utf8"), "outside journal\n");
 });
 
 test("recovery keeps a committed transaction when interruption follows its cleanup checkpoint", async (t) => {

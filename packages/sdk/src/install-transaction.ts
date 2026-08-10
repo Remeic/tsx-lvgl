@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  constants as fsConstants,
   closeSync,
   cpSync,
   existsSync,
@@ -14,6 +15,7 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -97,6 +99,8 @@ export class InstallTransactionInterruptedError extends Error {
 export interface InstallTransactionHooks {
   afterTransition?(transition: InstallTransactionTransition): void;
   beforeJournalPersist?(stateDirectory: string): void;
+  beforeRollbackPersist?(rollbackDirectory: string): void;
+  beforeJournalTemporaryOpen?(temporaryPath: string): void;
 }
 
 interface DirectorySnapshot {
@@ -152,11 +156,11 @@ export async function withInstallTransaction<T>(
   try {
     const metadata = METADATA_PATHS.map((path) => snapshotFile(join(projectRoot, path), filesystem));
     const directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(projectRoot, rollbackRoot, definition.path, definition.move, filesystem));
-    journal = createJournal(projectRoot, rollbackRoot, metadata, directories, filesystem);
+    journal = createJournal(projectRoot, rollbackRoot, metadata, directories, filesystem, hooks);
     writeJournal(projectRoot, journal, filesystem, hooks);
     hooks.afterTransition?.("journal-created");
 
-    captureDirectories(directories, filesystem, (directory) => {
+    captureDirectories(projectRoot, rollbackRoot, directories, filesystem, (directory) => {
       const path = directory.path === join(projectRoot, "node_modules")
         ? "node_modules"
         : ".tsx-lvgl/artifacts";
@@ -207,22 +211,28 @@ function createJournal(
   metadata: readonly FileSnapshot[],
   directories: readonly DirectorySnapshot[],
   filesystem: InstallTransactionFs,
+  hooks: InstallTransactionHooks,
 ): TransactionJournal {
   const rollbackDirectory = basename(rollbackRoot);
   resolveRollbackRoot(root, rollbackDirectory);
   const rollbackToken = randomBytes(32).toString("hex");
-  writeRollbackOwnership(rollbackRoot, rollbackToken, filesystem);
+  hooks.beforeRollbackPersist?.(rollbackRoot);
+  assertRollbackDirectory(root, rollbackRoot);
+  writeRollbackOwnership(root, rollbackRoot, rollbackToken, filesystem);
+  const metadataRoot = join(rollbackRoot, "metadata");
   const snapshots = metadata.map((snapshot, index) => {
     const backup = `metadata/${index}`;
     if (snapshot.existed) {
-      mkdirSync(dirname(join(rollbackRoot, backup)), { recursive: true });
+      assertRollbackDirectory(root, rollbackRoot);
+      mkdirSync(metadataRoot, { recursive: true });
+      assertRollbackChildDirectory(root, rollbackRoot, metadataRoot);
       const backupPath = join(rollbackRoot, backup);
-      writeFileSync(backupPath, snapshot.bytes as Buffer, { mode: 0o600 });
+      writeExclusiveFile(backupPath, snapshot.bytes as Buffer);
       persistFile(backupPath, filesystem);
     }
     return { path: METADATA_PATHS[index]!, existed: snapshot.existed, backup };
   });
-  persistDirectory(join(rollbackRoot, "metadata"), filesystem);
+  persistDirectory(metadataRoot, filesystem);
   persistDirectory(rollbackRoot, filesystem);
   return {
     version: JOURNAL_VERSION,
@@ -241,6 +251,7 @@ function createJournal(
 }
 
 function readMetadataSnapshots(root: string, rollbackRoot: string, journal: TransactionJournal): readonly FileSnapshot[] {
+  assertRollbackDirectory(root, rollbackRoot);
   return journal.metadata.map((snapshot) => {
     try {
       return {
@@ -274,6 +285,8 @@ function snapshotDirectory(
 
 /** Capture every mutable directory before the package-manager action starts. */
 function captureDirectories(
+  projectRoot: string,
+  rollbackRoot: string,
   directories: readonly DirectorySnapshot[],
   filesystem: InstallTransactionFs,
   captured: (directory: DirectorySnapshot) => void,
@@ -284,7 +297,9 @@ function captureDirectories(
       continue;
     }
     if (!directory.move) (filesystem.validateArtifactDirectory ?? validateFlatArtifactDirectory)(directory.path);
+    assertRollbackDirectory(projectRoot, rollbackRoot);
     filesystem.makeDirectory(dirname(directory.backupPath));
+    assertRollbackDirectory(projectRoot, rollbackRoot);
     if (directory.move) {
       filesystem.rename(directory.path, directory.backupPath);
       persistDirectory(dirname(directory.path), filesystem);
@@ -367,16 +382,35 @@ function writeJournal(
   filesystem: InstallTransactionFs,
   hooks: InstallTransactionHooks = {},
 ): void {
+  const statePath = join(resolve(root), ".tsx-lvgl");
+  const stateWasAbsent = !existsSync(statePath);
   const state = stateDirectory(root, true)!;
+  if (stateWasAbsent) {
+    persistDirectory(resolve(root), filesystem);
+    persistDirectory(state, filesystem);
+  }
   const target = join(state, JOURNAL_FILE);
-  const temporary = join(state, `.${JOURNAL_FILE}.${process.pid}.tmp`);
+  const temporary = join(state, `.${JOURNAL_FILE}.${randomBytes(16).toString("hex")}.tmp`);
   hooks.beforeJournalPersist?.(state);
   assertProjectStateDirectory(root, state);
-  writeFileSync(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
+  hooks.beforeJournalTemporaryOpen?.(temporary);
+  writeExclusiveFile(temporary, Buffer.from(`${JSON.stringify(journal)}\n`, "utf8"));
   persistFile(temporary, filesystem);
   assertProjectStateDirectory(root, state);
   renameSync(temporary, target);
   persistDirectory(state, filesystem);
+}
+
+function writeExclusiveFile(path: string, bytes: Buffer): void {
+  const descriptor = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+  try {
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      offset += writeSync(descriptor, bytes, offset, bytes.byteLength - offset);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function readJournal(root: string): TransactionJournal | undefined {
@@ -463,23 +497,55 @@ function resolveRollbackRoot(root: string, rollbackDirectory: string): string {
   return join(dirname(resolve(root)), rollbackDirectory);
 }
 
-function writeRollbackOwnership(root: string, rollbackToken: string, filesystem: InstallTransactionFs): void {
-  const marker = join(root, ROLLBACK_OWNER_FILE);
-  writeFileSync(marker, `${JSON.stringify({ version: 1, rollbackToken })}\n`, { mode: 0o600 });
+function writeRollbackOwnership(
+  projectRoot: string,
+  rollbackRoot: string,
+  rollbackToken: string,
+  filesystem: InstallTransactionFs,
+): void {
+  assertRollbackDirectory(projectRoot, rollbackRoot);
+  const marker = join(rollbackRoot, ROLLBACK_OWNER_FILE);
+  writeExclusiveFile(marker, Buffer.from(`${JSON.stringify({ version: 1, rollbackToken })}\n`, "utf8"));
   persistFile(marker, filesystem);
-  persistDirectory(root, filesystem);
-  persistDirectory(dirname(root), filesystem);
+  persistDirectory(rollbackRoot, filesystem);
+  persistDirectory(dirname(rollbackRoot), filesystem);
 }
 
-function isOwnedRollbackDirectory(root: string, expectedToken: string): boolean {
-  const marker = join(root, ROLLBACK_OWNER_FILE);
+function isOwnedRollbackDirectory(projectRoot: string, rollbackRoot: string, expectedToken: string): boolean {
+  const marker = join(rollbackRoot, ROLLBACK_OWNER_FILE);
   try {
+    assertRollbackDirectory(projectRoot, rollbackRoot);
     const details = lstatSync(marker);
     if (!details.isFile() || details.isSymbolicLink()) return false;
     const value = JSON.parse(readFileSync(marker, "utf8")) as unknown;
     return isRecord(value) && value.version === 1 && value.rollbackToken === expectedToken;
   } catch {
     return false;
+  }
+}
+
+function assertRollbackDirectory(projectRoot: string, rollbackRoot: string): void {
+  const expectedParent = canonicalDirectory(dirname(resolve(projectRoot)), "rollback parent is unavailable");
+  const details = lstatSync(rollbackRoot);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw recoveryFailure("rollback directory must not be a symlink");
+  }
+  const canonicalRollback = canonicalDirectory(rollbackRoot, "rollback directory is unavailable");
+  if (dirname(canonicalRollback) !== expectedParent || basename(canonicalRollback) !== basename(rollbackRoot)) {
+    throw recoveryFailure("rollback directory escapes the project sibling");
+  }
+}
+
+function assertRollbackChildDirectory(projectRoot: string, rollbackRoot: string, child: string): void {
+  assertRollbackDirectory(projectRoot, rollbackRoot);
+  const details = lstatSync(child);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw recoveryFailure("rollback metadata directory must not be a symlink");
+  }
+  const canonicalRollback = canonicalDirectory(rollbackRoot, "rollback directory is unavailable");
+  const canonicalChild = canonicalDirectory(child, "rollback metadata directory is unavailable");
+  if (!isContained(canonicalRollback, canonicalChild)) {
+    throw recoveryFailure("rollback metadata directory escapes its transaction");
   }
 }
 
@@ -580,9 +646,10 @@ function cleanupOwnedRollbackDirectory(
   if (dirname(rollbackRoot) !== dirname(resolve(root))) throw recoveryFailure("rollback directory escapes the project sibling");
   const details = existsSync(rollbackRoot) ? lstatSync(rollbackRoot) : undefined;
   if (details !== undefined) {
-    if (!details.isDirectory() || details.isSymbolicLink() || !isOwnedRollbackDirectory(rollbackRoot, rollbackToken)) {
+    if (!details.isDirectory() || details.isSymbolicLink() || !isOwnedRollbackDirectory(root, rollbackRoot, rollbackToken)) {
       throw recoveryFailure("rollback directory ownership cannot be verified");
     }
+    assertRollbackDirectory(root, rollbackRoot);
     filesystem.remove(rollbackRoot, { recursive: true, force: true });
     persistDirectory(dirname(rollbackRoot), filesystem);
   }
