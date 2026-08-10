@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, posix, relative, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { valid as validSemver } from "semver";
@@ -24,7 +24,14 @@ export interface ArtifactStore {
   install(root: string, artifactPath: string, metadata?: SourcePackResult): FrameworkLock;
 }
 
-export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
+export interface ArtifactStoreHooks {
+  /** Test seam called after the private staged state is complete, before its
+   * path-component-safe rename swaps it into the project. */
+  beforeInstallSwap?(): void;
+}
+
+export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactStore {
+  return {
   resolve: (root, lock) => resolveProjectArtifact(root, lock.artifact.file),
   verify(path, lock) {
     if (!existsSync(path)) {
@@ -57,9 +64,8 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
       throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
     }
     const artifactFile = artifactFileName(provenance.version);
-    const destination = resolveProjectArtifact(root, `.tsx-lvgl/artifacts/${artifactFile}`, true);
-    replaceArtifactAtomically(destination, readFileSync(artifactPath));
-    const bytes = readFileSync(destination);
+    const bytes = readFileSync(artifactPath);
+    replaceProjectStateAtomically(root, artifactFile, bytes, hooks.beforeInstallSwap);
     return {
       formatVersion: LOCK_FORMAT_VERSION,
       package: SDK_PACKAGE_NAME,
@@ -72,7 +78,10 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
       },
     };
   },
-};
+  };
+}
+
+export const DEFAULT_ARTIFACT_STORE = createArtifactStore();
 
 export function validateArtifactReference(file: string): void {
   const artifactPrefix = ".tsx-lvgl/artifacts/";
@@ -141,19 +150,34 @@ function assertArtifactFile(path: string): void {
   }
 }
 
-function replaceArtifactAtomically(destination: string, bytes: Uint8Array): void {
-  const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
-  let descriptor: number | undefined;
+function replaceProjectStateAtomically(root: string, artifactFile: string, bytes: Uint8Array, beforeInstallSwap: (() => void) | undefined): void {
+  const projectRoot = resolve(root);
+  const state = join(projectRoot, ".tsx-lvgl");
+  if (existsSync(state)) {
+    const details = lstatSync(state);
+    if (!details.isDirectory() || details.isSymbolicLink()) {
+      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
+    }
+  }
+  const stage = mkdtempSync(join(projectRoot, ".tsx-lvgl-stage-"));
+  const backup = join(projectRoot, `.tsx-lvgl-backup-${process.pid}-${Date.now()}`);
+  let movedPrevious = false;
   try {
-    descriptor = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    writeFileSync(descriptor, bytes);
-    closeSync(descriptor);
-    descriptor = undefined;
-    /* rename replaces a raced final symlink itself, never its target. */
-    renameSync(temporary, destination);
+    if (existsSync(state)) cpSync(state, stage, { recursive: true, dereference: false });
+    rmSync(join(stage, "artifacts"), { recursive: true, force: true });
+    mkdirSync(join(stage, "artifacts"));
+    writeFileSync(join(stage, "artifacts", artifactFile), bytes, { mode: 0o600 });
+    beforeInstallSwap?.();
+    if (existsSync(state)) {
+      /* rename moves a raced symlink itself; it never follows into its target. */
+      renameSync(state, backup);
+      movedPrevious = true;
+    }
+    renameSync(stage, state);
+    if (movedPrevious) rmSync(backup, { recursive: true, force: true });
   } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-    if (existsSync(temporary)) unlinkSync(temporary);
+    if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
+    if (movedPrevious && existsSync(backup) && !existsSync(state)) renameSync(backup, state);
   }
 }
 
