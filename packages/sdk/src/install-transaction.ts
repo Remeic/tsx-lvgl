@@ -85,6 +85,7 @@ export async function withInstallTransaction<T>(
       }
     }
     const result = await action();
+    cleanupRollbackRoot(rollbackRoot, filesystem);
     return result;
   } catch (error) {
     for (const directory of directories) {
@@ -95,10 +96,13 @@ export async function withInstallTransaction<T>(
       }
     }
     restoreFiles(metadata, filesystem);
+    cleanupRollbackRoot(rollbackRoot, filesystem);
     throw error;
-  } finally {
-    filesystem.remove(rollbackRoot, { recursive: true, force: true });
   }
+}
+
+function cleanupRollbackRoot(root: string, filesystem: InstallTransactionFs): void {
+  filesystem.remove(root, { recursive: true, force: true });
 }
 
 interface DirectorySnapshot {
