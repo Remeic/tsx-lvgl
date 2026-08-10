@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
-import { packInstalledSdk } from "../packages/sdk/dist/project.js";
+import { DEFAULT_INSTALLED_SDK_PACK_RUNTIME, packInstalledSdk } from "../packages/sdk/dist/project.js";
 
 function runtime({ exists = true, status = 0, stdout = '[{"filename":"sdk.tgz"}]' } = {}) {
   const removed = [];
@@ -33,4 +33,14 @@ test("installed SDK repacking is deterministic and fail-closed through its narro
   fake = runtime();
   assert.equal(packInstalledSdk("/sdk", fake.adapter), "/tmp/packed-sdk/sdk.tgz");
   assert.deepEqual(fake.calls[0], ["npm", ["pack", "/sdk", "--ignore-scripts", "--json", "--pack-destination", "/tmp/packed-sdk"], "/sdk"]);
+});
+
+test("default installed-SDK adapter delegates process and temporary filesystem operations", () => {
+  assert.equal(DEFAULT_INSTALLED_SDK_PACK_RUNTIME.exists(process.cwd()), true);
+  const temporary = DEFAULT_INSTALLED_SDK_PACK_RUNTIME.makeTemporaryDirectory("/tmp/tsx-lvgl-pack-runtime-");
+  assert.equal(DEFAULT_INSTALLED_SDK_PACK_RUNTIME.exists(temporary), true);
+  const result = DEFAULT_INSTALLED_SDK_PACK_RUNTIME.run(process.execPath, ["-e", "process.stdout.write('ok')"], process.cwd());
+  assert.deepEqual(result, { status: 0, stdout: "ok" });
+  DEFAULT_INSTALLED_SDK_PACK_RUNTIME.remove(temporary);
+  assert.equal(DEFAULT_INSTALLED_SDK_PACK_RUNTIME.exists(temporary), false);
 });

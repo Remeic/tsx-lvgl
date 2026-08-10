@@ -98,7 +98,7 @@ export interface InstalledSdkPackRuntime {
   run(command: string, args: readonly string[], cwd: string): { readonly status: number | null; readonly stdout: string };
 }
 
-const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
+export const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
   exists: existsSync,
   makeTemporaryDirectory: mkdtempSync,
   remove: (path) => rmSync(path, { recursive: true, force: true }),
