@@ -23,4 +23,4 @@ export class MemoryBoardAdapter implements BoardPlatformAdapter {
 }
 export function encodeBoardPayload(value: Record<string, unknown>): Uint8Array { const text = JSON.stringify(value); const bytes = new Uint8Array(text.length); for (let i = 0; i < text.length; i += 1) { const code = text.charCodeAt(i); if (code > 0x7f) throw new Error("board payload must be ASCII"); bytes[i] = code; } return bytes; }
 export function decodeBoardPayload(payload: Uint8Array): Record<string, unknown> | undefined { let text = ""; for (const byte of payload) { if (byte > 0x7f) return undefined; text += String.fromCharCode(byte); } try { const value: unknown = JSON.parse(text); return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined; } catch { return undefined; } }
-function cloneEvent(event: NativeBoardEvent): NativeBoardEvent { return { ...event, payload: event.payload.slice() }; }
+function cloneEvent(event: NativeBoardEvent): NativeBoardEvent { return { ...event, payload: event.payload.slice() } as NativeBoardEvent; }

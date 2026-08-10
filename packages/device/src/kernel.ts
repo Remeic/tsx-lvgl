@@ -25,11 +25,13 @@ import {
   useInterval,
   useMotion,
   useState,
+  useWifi,
 } from "@tsx-lvgl/runtime";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
 import * as sensorsModule from "@tsx-lvgl/sensors";
 import { isShake } from "@tsx-lvgl/sensors";
 import * as capabilitiesModule from "@tsx-lvgl/capabilities";
+import * as connectivityModule from "@tsx-lvgl/connectivity";
 import { BoardRuntime } from "./board-runtime.js";
 import { createClickRegistry, createLvglHost } from "./lvgl-host.js";
 import { createDeviceScheduler } from "./scheduler.js";
@@ -71,6 +73,7 @@ function resolveModule(specifier: string): Record<string, unknown> {
         useInterval,
         useMotion,
         useState,
+        useWifi,
         isShake,
       }) as Record<string, unknown>;
     case "@tsx-lvgl/sdk/jsx-runtime":
@@ -85,6 +88,8 @@ function resolveModule(specifier: string): Record<string, unknown> {
       return sensorsModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/capabilities":
       return capabilitiesModule as unknown as Record<string, unknown>;
+    case "@tsx-lvgl/connectivity":
+      return connectivityModule as unknown as Record<string, unknown>;
     default:
       throw new Error(`unknown module: ${specifier}`);
   }
@@ -127,6 +132,7 @@ export function createKernel(native: NativeBindings): DeviceKernel {
     scheduler,
     capabilities,
     ...(board === undefined ? {} : { board }),
+    ...(board === undefined ? {} : { wifi: board.wifi }),
     onError: (error: unknown) => native.log(`kernel: error ${String(error)}`),
   });
   native.onClick(clicks.dispatch);

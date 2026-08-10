@@ -1,0 +1,19 @@
+menu "TSX-LVGL Wi-Fi station"
+
+config TSX_LVGL_WIFI_STATION_ENABLED
+    bool "Enable the build-local Wi-Fi station provider"
+    default n
+    help
+        The provider remains installed when disabled, but no association is attempted.
+
+config TSX_LVGL_WIFI_STATION_SSID
+    string "Station SSID"
+    depends on TSX_LVGL_WIFI_STATION_ENABLED
+    default ""
+
+config TSX_LVGL_WIFI_STATION_PASSWORD
+    string "Station password"
+    depends on TSX_LVGL_WIFI_STATION_ENABLED
+    default ""
+
+endmenu

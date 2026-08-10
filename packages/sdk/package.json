@@ -30,6 +30,7 @@
   "dependencies": {
     "@tsx-lvgl/bundler": "0.1.0",
     "@tsx-lvgl/capabilities": "0.1.0",
+    "@tsx-lvgl/connectivity": "0.1.0",
     "@tsx-lvgl/core": "0.1.0",
     "@tsx-lvgl/device": "0.1.0",
     "@tsx-lvgl/runtime": "0.1.0",
@@ -41,6 +42,7 @@
   "bundleDependencies": [
     "@tsx-lvgl/bundler",
     "@tsx-lvgl/capabilities",
+    "@tsx-lvgl/connectivity",
     "@tsx-lvgl/core",
     "@tsx-lvgl/device",
     "@tsx-lvgl/runtime",

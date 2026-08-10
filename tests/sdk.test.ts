@@ -20,6 +20,7 @@ test("SDK facade exposes only the supported application surface", () => {
     "useEffect",
     "useInterval",
     "useMotion",
+    "useWifi",
     "useState",
   ]);
 });
