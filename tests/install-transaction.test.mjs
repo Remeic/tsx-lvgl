@@ -103,3 +103,28 @@ test("transaction keeps its backup beside the project to avoid cross-device rena
   assert.equal(dirname(backupRoot), dirname(root));
   assert.equal(existsSync(backupRoot), false);
 });
+
+test("transaction propagates rollback-directory allocation failure before invoking the install", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-rollback-allocation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let invoked = false;
+  const unavailable = new Error("rollback directory unavailable");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {
+      invoked = true;
+      return "unreachable";
+    }, {
+      exists: () => false,
+      makeSiblingTemporaryDirectory: () => { throw unavailable; },
+      readFile: readFileSync,
+      copy: () => {},
+      rename: renameSync,
+      remove: rmSync,
+      makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+      writeFile: writeFileSync,
+    }),
+    (error) => error === unavailable,
+  );
+  assert.equal(invoked, false);
+});
