@@ -14,6 +14,7 @@ export { createLvglHost, createClickRegistry, type ClickRegistry } from "./lvgl-
 export { createDeviceScheduler } from "./scheduler.js";
 export { createNativeMotionSensor } from "./sensors.js";
 export { BoardRuntime, createDefaultBoardDescriptors } from "./board-runtime.js";
+export { createBoardSchemaRegistry, DEFAULT_BOARD_SCHEMA_REGISTRY, type BoardSchemaRegistry } from "./board-schema-registry.js";
 export { MemoryBoardAdapter, decodeBoardPayload, encodeBoardPayload } from "./board-adapter.js";
 export { createKernel, type DeviceKernel } from "./kernel.js";
 /** ASCII-only string-to-bytes encoding shared with the generated kernel's boot glue. */

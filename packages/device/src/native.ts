@@ -51,8 +51,14 @@ export interface NativeCapabilityDescriptor {
   readonly maxPeriodMs: number;
   readonly maxFrameBytes: number;
 }
-export interface NativeBoardRequest { readonly version: 1; readonly kind: "observe"; readonly instanceId: string; readonly periodMs: number; }
-export interface NativeBoardEvent { readonly version: 1; readonly kind: "state"; readonly handle: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; }
+/** Observation, stream, and correlated command envelopes intentionally remain
+ * separate. This slice implements observations only; later command support
+ * cannot accidentally share an observation handle or sequence domain. */
+export interface NativeBoardObserveRequest { readonly version: 1; readonly kind: "observe"; readonly instanceId: string; readonly periodMs: number; readonly reloadEpoch: number; }
+export interface NativeBoardStreamRequest { readonly version: 1; readonly kind: "stream"; readonly instanceId: string; readonly reloadEpoch: number; }
+export interface NativeBoardCommandRequest { readonly version: 1; readonly kind: "command"; readonly instanceId: string; readonly commandId: string; readonly correlationId: string; readonly reloadEpoch: number; }
+export type NativeBoardRequest = NativeBoardObserveRequest;
+export interface NativeBoardEvent { readonly version: 1; readonly kind: "state"; readonly handle: number; readonly reloadEpoch: number; readonly sequence: number; readonly observedAtMs: number; readonly payload: Uint8Array; }
 export interface BoardPlatformAdapter {
   list(): readonly NativeCapabilityDescriptor[];
   readCached(instanceId: string): NativeBoardEvent | undefined;

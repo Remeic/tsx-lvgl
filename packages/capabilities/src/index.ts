@@ -79,5 +79,22 @@ export function selectCapabilityInstance(instances: readonly CapabilityInstance[
   if (instanceId !== undefined) { const instance = instances.find((entry) => entry.id === instanceId); return instance === undefined ? { status: "unsupported", reason: "invalid-instance" } : { status: "selected", instance }; }
   const defaults = instances.filter((instance) => instance.isDefault); return defaults.length === 1 ? { status: "selected", instance: defaults[0]! } : { status: "ambiguous", instances };
 }
-export function issue(code: BoardIssueCode, retry: BoardIssueRetry, diagnosticId: string): BoardIssue { if (!isText(diagnosticId)) throw new Error("diagnostic ID must be bounded and non-empty"); return Object.freeze({ code, retry, diagnosticId }); }
+const ISSUE_CODES: readonly BoardIssueCode[] = ["unsupported", "not-ready", "busy", "cancelled", "timeout", "invalid-input", "hardware-failure", "protocol-error", "internal"];
+const ISSUE_RETRIES: readonly BoardIssueRetry[] = ["automatic", "manual", "after-reconfigure", "never"];
+const MAX_DIAGNOSTIC_ID_LENGTH = 96;
+
+export function issue(code: BoardIssueCode, retry: BoardIssueRetry, diagnosticId: string): BoardIssue {
+  if (!ISSUE_CODES.includes(code) || !ISSUE_RETRIES.includes(retry) || !isDiagnosticId(diagnosticId)) {
+    throw new Error("board issue is invalid");
+  }
+  return Object.freeze({ code, retry, diagnosticId });
+}
+
+export function isBoardIssue(code: unknown, retry: unknown, diagnosticId: unknown): code is BoardIssueCode {
+  return typeof code === "string" && ISSUE_CODES.includes(code as BoardIssueCode)
+    && typeof retry === "string" && ISSUE_RETRIES.includes(retry as BoardIssueRetry)
+    && typeof diagnosticId === "string" && isDiagnosticId(diagnosticId);
+}
+
+function isDiagnosticId(value: string): boolean { return value.length > 0 && value.length <= MAX_DIAGNOSTIC_ID_LENGTH && /^[a-z0-9-]+$/.test(value); }
 function isText(value: string): boolean { return value.length > 0 && !value.includes("\0"); }

@@ -9,6 +9,7 @@ import type {
   NativeTimers,
   NativeWidgetKind,
 } from "@tsx-lvgl/device";
+import { MemoryBoardAdapter, createDefaultBoardDescriptors, encodeBoardPayload } from "@tsx-lvgl/device";
 import type { SensorStatus } from "@tsx-lvgl/sensors";
 
 import { advanceTimers } from "./time.js";
@@ -192,7 +193,9 @@ export interface FakeNative {
   readonly lvgl: FakeNativeLvgl;
   readonly timers: FakeNativeTimers;
   readonly sensors: FakeNativeSensors;
+  readonly board: MemoryBoardAdapter;
   readonly logs: string[];
+  emitMotion(reading: ScriptedSensorReading): void;
   dispatchClick(id: number): void;
 }
 
@@ -201,6 +204,7 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
   const lvgl = new FakeNativeLvgl();
   const timers = new FakeNativeTimers();
   const sensors = new FakeNativeSensors();
+  const board = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
   const logs: string[] = [];
   let dispatch: ((id: number) => void) | undefined;
 
@@ -209,6 +213,7 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
     lvgl,
     timers,
     sensors,
+    board,
     onClick(next: (id: number) => void): void {
       dispatch = next;
     },
@@ -222,7 +227,27 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
     lvgl,
     timers,
     sensors,
+    board,
     logs,
+    emitMotion(reading: ScriptedSensorReading): void {
+      const request = board.submitted.at(-1);
+      if (request === undefined) throw new Error("motion observation was not started");
+      const status = reading.status === "ok" ? "ok" : reading.status;
+      board.emit({
+        version: 1,
+        kind: "state",
+        handle: board.submitted.length,
+        reloadEpoch: request.reloadEpoch,
+        sequence: Math.max(1, Math.round(reading.sampledAtMs) + 1),
+        observedAtMs: reading.sampledAtMs,
+        payload: encodeBoardPayload({
+          status,
+          schemaVersion: 1,
+          ...(reading.value === undefined ? {} : { value: reading.value }),
+          ...(status === "ok" || status === "stale" ? {} : { issue: { code: "not-ready", retry: "automatic", diagnosticId: "fake-motion" } }),
+        }),
+      });
+    },
     dispatchClick(id: number): void {
       dispatch?.(id);
     },

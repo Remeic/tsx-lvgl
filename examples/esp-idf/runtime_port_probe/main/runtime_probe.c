@@ -8,7 +8,6 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "driver/i2c_master.h"
 #include "lvgl.h"
 #include "quickjs.h"
 
@@ -30,21 +29,6 @@ static const char *TAG = "tsx_runtime_probe";
 #define ENGINE_STACK_LIMIT (32U * 1024U)
 #define ENGINE_SMOKE_CYCLES 10U
 #define TIMER_SLOT_COUNT 8U
-#define QMI8658_ADDRESS_HIGH 0x6BU
-#define QMI8658_ADDRESS_LOW 0x6AU
-#define QMI8658_WHO_AM_I_REGISTER 0x00U
-#define QMI8658_WHO_AM_I_VALUE 0x05U
-#define QMI8658_RESET_REGISTER 0x60U
-#define QMI8658_RESET_COMMAND 0xB0U
-#define QMI8658_CTRL1_REGISTER 0x02U
-#define QMI8658_CTRL2_REGISTER 0x03U
-#define QMI8658_CTRL3_REGISTER 0x04U
-#define QMI8658_CTRL7_REGISTER 0x08U
-#define QMI8658_ACCEL_GYRO_REGISTER 0x35U
-#define QMI8658_I2C_SPEED_HZ 400000U
-#define QMI8658_I2C_TIMEOUT_MS 100
-#define QMI8658_ACCEL_SCALE_MPS2 (9.80665 / 8192.0)
-#define QMI8658_GYRO_SCALE_DPS (1.0 / 128.0)
 
 typedef enum {
     RUNTIME_PROBE_EVENT_INTERVAL,
@@ -86,6 +70,12 @@ struct runtime_probe {
     JSValue pump_fn;
     JSValue reload_fn;
     JSValue lastgen_fn;
+    /** __native.board callback and the one bounded motion observation. */
+    JSValue board_sink;
+    int32_t board_handle;
+    uint32_t board_reload_epoch;
+    uint32_t board_last_sequence;
+    bool board_active;
 
     QueueHandle_t event_queue;
     /** Capacity 1: the wire protocol serializes reload attempts (TSXB ERR busy otherwise). */
@@ -235,80 +225,6 @@ static void native_timer_fired(void *arg)
     queue_probe_event(probe, RUNTIME_PROBE_EVENT_INTERVAL, (int)(intptr_t)arg);
 }
 
-/* Retired direct I2C path: the provider component owns all QMI transactions. */
-#if 0
-
-static esp_err_t qmi8658_write_register(runtime_probe_t *probe, uint8_t reg, uint8_t value)
-{
-    const uint8_t command[] = {reg, value};
-    return i2c_master_transmit(probe->imu_device, command, sizeof(command), QMI8658_I2C_TIMEOUT_MS);
-}
-
-static esp_err_t qmi8658_read_registers(runtime_probe_t *probe, uint8_t reg, uint8_t *data, size_t length)
-{
-    return i2c_master_transmit_receive(probe->imu_device, &reg, sizeof(reg), data, length, QMI8658_I2C_TIMEOUT_MS);
-}
-
-static int16_t qmi8658_signed_sample(const uint8_t *data, size_t offset)
-{
-    const uint16_t raw = (uint16_t)data[offset] | ((uint16_t)data[offset + 1U] << 8U);
-    return (int16_t)raw;
-}
-
-static esp_err_t initialize_qmi8658(runtime_probe_t *probe)
-{
-    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
-    if (bus == NULL) return ESP_ERR_INVALID_STATE;
-
-    const uint8_t candidates[] = {QMI8658_ADDRESS_HIGH, QMI8658_ADDRESS_LOW};
-    for (size_t index = 0; index < sizeof(candidates); index++) {
-        const uint8_t address = candidates[index];
-        if (i2c_master_probe(bus, address, QMI8658_I2C_TIMEOUT_MS) != ESP_OK) continue;
-
-        const i2c_device_config_t device_config = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = address,
-            .scl_speed_hz = QMI8658_I2C_SPEED_HZ,
-        };
-        i2c_master_dev_handle_t device = NULL;
-        esp_err_t result = i2c_master_bus_add_device(bus, &device_config, &device);
-        if (result != ESP_OK) continue;
-
-        uint8_t who_am_i = 0;
-        result = i2c_master_transmit_receive(device, (uint8_t[]){QMI8658_WHO_AM_I_REGISTER}, 1, &who_am_i, 1,
-                                             QMI8658_I2C_TIMEOUT_MS);
-        if (result != ESP_OK || who_am_i != QMI8658_WHO_AM_I_VALUE) {
-            (void)i2c_master_bus_rm_device(device);
-            continue;
-        }
-
-        probe->imu_device = device;
-        probe->imu_address = address;
-        result = qmi8658_write_register(probe, QMI8658_RESET_REGISTER, QMI8658_RESET_COMMAND);
-        if (result == ESP_OK) {
-            vTaskDelay(pdMS_TO_TICKS(20));
-            result = qmi8658_write_register(probe, QMI8658_CTRL1_REGISTER, 0x60U);
-        }
-        if (result == ESP_OK) result = qmi8658_write_register(probe, QMI8658_CTRL2_REGISTER, 0x15U);
-        if (result == ESP_OK) result = qmi8658_write_register(probe, QMI8658_CTRL3_REGISTER, 0x45U);
-        if (result == ESP_OK) result = qmi8658_write_register(probe, QMI8658_CTRL7_REGISTER, 0x03U);
-        if (result != ESP_OK) {
-            (void)i2c_master_bus_rm_device(probe->imu_device);
-            probe->imu_device = NULL;
-            continue;
-        }
-
-        probe->imu_ready = true;
-        char detail[96];
-        snprintf(detail, sizeof(detail), "sensor=qmi8658 addr=0x%02x who_am_i=0x%02x", probe->imu_address, who_am_i);
-        log_checkpoint("imu_init", "pass", detail);
-        return ESP_OK;
-    }
-
-    return ESP_ERR_NOT_FOUND;
-}
-
-#endif
 /* --- __native binding surface (packages/device/src/native.ts is the normative contract) --- */
 
 static JSValue js_console_log(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
@@ -516,6 +432,151 @@ static JSValue new_motion_vector(JSContext *context, double x, double y, double 
     return vector;
 }
 
+static JSValue new_board_payload(JSContext *context, const waveshare_v1_motion_frame_t *frame, bool available)
+{
+    char json[256];
+    if (available) {
+        snprintf(json, sizeof(json),
+                 "{\"status\":\"ok\",\"schemaVersion\":1,\"droppedSincePrevious\":0,\"value\":{\"accelerationMps2\":[%.7g,%.7g,%.7g],\"angularVelocityDps\":[%.7g,%.7g,%.7g]}}",
+                 frame->acceleration_mps2[0], frame->acceleration_mps2[1], frame->acceleration_mps2[2],
+                 frame->angular_velocity_dps[0], frame->angular_velocity_dps[1], frame->angular_velocity_dps[2]);
+    } else {
+        snprintf(json, sizeof(json),
+                 "{\"status\":\"unavailable\",\"schemaVersion\":1,\"issue\":{\"code\":\"not-ready\",\"retry\":\"automatic\",\"diagnosticId\":\"motion-cache\"}}");
+    }
+    JSValue payload = JS_NewArray(context);
+    if (JS_IsException(payload)) return payload;
+    for (uint32_t index = 0; json[index] != '\0'; index++) {
+        if (JS_SetPropertyUint32(context, payload, index, JS_NewUint32(context, (uint8_t)json[index])) < 0) {
+            JS_FreeValue(context, payload);
+            return JS_EXCEPTION;
+        }
+    }
+    return payload;
+}
+
+static JSValue new_board_event(JSContext *context, runtime_probe_t *probe, int32_t handle, uint32_t reload_epoch)
+{
+    waveshare_v1_motion_frame_t frame = {0};
+    const bool available = waveshare_v1_sensors_read_motion(probe->sensors, &frame);
+    JSValue event = JS_NewObject(context);
+    if (JS_IsException(event)) return event;
+    const uint32_t sequence = available ? frame.sequence : (probe->board_last_sequence + 1U);
+    const int64_t observed_at = available ? frame.observed_at_ms : esp_timer_get_time() / 1000;
+    JS_SetPropertyStr(context, event, "version", JS_NewInt32(context, 1));
+    JS_SetPropertyStr(context, event, "kind", JS_NewString(context, "state"));
+    JS_SetPropertyStr(context, event, "handle", JS_NewInt32(context, handle));
+    JS_SetPropertyStr(context, event, "reloadEpoch", JS_NewUint32(context, reload_epoch));
+    JS_SetPropertyStr(context, event, "sequence", JS_NewUint32(context, sequence));
+    JS_SetPropertyStr(context, event, "observedAtMs", JS_NewInt64(context, observed_at));
+    JS_SetPropertyStr(context, event, "payload", new_board_payload(context, &frame, available));
+    return event;
+}
+
+static JSValue js_native_board_list(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    (void)argc;
+    (void)argv;
+    JSValue entries = JS_NewArray(context);
+    JSValue descriptor = JS_NewObject(context);
+    JS_SetPropertyStr(context, descriptor, "familyCode", JS_NewInt32(context, 0x0101));
+    JS_SetPropertyStr(context, descriptor, "semanticId", JS_NewString(context, "device.motion"));
+    JS_SetPropertyStr(context, descriptor, "instanceId", JS_NewString(context, "motion"));
+    JS_SetPropertyStr(context, descriptor, "version", JS_NewInt32(context, 1));
+    JS_SetPropertyStr(context, descriptor, "source", JS_NewString(context, "qmi8658"));
+    JS_SetPropertyStr(context, descriptor, "isDefault", JS_NewBool(context, true));
+    JS_SetPropertyStr(context, descriptor, "delivery", JS_NewString(context, "snapshot"));
+    JS_SetPropertyStr(context, descriptor, "defaultPeriodMs", JS_NewInt32(context, 80));
+    JS_SetPropertyStr(context, descriptor, "minPeriodMs", JS_NewInt32(context, 20));
+    JS_SetPropertyStr(context, descriptor, "maxPeriodMs", JS_NewInt32(context, 1000));
+    JS_SetPropertyStr(context, descriptor, "maxFrameBytes", JS_NewInt32(context, 512));
+    JS_SetPropertyUint32(context, entries, 0, descriptor);
+    return entries;
+}
+
+static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 1) return JS_UNDEFINED;
+    const char *instance_id = JS_ToCString(context, argv[0]);
+    const bool is_motion = instance_id != NULL && strcmp(instance_id, "motion") == 0;
+    JS_FreeCString(context, instance_id);
+    if (!is_motion) return JS_UNDEFINED;
+    const int32_t handle = probe->board_handle == 0 ? 1 : probe->board_handle;
+    const uint32_t epoch = probe->board_reload_epoch == 0 ? 1U : probe->board_reload_epoch;
+    return new_board_event(context, probe, handle, epoch);
+}
+
+static JSValue js_native_board_submit(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 1) return JS_ThrowTypeError(context, "board.submit(request) requires request");
+    JSValue instance = JS_GetPropertyStr(context, argv[0], "instanceId");
+    JSValue epoch = JS_GetPropertyStr(context, argv[0], "reloadEpoch");
+    const char *instance_id = JS_ToCString(context, instance);
+    int32_t reload_epoch = 0;
+    const bool valid = instance_id != NULL && strcmp(instance_id, "motion") == 0 && JS_ToInt32(context, &reload_epoch, epoch) == 0 && reload_epoch > 0;
+    JS_FreeCString(context, instance_id);
+    JS_FreeValue(context, instance);
+    JS_FreeValue(context, epoch);
+    if (!valid) return JS_ThrowTypeError(context, "board.submit: invalid motion observation");
+    probe->board_handle++;
+    probe->board_reload_epoch = (uint32_t)reload_epoch;
+    probe->board_last_sequence = 0;
+    probe->board_active = true;
+    return JS_NewInt32(context, probe->board_handle);
+}
+
+static JSValue js_native_board_cancel(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    int32_t handle = 0;
+    if (probe == NULL || argc < 1 || JS_ToInt32(context, &handle, argv[0]) != 0) return JS_UNDEFINED;
+    if (handle == probe->board_handle) probe->board_active = false;
+    return JS_UNDEFINED;
+}
+
+static JSValue js_native_board_set_sink(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 1 || !JS_IsFunction(context, argv[0])) return JS_ThrowTypeError(context, "board.setSink(listener) requires function");
+    if (!JS_IsUndefined(probe->board_sink)) JS_FreeValue(context, probe->board_sink);
+    probe->board_sink = JS_DupValue(context, argv[0]);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_native_board_dispose(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    (void)argc;
+    (void)argv;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe != NULL) probe->board_active = false;
+    return JS_UNDEFINED;
+}
+
+static void emit_board_reading(runtime_probe_t *probe)
+{
+    if (!probe->board_active || JS_IsUndefined(probe->board_sink)) return;
+    waveshare_v1_motion_frame_t frame = {0};
+    if (!waveshare_v1_sensors_read_motion(probe->sensors, &frame) || frame.sequence <= probe->board_last_sequence) return;
+    JSValue event = new_board_event(probe->context, probe, probe->board_handle, probe->board_reload_epoch);
+    JSValue result = JS_Call(probe->context, probe->board_sink, JS_UNDEFINED, 1, &event);
+    JS_FreeValue(probe->context, event);
+    if (JS_IsException(result)) {
+        JS_FreeValue(probe->context, result);
+        dump_exception(probe->context, "board_event");
+        return;
+    }
+    JS_FreeValue(probe->context, result);
+    probe->board_last_sequence = frame.sequence;
+}
+
 /**
  * Backs `__native.sensors.read`. Returns the `NativeMotionReading` shape
  * `packages/device/src/sensors.ts` expects: `{status, sampledAtMs, value?}`
@@ -611,6 +672,15 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     JS_SetPropertyStr(context, sensors, "read", JS_NewCFunction(context, js_native_sensor_read, "read", 1));
     JS_SetPropertyStr(context, native, "sensors", sensors);
 
+    JSValue board = JS_NewObject(context);
+    JS_SetPropertyStr(context, board, "list", JS_NewCFunction(context, js_native_board_list, "list", 0));
+    JS_SetPropertyStr(context, board, "readCached", JS_NewCFunction(context, js_native_board_read_cached, "readCached", 1));
+    JS_SetPropertyStr(context, board, "submit", JS_NewCFunction(context, js_native_board_submit, "submit", 1));
+    JS_SetPropertyStr(context, board, "cancel", JS_NewCFunction(context, js_native_board_cancel, "cancel", 1));
+    JS_SetPropertyStr(context, board, "setSink", JS_NewCFunction(context, js_native_board_set_sink, "setSink", 1));
+    JS_SetPropertyStr(context, board, "dispose", JS_NewCFunction(context, js_native_board_dispose, "dispose", 0));
+    JS_SetPropertyStr(context, native, "board", board);
+
     JS_SetPropertyStr(context, native, "onClick", JS_NewCFunction(context, js_native_on_click, "onClick", 1));
     JS_SetPropertyStr(context, native, "log", JS_NewCFunction(context, js_native_log, "log", 1));
 
@@ -621,8 +691,9 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
 
 /* --- Boot: evaluate kernel.js, then mount the baked-in ShakeFace bundle (generation 1) --- */
 
-static esp_err_t boot_kernel_and_app(runtime_probe_t *probe)
+esp_err_t runtime_probe_boot(runtime_probe_t *probe)
 {
+    if (probe == NULL || probe->sensors == NULL) return ESP_ERR_INVALID_STATE;
     JSContext *context = probe->context;
     const size_t kernel_length = (size_t)(_binary_kernel_js_end - _binary_kernel_js_start);
     JSValue eval_result = JS_Eval(context, (const char *)_binary_kernel_js_start, kernel_length, "kernel.js",
@@ -866,6 +937,7 @@ void runtime_probe_task(void *arg)
         if (bsp_display_lock(100)) {
             JS_UpdateStackTop(probe->runtime);
             process_pending_events(probe);
+            emit_board_reading(probe);
             call_kernel_pump(probe);
             process_pending_jobs(probe);
             process_reload_handoff(probe);
@@ -934,6 +1006,7 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
     probe->pump_fn = JS_UNDEFINED;
     probe->reload_fn = JS_UNDEFINED;
     probe->lastgen_fn = JS_UNDEFINED;
+    probe->board_sink = JS_UNDEFINED;
     for (int index = 0; index < (int)TIMER_SLOT_COUNT; index++) probe->timer_slots[index].callback = JS_UNDEFINED;
 
     probe->event_queue = xQueueCreate(32, sizeof(runtime_probe_event_t));
@@ -986,12 +1059,6 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
     probe->active = true;
     s_active_probe = probe;
 
-    if (boot_kernel_and_app(probe) != ESP_OK) {
-        s_active_probe = NULL;
-        runtime_probe_destroy(probe);
-        return ESP_FAIL;
-    }
-
     *out_probe = probe;
     JSMemoryUsage usage = {0};
     JS_ComputeMemoryUsage(probe->runtime, &usage);
@@ -1019,6 +1086,13 @@ void runtime_probe_destroy(runtime_probe_t *probe)
     if (probe == NULL) return;
     probe->active = false;
     if (s_active_probe == probe) s_active_probe = NULL;
+
+    /* Join the I2C task before destroying queues/QuickJS state it may still
+     * indirectly service after its bounded 100ms transfer returns. */
+    if (probe->sensors != NULL) {
+        waveshare_v1_sensors_destroy(probe->sensors);
+        probe->sensors = NULL;
+    }
 
     for (int slot = 0; slot < (int)TIMER_SLOT_COUNT; slot++) {
         timer_slot_t *entry = &probe->timer_slots[slot];
@@ -1050,16 +1124,12 @@ void runtime_probe_destroy(runtime_probe_t *probe)
         probe->lvgl_host = NULL;
     }
 
-    if (probe->sensors != NULL) {
-        waveshare_v1_sensors_destroy(probe->sensors);
-        probe->sensors = NULL;
-    }
-
     if (probe->context != NULL) {
         if (!JS_IsUndefined(probe->click_dispatch)) JS_FreeValue(probe->context, probe->click_dispatch);
         if (!JS_IsUndefined(probe->pump_fn)) JS_FreeValue(probe->context, probe->pump_fn);
         if (!JS_IsUndefined(probe->reload_fn)) JS_FreeValue(probe->context, probe->reload_fn);
         if (!JS_IsUndefined(probe->lastgen_fn)) JS_FreeValue(probe->context, probe->lastgen_fn);
+        if (!JS_IsUndefined(probe->board_sink)) JS_FreeValue(probe->context, probe->board_sink);
         JS_FreeContext(probe->context);
         probe->context = NULL;
     }

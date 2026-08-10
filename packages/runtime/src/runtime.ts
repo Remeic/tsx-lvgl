@@ -140,6 +140,7 @@ export class Runtime implements RuntimeContext {
       try {
         candidate.flushEffects();
       } catch (error) {
+        this.board.rollbackEpoch(candidate.epoch);
         restorePreviousRoot();
         candidate.detach();
         candidate.dispose();
