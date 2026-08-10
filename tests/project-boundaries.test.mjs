@@ -130,6 +130,9 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   rmSync(tsconfigPath);
   assertCode(() => checkProject(root), DIAGNOSTIC_CODES.CONFIG_NOT_FOUND);
   writeFileSync(tsconfigPath, tsconfig);
+  writeFileSync(tsconfigPath, `${tsconfig}\n// paths\n`);
+  assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
+  writeFileSync(tsconfigPath, tsconfig);
   writeFileSync(entryPath, "export default 42 as any;\n");
   await assertAsyncCode(() => devProject(root), DIAGNOSTIC_CODES.DEV_FAILED);
   writeFileSync(entryPath, entry);
@@ -171,9 +174,14 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
   writeFileSync(script, "process.stdout.write('not json\\n');\n");
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
+  writeFileSync(script, "process.stdout.write('');\n");
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
+  writeFileSync(script, "process.stdout.write('{}');\n");
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "${"a".repeat(40)}", sourceDirty: true, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_DIRTY);
-  writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: "x", packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
-  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND);
+  const packedArtifact = JSON.parse(packed.stdout).artifactPath;
+  writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: ${JSON.stringify(packedArtifact)}, packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
   assert.equal(existsSync(join(root, ".tsx-lvgl", "framework.lock.json")), true);
 });

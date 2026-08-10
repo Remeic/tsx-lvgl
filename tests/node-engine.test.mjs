@@ -62,6 +62,11 @@ test("doctor applies the declared Node SemVer range to injected versions", async
       diagnosticCode: "SDK_UNSUPPORTED_NODE",
     },
   );
+  await rm(join(root, "node_modules", "@tsx-lvgl", "sdk", "package.json"));
+  assert.deepEqual(
+    doctorProject(root, { nodeVersion: "24.19.0" }).checks.find((check) => check.id === DOCTOR_CHECK_IDS.SDK_NODE_ENGINE),
+    { id: DOCTOR_CHECK_IDS.SDK_NODE_ENGINE, ok: false, detail: "the locked SDK artifact is not installed", diagnosticCode: "PACKAGE_NOT_INSTALLED" },
+  );
 });
 
 test("Node contract diagnostics distinguish every SDK and consumer declaration failure", () => {
