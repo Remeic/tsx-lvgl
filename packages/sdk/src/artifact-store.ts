@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { valid as validSemver } from "semver";
 
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 import type { FrameworkLock } from "./framework-lock.js";
@@ -24,7 +25,7 @@ export interface ArtifactStore {
 }
 
 export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
-  resolve: (root, lock) => resolve(root, lock.artifact.file),
+  resolve: (root, lock) => resolveProjectArtifact(root, lock.artifact.file),
   verify(path, lock) {
     if (!existsSync(path)) {
       throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, "framework artifact is missing");
@@ -54,8 +55,8 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
       }
       throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
     }
-    const artifactFile = `tsx-lvgl-sdk-${provenance.version}.tgz`;
-    const destination = join(root, ".tsx-lvgl", "artifacts", artifactFile);
+    const artifactFile = artifactFileName(provenance.version);
+    const destination = resolveProjectArtifact(root, `.tsx-lvgl/artifacts/${artifactFile}`);
     mkdirSync(dirname(destination), { recursive: true });
     copyFileSync(artifactPath, destination);
     const bytes = readFileSync(destination);
@@ -74,9 +75,37 @@ export const DEFAULT_ARTIFACT_STORE: ArtifactStore = {
 };
 
 export function validateArtifactReference(file: string): void {
-  if (isAbsolute(file) || !file.startsWith(".tsx-lvgl/artifacts/")) {
+  const artifactPrefix = ".tsx-lvgl/artifacts/";
+  if (
+    isAbsolute(file)
+    || file.includes("\\")
+    || !file.startsWith(artifactPrefix)
+    || posix.normalize(file) !== file
+    || file.length === artifactPrefix.length
+  ) {
     throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
   }
+}
+
+function resolveProjectArtifact(root: string, file: string): string {
+  validateArtifactReference(file);
+  const artifactDirectory = resolve(root, ".tsx-lvgl", "artifacts");
+  const destination = resolve(root, file);
+  if (destination === artifactDirectory || !destination.startsWith(`${artifactDirectory}${sep}`)) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
+  }
+  return destination;
+}
+
+function artifactFileName(version: string): string {
+  if (validSemver(version) !== version) {
+    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
+  }
+  const file = `tsx-lvgl-sdk-${version}.tgz`;
+  if (basename(file) !== file) {
+    throw new CliError(DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH, "SDK artifact has invalid provenance");
+  }
+  return file;
 }
 
 function readPackProvenance(artifactPath: string): PackProvenance {

@@ -30,6 +30,28 @@ export const View = "View";
 export const Text = "Text";
 export const Button = "Button";
 
+/** One descriptor keeps the SDK facade and device module resolver in lockstep. */
+export const APPLICATION_FACADE_KEYS = [
+  "Button",
+  "Fragment",
+  "Screen",
+  "Text",
+  "View",
+  "isShake",
+  "useEffect",
+  "useInterval",
+  "useMotion",
+  "useState",
+] as const;
+
+export type ApplicationFacadeKey = (typeof APPLICATION_FACADE_KEYS)[number];
+export type ApplicationFacadeBindings = { readonly [key in ApplicationFacadeKey]: unknown };
+
+/** Internal construction seam shared by the SDK facade and the on-device resolver. */
+export function createApplicationFacade<Bindings>(bindings: Bindings & ApplicationFacadeBindings): Readonly<Bindings> {
+  return Object.freeze(bindings);
+}
+
 export type Component<Props extends object = Record<string, unknown>> = (
   props: Props & { readonly children: readonly VNode[] },
 ) => VNodeChild;

@@ -6,6 +6,7 @@ import {
   Screen,
   Text,
   View,
+  createApplicationFacade,
 } from "@tsx-lvgl/core";
 import {
   PROTOCOL_VERSION,
@@ -57,7 +58,7 @@ function parseManifestJson(manifestJson: string): ManifestParseResult {
 function resolveModule(specifier: string): Record<string, unknown> {
   switch (specifier) {
     case "@tsx-lvgl/sdk":
-      return {
+      return createApplicationFacade({
         Button,
         Fragment,
         Screen,
@@ -68,7 +69,7 @@ function resolveModule(specifier: string): Record<string, unknown> {
         useMotion: () => useSensor(motionSchema),
         useState,
         isShake,
-      };
+      }) as Record<string, unknown>;
     case "@tsx-lvgl/sdk/jsx-runtime":
       return jsxRuntimeModule as unknown as Record<string, unknown>;
     case "@tsx-lvgl/core":

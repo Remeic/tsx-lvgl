@@ -116,10 +116,12 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
     writeFileSync(lockPath, `${JSON.stringify(candidate)}\n`);
     assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.LOCK_INVALID);
   }
-  const escapedLock = JSON.parse(lock);
-  escapedLock.artifact.file = "../escaped.tgz";
-  writeFileSync(lockPath, `${JSON.stringify(escapedLock)}\n`);
-  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
+  for (const artifactFile of ["../escaped.tgz", ".tsx-lvgl/artifacts/../../../escaped.tgz"]) {
+    const escapedLock = JSON.parse(lock);
+    escapedLock.artifact.file = artifactFile;
+    writeFileSync(lockPath, `${JSON.stringify(escapedLock)}\n`);
+    assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
+  }
   writeFileSync(lockPath, lock);
 
   rmSync(project.artifactPath);

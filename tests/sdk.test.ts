@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { jsx } from "@tsx-lvgl/core/jsx-runtime";
 import type { VNode } from "@tsx-lvgl/core";
 import * as sdk from "@tsx-lvgl/sdk";
+import { APPLICATION_FACADE_KEYS } from "@tsx-lvgl/core";
 import {
   motionSchema,
   type MotionSample,
@@ -14,7 +15,8 @@ import { test } from "node:test";
 import { createHarness, sensorCapabilities } from "./support/harness.js";
 
 test("SDK facade exposes only the supported application surface", () => {
-  assert.deepEqual(Object.keys(sdk).sort(), [
+  assert.deepEqual(Object.keys(sdk).sort(), [...APPLICATION_FACADE_KEYS].sort());
+  assert.deepEqual(APPLICATION_FACADE_KEYS, [
     "Button",
     "Fragment",
     "Screen",

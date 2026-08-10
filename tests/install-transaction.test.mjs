@@ -128,3 +128,31 @@ test("transaction propagates rollback-directory allocation failure before invoki
   );
   assert.equal(invoked, false);
 });
+
+test("a failed artifact backup leaves the original artifact untouched", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-copy-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const artifactPath = join(root, ".tsx-lvgl", "artifacts", "sdk.tgz");
+  await mkdir(dirname(artifactPath), { recursive: true });
+  await writeFile(artifactPath, "original artifact\n");
+  let invoked = false;
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {
+      invoked = true;
+    }, {
+      exists: existsSync,
+      makeSiblingTemporaryDirectory: (projectRoot, prefix) => mkdtempSync(join(dirname(projectRoot), prefix)),
+      readFile: readFileSync,
+      copy: () => { throw new Error("backup copy failed"); },
+      rename: renameSync,
+      remove: rmSync,
+      makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+      writeFile: writeFileSync,
+    }),
+    /backup copy failed/,
+  );
+
+  assert.equal(invoked, false);
+  assert.equal(await readFile(artifactPath, "utf8"), "original artifact\n");
+});

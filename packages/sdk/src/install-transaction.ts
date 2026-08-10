@@ -77,18 +77,15 @@ export async function withInstallTransaction<T>(
   try {
     metadata = METADATA_PATHS.map((path) => snapshotFile(join(root, path), filesystem));
     directories = TRANSACTION_DIRECTORIES.map((definition) => snapshotDirectory(root, rollbackRoot, definition.path, definition.move, filesystem));
-    for (const directory of directories) {
-      if (directory.existed) {
-        filesystem.makeDirectory(dirname(directory.backupPath));
-        if (directory.move) filesystem.rename(directory.path, directory.backupPath);
-        else filesystem.copy(directory.path, directory.backupPath);
-      }
-    }
+    captureDirectories(directories, filesystem);
     const result = await action();
     cleanupRollbackRoot(rollbackRoot, filesystem);
     return result;
   } catch (error) {
     for (const directory of directories) {
+      // A failed copy leaves the original directory in place. Only a completed
+      // capture authorizes rollback to remove a project directory.
+      if (!directory.captured) continue;
       filesystem.remove(directory.path, { recursive: true, force: true });
       if (directory.existed && filesystem.exists(directory.backupPath)) {
         filesystem.makeDirectory(dirname(directory.path));
@@ -110,6 +107,7 @@ interface DirectorySnapshot {
   readonly backupPath: string;
   readonly existed: boolean;
   readonly move: boolean;
+  captured: boolean;
 }
 
 function snapshotDirectory(
@@ -120,12 +118,28 @@ function snapshotDirectory(
   filesystem: InstallTransactionFs,
 ): DirectorySnapshot {
   const destination = join(root, path);
+  const existed = filesystem.exists(destination);
   return {
     path: destination,
     backupPath: join(rollbackRoot, path),
-    existed: filesystem.exists(destination),
+    existed,
     move,
+    // An absent directory is a successful empty snapshot: rollback may remove
+    // only state created after this point. Existing directories require their
+    // backup operation to finish before they become rollback-eligible.
+    captured: !existed,
   };
+}
+
+/** Capture every mutable directory before the package-manager action starts. */
+function captureDirectories(directories: readonly DirectorySnapshot[], filesystem: InstallTransactionFs): void {
+  for (const directory of directories) {
+    if (!directory.existed) continue;
+    filesystem.makeDirectory(dirname(directory.backupPath));
+    if (directory.move) filesystem.rename(directory.path, directory.backupPath);
+    else filesystem.copy(directory.path, directory.backupPath);
+    directory.captured = true;
+  }
 }
 
 function snapshotFile(path: string, filesystem: InstallTransactionFs): FileSnapshot {

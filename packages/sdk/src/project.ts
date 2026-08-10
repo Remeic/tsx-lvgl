@@ -106,64 +106,28 @@ export async function createProject(
   adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
 ): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
   const root = resolve(target);
-  if (existsSync(root) && readdirSync(root).length > 0) {
+  const targetExisted = existsSync(root);
+  if (targetExisted && readdirSync(root).length > 0) {
     throw new CliError(DIAGNOSTIC_CODES.PROJECT_EXISTS, "target directory is not empty");
   }
 
-  mkdirSync(root, { recursive: true });
-  const appName = appNameFromRoot(root);
-  writeText(root, "tsx-lvgl.json", `${JSON.stringify({
-    version: 1,
-    entry: "src/App.tsx",
-    bundleId: "app",
-    boardId: DEFAULT_BOARD_ID,
-    generation: 1,
-  }, null, 2)}\n`);
-  writeText(root, "src/App.tsx", `import { Screen, Text, type VNode } from "@tsx-lvgl/sdk";\n\nexport default function App(): VNode {\n  return (\n    <Screen>\n      <Text text="Hello TSX-LVGL" />\n    </Screen>\n  );\n}\n`);
-  writeText(root, "tsconfig.json", `${JSON.stringify({
-    compilerOptions: {
-      target: "ES2022",
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      strict: true,
-      jsx: "react-jsx",
-      jsxImportSource: SDK_PACKAGE_NAME,
-      noEmit: true,
-      skipLibCheck: true,
-    },
-    include: ["src/**/*.ts", "src/**/*.tsx"],
-  }, null, 2)}\n`);
-  writeText(root, "package.json", `${JSON.stringify({
-    name: appName,
-    version: "0.1.0",
-    private: true,
-    type: "module",
-    engines: {
-      node: NODE_ENGINE_RANGE,
-    },
-    scripts: {
-      sync: "tsx-lvgl sync",
-      update: "tsx-lvgl update",
-      dev: "tsx-lvgl dev",
-      check: "tsx-lvgl check",
-      build: "tsx-lvgl build",
-      doctor: "tsx-lvgl doctor",
-    },
-    dependencies: {},
-  }, null, 2)}\n`);
-  writeText(root, ".gitignore", "node_modules/\nbuild/\n");
-  writeText(root, "AGENTS.md", consumerAgentsTemplate());
-
-  const generatedArtifact = artifactArgument === undefined;
-  const artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument);
+  let generatedArtifact = false;
+  let artifactPath: string | undefined;
   try {
+    scaffoldProject(root);
+    generatedArtifact = artifactArgument === undefined;
+    artifactPath = generatedArtifact ? packArtifact() : resolve(artifactArgument!);
+    const installArtifact = artifactPath;
     return await withInstallTransaction(root, async () => {
-      const lock = adapters.artifactStore.install(root, artifactPath);
+      const lock = adapters.artifactStore.install(root, installArtifact);
       await installLockedArtifact(root, lock, adapters);
       return { root, lock };
     });
+  } catch (error) {
+    restoreCreateTarget(root, targetExisted);
+    throw error;
   } finally {
-    if (generatedArtifact) rmSync(dirname(artifactPath), { recursive: true, force: true });
+    if (generatedArtifact && artifactPath !== undefined) rmSync(dirname(artifactPath), { recursive: true, force: true });
   }
 }
 
@@ -182,6 +146,7 @@ export async function updateProject(
   adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
 ): Promise<{ readonly lock: FrameworkLock }> {
   const projectRoot = resolve(root);
+  const project = readProjectFiles(projectRoot);
   const sourceRoot = adapters.sourcePackAdapter.resolveSource(explicitSource);
   const tempRoot = adapters.sourcePackAdapter.createOutputDirectory();
   try {
@@ -189,9 +154,9 @@ export async function updateProject(
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
-    return await withInstallTransaction(projectRoot, async () => {
-      const lock = adapters.artifactStore.install(projectRoot, metadata.artifactPath, metadata);
-      await installLockedArtifact(projectRoot, lock, adapters);
+    return await withInstallTransaction(project.root, async () => {
+      const lock = adapters.artifactStore.install(project.root, metadata.artifactPath, metadata);
+      await installLockedArtifact(project.root, lock, adapters);
       return { lock };
     });
   } finally {
@@ -254,7 +219,7 @@ export function doctorProject(
       return "framework.lock.json is valid";
     },
     artifact: () => {
-      if (lock === undefined || config === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
+      if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
       DEFAULT_ARTIFACT_STORE.verify(DEFAULT_ARTIFACT_STORE.resolve(projectRoot, lock), lock);
       return "artifact digest and byte length match";
     },
@@ -500,6 +465,55 @@ function writeText(root: string, path: string, content: string): void {
   const destination = join(root, path);
   mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, content, "utf8");
+}
+
+function scaffoldProject(root: string): void {
+  mkdirSync(root, { recursive: true });
+  const appName = appNameFromRoot(root);
+  writeText(root, "tsx-lvgl.json", `${JSON.stringify({
+    version: 1,
+    entry: "src/App.tsx",
+    bundleId: "app",
+    boardId: DEFAULT_BOARD_ID,
+    generation: 1,
+  }, null, 2)}\n`);
+  writeText(root, "src/App.tsx", `import { Screen, Text, type VNode } from "@tsx-lvgl/sdk";\n\nexport default function App(): VNode {\n  return (\n    <Screen>\n      <Text text="Hello TSX-LVGL" />\n    </Screen>\n  );\n}\n`);
+  writeText(root, "tsconfig.json", `${JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      strict: true,
+      jsx: "react-jsx",
+      jsxImportSource: SDK_PACKAGE_NAME,
+      noEmit: true,
+      skipLibCheck: true,
+    },
+    include: ["src/**/*.ts", "src/**/*.tsx"],
+  }, null, 2)}\n`);
+  writeText(root, "package.json", `${JSON.stringify({
+    name: appName,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    engines: { node: NODE_ENGINE_RANGE },
+    scripts: {
+      sync: "tsx-lvgl sync",
+      update: "tsx-lvgl update",
+      dev: "tsx-lvgl dev",
+      check: "tsx-lvgl check",
+      build: "tsx-lvgl build",
+      doctor: "tsx-lvgl doctor",
+    },
+    dependencies: {},
+  }, null, 2)}\n`);
+  writeText(root, ".gitignore", "node_modules/\nbuild/\n");
+  writeText(root, "AGENTS.md", consumerAgentsTemplate());
+}
+
+function restoreCreateTarget(root: string, targetExisted: boolean): void {
+  rmSync(root, { recursive: true, force: true });
+  if (targetExisted) mkdirSync(root, { recursive: true });
 }
 
 function appNameFromRoot(root: string): string {

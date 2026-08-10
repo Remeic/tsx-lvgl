@@ -98,6 +98,27 @@ test("artifact-store records and verifies a local artifact without npm packing",
   );
 });
 
+test("artifact-store rejects escaped lock paths and unsafe provenance versions", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-boundary-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const sourceArtifact = join(root, "sdk.tgz");
+  writeFileSync(sourceArtifact, "SDK artifact fixture");
+
+  const escapedLock = {
+    ...lock(),
+    artifact: { ...lock().artifact, file: ".tsx-lvgl/artifacts/../../../escaped.tgz" },
+  };
+  assert.throws(
+    () => DEFAULT_ARTIFACT_STORE.resolve(root, escapedLock),
+    { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+  );
+  assert.throws(
+    () => DEFAULT_ARTIFACT_STORE.install(root, sourceArtifact, metadata(sourceArtifact, "../../../escaped")),
+    { code: DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH },
+  );
+  assert.equal(existsSync(join(root, "escaped.tgz")), false);
+});
+
 test("project lifecycle uses injected source, artifact and install boundaries in-process", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-mutation-project-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -116,6 +137,8 @@ test("project lifecycle uses injected source, artifact and install boundaries in
     installExecutor: {
       install: async (projectRoot, installedLock, artifactPath, verifyInstalled) => {
         calls.push(["install", artifactPath]);
+        mkdirSync(join(projectRoot, ".tsx-lvgl"), { recursive: true });
+        writeFileSync(join(projectRoot, ".tsx-lvgl", "framework.lock.json"), JSON.stringify(installedLock));
         installSnapshot(projectRoot, installedLock);
         verifyInstalled();
       },
@@ -156,6 +179,25 @@ test("project lifecycle uses injected source, artifact and install boundaries in
     ["source", "/fixture/dirty-source"],
     ["pack", "/fixture/source", "/fixture/output"],
   ]);
+});
+
+test("update rejects a non-consumer target before resolving or packing source", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tsx-lvgl-update-identity-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const calls = [];
+  const adapters = {
+    artifactStore: DEFAULT_ARTIFACT_STORE,
+    installExecutor: { install: async () => { throw new Error("unreachable"); } },
+    sourcePackAdapter: {
+      resolveSource: () => { calls.push("source"); return "/fixture/source"; },
+      createOutputDirectory: () => { calls.push("output"); return "/fixture/output"; },
+      pack: () => { calls.push("pack"); throw new Error("unreachable"); },
+      removeOutputDirectory: () => { calls.push("remove"); },
+    },
+  };
+
+  await assert.rejects(updateProject(root, "/fixture/source", adapters), { code: DIAGNOSTIC_CODES.CONFIG_NOT_FOUND });
+  assert.deepEqual(calls, []);
 });
 
 test("install executor writes the SDK pin before its injected package-manager boundary", async (t) => {

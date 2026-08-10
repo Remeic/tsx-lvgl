@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +86,7 @@ test("doctor keeps sequencing diagnostics when config or lock prerequisites fail
   rmSync(configPath);
   const configFailure = doctorProject(root);
   assert.equal(configFailure.ok, false);
-  assert.equal(configFailure.checks.find((check) => check.id === "ARTIFACT")?.diagnosticCode, DIAGNOSTIC_CODES.LOCK_INVALID);
+  assert.equal(configFailure.checks.find((check) => check.id === "ARTIFACT")?.successCode, "DOCTOR_ARTIFACT_OK");
   writeFileSync(configPath, config);
   rmSync(lockPath);
   const lockFailure = doctorProject(root);
@@ -252,4 +252,20 @@ test("scaffold fallback remains a valid portable package name", async (t) => {
   await createProject(root, undefined, () => artifact);
   assert.equal(JSON.parse(readFileSync(join(root, "package.json"))).name, "tsx-lvgl-app");
   assert.equal(existsSync(dirname(artifact)), false);
+});
+
+test("failed create restores a retryable target to its pre-command state", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-create-rollback-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const absentTarget = join(sandbox, "absent");
+  const invalidArtifact = join(sandbox, "invalid.tgz");
+  writeFileSync(invalidArtifact, "not an SDK archive");
+
+  await assertAsyncCode(() => createProject(absentTarget, invalidArtifact), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  assert.equal(existsSync(absentTarget), false);
+
+  const existingTarget = join(sandbox, "existing-empty");
+  mkdirSync(existingTarget);
+  await assertAsyncCode(() => createProject(existingTarget, invalidArtifact), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  assert.deepEqual(readdirSync(existingTarget), []);
 });
