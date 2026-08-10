@@ -17,6 +17,7 @@ export {
   useEffect,
   useInterval,
   useMotion,
+  useWifi,
   useSensor,
   useState,
   type StateSetter,

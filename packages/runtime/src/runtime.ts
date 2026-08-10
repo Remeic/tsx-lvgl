@@ -1,6 +1,7 @@
 import type { VNode } from "@tsx-lvgl/core";
 import { createSensorRegistry, type DeviceCapabilities } from "@tsx-lvgl/sensors";
 import type { CapabilityRuntime, CapabilitySchema, CapabilityObserveOptions, CapabilityBinding, CapabilityContext, CapabilitySubscription, BoardDiagnosticsSnapshot } from "@tsx-lvgl/capabilities";
+import type { WifiService } from "@tsx-lvgl/connectivity";
 import {
   validateRuntimeBundle,
   type RuntimeBundle,
@@ -16,6 +17,7 @@ export interface RuntimeOptions {
   readonly scheduler: RuntimeScheduler;
   readonly capabilities?: DeviceCapabilities;
   readonly board?: CapabilityRuntime;
+  readonly wifi?: WifiService;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -60,6 +62,10 @@ export class Runtime implements RuntimeContext {
 
   public get board(): CapabilityRuntime {
     return this.options.board ?? noBoard;
+  }
+
+  public get wifi(): WifiService | undefined {
+    return this.options.wifi;
   }
 
   public mount(root: VNode): RuntimeSession {
