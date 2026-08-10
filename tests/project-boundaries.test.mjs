@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 import test from "node:test";
 
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
@@ -24,6 +25,14 @@ function assertCode(action, code) {
   assert.throws(action, { code });
 }
 
+function provenanceArchive(path, provenance) {
+  const content = Buffer.from(JSON.stringify(provenance));
+  const header = Buffer.alloc(512);
+  header.write("package/provenance.json");
+  header.write(content.byteLength.toString(8).padStart(11, "0"), 124);
+  writeFileSync(path, gzipSync(Buffer.concat([header, content, Buffer.alloc(Math.ceil(content.byteLength / 512) * 512 - content.byteLength), Buffer.alloc(1024)])));
+}
+
 async function assertAsyncCode(action, code) {
   await assert.rejects(action, { code });
 }
@@ -35,6 +44,13 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   const packed = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--out", artifactRoot, "--json"], { cwd: repositoryRoot, encoding: "utf8" });
   assert.equal(packed.status, 0, packed.stderr);
   const root = join(sandbox, "app");
+  await assertAsyncCode(() => createProject(join(sandbox, "no-artifact")), DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND);
+  const malformedArtifact = join(sandbox, "malformed.tgz");
+  writeFileSync(malformedArtifact, "not a gzip archive");
+  await assertAsyncCode(() => createProject(join(sandbox, "malformed"), malformedArtifact), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
+  const dirtyArtifact = join(sandbox, "dirty.tgz");
+  provenanceArchive(dirtyArtifact, { formatVersion: 1, packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "a".repeat(40), sourceDirty: true });
+  await assertAsyncCode(() => createProject(join(sandbox, "dirty"), dirtyArtifact), DIAGNOSTIC_CODES.SOURCE_DIRTY);
   await createProject(root, JSON.parse(packed.stdout).artifactPath);
 
   const configPath = join(root, "tsx-lvgl.json");
@@ -116,8 +132,10 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   await assertAsyncCode(() => updateProject(root, ""), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
   await assertAsyncCode(() => updateProject(root, join(sandbox, "missing")), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
   const source = join(sandbox, "source");
-  mkdirSync(join(source, "scripts"), { recursive: true });
+  mkdirSync(source, { recursive: true });
   writeFileSync(join(source, "package.json"), '{"name":"source"}\n');
+  await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_NOT_CONFIGURED);
+  mkdirSync(join(source, "scripts"), { recursive: true });
   const script = join(source, "scripts", "pack-sdk.mjs");
   writeFileSync(script, "process.exitCode = 1;\n");
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.SOURCE_PACK_FAILED);
