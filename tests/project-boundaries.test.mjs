@@ -40,6 +40,11 @@ async function assertAsyncCode(action, code) {
 test("project facade rejects invalid persisted boundaries before lifecycle work", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-project-boundaries-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  });
   const artifactRoot = join(sandbox, "artifact");
   const packed = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--out", artifactRoot, "--json"], { cwd: repositoryRoot, encoding: "utf8" });
   assert.equal(packed.status, 0, packed.stderr);
@@ -174,7 +179,6 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   writeFileSync(entryPath, "export default 42 as any;\n");
   await assertAsyncCode(() => devProject(root), DIAGNOSTIC_CODES.DEV_FAILED);
   writeFileSync(entryPath, entry);
-  const originalPath = process.env.PATH;
   const fakeBin = join(sandbox, "fake-bin");
   mkdirSync(fakeBin);
   const fakeNpm = join(fakeBin, "npm");
@@ -195,6 +199,14 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
 test("update source boundary fails closed for missing, invalid, malformed and dirty pack metadata", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-update-boundaries-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const originalSource = process.env.TSX_LVGL_SOURCE;
+  const originalConfig = process.env.TSX_LVGL_CONFIG;
+  t.after(() => {
+    if (originalSource === undefined) delete process.env.TSX_LVGL_SOURCE;
+    else process.env.TSX_LVGL_SOURCE = originalSource;
+    if (originalConfig === undefined) delete process.env.TSX_LVGL_CONFIG;
+    else process.env.TSX_LVGL_CONFIG = originalConfig;
+  });
   const root = join(sandbox, "app");
   const artifactRoot = join(sandbox, "artifact");
   const packed = spawnSync(process.execPath, [join(repositoryRoot, "scripts", "pack-sdk.mjs"), "--out", artifactRoot, "--json"], { cwd: repositoryRoot, encoding: "utf8" });
@@ -221,8 +233,6 @@ test("update source boundary fails closed for missing, invalid, malformed and di
   const packedArtifact = JSON.parse(packed.stdout).artifactPath;
   writeFileSync(script, `process.stdout.write(JSON.stringify({ artifactPath: ${JSON.stringify(packedArtifact)}, packageName: "@tsx-lvgl/sdk", version: "0.1.0", sourceSha: "not-a-sha", sourceDirty: false, sha256: "${"a".repeat(64)}", byteLength: 1 }));\n`);
   await assertAsyncCode(() => updateProject(root, source), DIAGNOSTIC_CODES.ARTIFACT_DIGEST_MISMATCH);
-  const originalSource = process.env.TSX_LVGL_SOURCE;
-  const originalConfig = process.env.TSX_LVGL_CONFIG;
   const machineConfig = join(sandbox, "machine-config.json");
   writeFileSync(machineConfig, JSON.stringify({ sourcePath: source }));
   delete process.env.TSX_LVGL_SOURCE;

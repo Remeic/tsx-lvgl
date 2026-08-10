@@ -175,6 +175,11 @@ test("update covers source configuration, artifact, dependency and temporary-dir
 test("dev, pack and archive parsing handle public error and fallback contracts", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-project-errors-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const previousTmpdir = process.env.TMPDIR;
+  t.after(() => {
+    if (previousTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpdir;
+  });
   const artifact = packArtifact(sandbox);
   const root = join(sandbox, "app");
   await createProject(root, artifact);
@@ -184,7 +189,6 @@ test("dev, pack and archive parsing handle public error and fallback contracts",
   await assertAsyncCode(() => devProject(root), DIAGNOSTIC_CODES.DEV_FAILED);
   writeFileSync(entryPath, entry);
 
-  const previousTmpdir = process.env.TMPDIR;
   delete process.env.TMPDIR;
   const packed = packInstalledSdk("/sdk", {
     exists: () => true,
