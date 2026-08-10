@@ -20,6 +20,12 @@ export interface SerialRuntime {
   open(port: string): SerialLineChannel;
 }
 
+interface ClosableSerialResources {
+  readonly lines: { close(): void };
+  readonly input: { destroy(): void };
+  readonly output: { readonly destroyed: boolean; end(callback: (error?: Error | null) => void): void };
+}
+
 const POSIX_SERIAL_PORT = /^\/dev\/(?:cu|tty)\.[A-Za-z0-9._-]+$/;
 const WINDOWS_SERIAL_PORT = /^COM[1-9][0-9]*$/i;
 
@@ -75,32 +81,40 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
       close(): Promise<void> {
         if (closed) return Promise.resolve();
         closed = true;
-        return new Promise<void>((resolve, reject) => {
-          let synchronousError: unknown;
-          try {
-            lines.close();
-          } catch (error) {
-            synchronousError = error;
-          }
-          try {
-            input.destroy();
-          } catch (error) {
-            synchronousError ??= error;
-          }
-          try {
-            if (output.destroyed) {
-              synchronousError === undefined ? resolve() : reject(synchronousError);
-            } else {
-              output.end(() => synchronousError === undefined ? resolve() : reject(synchronousError));
-            }
-          } catch (error) {
-            reject(synchronousError ?? error);
-          }
-        });
+        return closeSerialResources({ lines, input, output });
       },
     };
   },
 };
+
+/** Closes the three Node resources as one observable async operation. */
+export function closeSerialResources({ lines, input, output }: ClosableSerialResources): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let synchronousError: unknown;
+    try {
+      lines.close();
+    } catch (error) {
+      synchronousError = error;
+    }
+    try {
+      input.destroy();
+    } catch (error) {
+      synchronousError ??= error;
+    }
+    try {
+      if (output.destroyed) {
+        synchronousError === undefined ? resolve() : reject(synchronousError);
+      } else {
+        output.end((error) => {
+          const closeError = synchronousError ?? error;
+          closeError === undefined || closeError === null ? resolve() : reject(closeError);
+        });
+      }
+    } catch (error) {
+      reject(synchronousError ?? error);
+    }
+  });
+}
 
 function configurePort(port: string): void {
   // Windows does not have stty. Node stream opening is its portable preflight.

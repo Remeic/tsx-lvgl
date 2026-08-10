@@ -9,7 +9,7 @@ import {
 import type { RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
-import { NODE_SERIAL_RUNTIME, type SerialLineChannel, type SerialRuntime, validateSerialPort } from "./serial.js";
+import { NODE_SERIAL_RUNTIME, type SerialRuntime, validateSerialPort } from "./serial.js";
 
 export interface DeviceDevResult {
   readonly bundleId: string;
@@ -68,6 +68,7 @@ export async function runDevicePush(
     let unsubscribeLine: (() => void) | undefined;
     let unsubscribeError: (() => void) | undefined;
     let eventQueue = Promise.resolve();
+    const pendingIo = new Set<(reason: CliError) => void>();
 
     const cancelTimer = () => {
       timerToken += 1;
@@ -79,8 +80,13 @@ export async function runDevicePush(
       }
       timer = undefined;
     };
+    const cancelPendingIo = () => {
+      const cancellation = new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial operation cancelled");
+      for (const cancel of [...pendingIo]) cancel(cancellation);
+    };
     const detach = () => {
       cancelTimer();
+      cancelPendingIo();
       try {
         unsubscribeLine?.();
       } catch {
@@ -95,25 +101,66 @@ export async function runDevicePush(
     const asDeviceError = (error: unknown): CliError => error instanceof CliError
       ? error
       : new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, error instanceof Error ? error.message : String(error));
+    const boundedIo = <T>(label: "write" | "close", operation: () => T | Promise<T>): Promise<T> => new Promise<T>((resolveIo, rejectIo) => {
+      let finished = false;
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const finish = (outcome: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown }) => {
+        if (finished) return;
+        finished = true;
+        pendingIo.delete(cancel);
+        if (deadline !== undefined) {
+          try {
+            runtime.clearTimer(deadline);
+          } catch {
+            // The finished flag fences a late deadline callback.
+          }
+        }
+        outcome.ok ? resolveIo(outcome.value) : rejectIo(outcome.error);
+      };
+      const cancel = (reason: CliError) => finish({ ok: false, error: reason });
+      pendingIo.add(cancel);
+      const operationPromise = Promise.resolve().then(operation);
+      // Both handlers stay attached after a timeout/cancellation, so a late
+      // stream rejection is observed rather than becoming unhandled.
+      operationPromise.then(
+        (value) => finish({ ok: true, value }),
+        (error: unknown) => finish({ ok: false, error }),
+      );
+      try {
+        const armedDeadline = runtime.setTimer(
+          () => finish({ ok: false, error: new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, `serial ${label} timed out`) }),
+          ackTimeoutMs,
+        );
+        deadline = armedDeadline;
+        if (finished) {
+          try {
+            runtime.clearTimer(armedDeadline);
+          } catch {
+            // The finished flag still fences a synchronously fired callback.
+          }
+        }
+      } catch (error) {
+        finish({ ok: false, error });
+      }
+    });
+    const writeFrame = (frame: string): Promise<void> => boundedIo("write", () => channel.write(frame));
     const closeBestEffort = async (): Promise<unknown> => {
       try {
-        await channel.close();
+        await boundedIo("close", () => channel.close());
         return undefined;
       } catch (error) {
         return error;
       }
     };
-    const fail = async (error: unknown, abortAlreadySent = false): Promise<void> => {
+    const fail = async (error: unknown): Promise<void> => {
       if (settled) return;
       settled = true;
       const primaryError = asDeviceError(error);
       detach();
-      if (!abortAlreadySent) {
-        try {
-          await channel.write("TSXB ABORT");
-        } catch {
-          // The primary failure wins; ABORT is explicitly best-effort.
-        }
+      try {
+        await writeFrame("TSXB ABORT");
+      } catch {
+        // The primary failure wins; ABORT is explicitly best-effort.
       }
       await closeBestEffort();
       reject(primaryError);
@@ -153,46 +200,46 @@ export async function runDevicePush(
     const apply = async (progress: PushProgress): Promise<void> => {
       if (settled) return;
       state = progress.state;
-      let abortSent = false;
+      if (progress.state === "failed") {
+        // The pure session represents failure with an ABORT frame. Delegate
+        // that best-effort write to `fail` so an I/O timeout cannot replace
+        // the protocol failure that caused it.
+        await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, progress.failure ?? "device push failed"));
+        return;
+      }
       for (const frame of progress.send) {
-        await channel.write(frame);
-        if (frame === "TSXB ABORT") abortSent = true;
+        await writeFrame(frame);
       }
       if (progress.state === "done") {
         await succeed(progress);
         return;
       }
-      if (progress.state === "failed") {
-        await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, progress.failure ?? "device push failed"), abortSent);
-        return;
-      }
       arm(progress);
     };
-    const retryWith = async (lastGeneration: number): Promise<void> => {
+    const retryWith = async (lastGeneration: number, rejectedProgress: PushProgress): Promise<void> => {
       if (retryCount >= 1 || !Number.isSafeInteger(lastGeneration) || lastGeneration >= Number.MAX_SAFE_INTEGER) {
-        await apply(session.handle({ kind: "line", line: `TSXB RDY maxBytes=${manifest.byteLength} protocol=${manifest.protocolVersion} board=${manifest.boardId} lastGeneration=${lastGeneration}` }));
+        await apply(rejectedProgress);
         return;
       }
       // The current device state owns the staging buffer. Abort before the
       // next BEGIN, then immediately make the one fresh, monotonic attempt.
       cancelTimer();
-      await channel.write("TSXB ABORT");
+      await writeFrame("TSXB ABORT");
       retryCount += 1;
       manifest = { ...manifest, generation: lastGeneration + 1 };
       session = createPushSession(manifest, bundle.bytes);
       await apply(session.begin());
     };
     const handleProtocolLine = async (line: string, parsed: Exclude<ReturnType<typeof parseDeviceLine>, { readonly kind: "noise" }>): Promise<void> => {
-      if (parsed.kind === "rdy") {
-        // createPushSession deliberately ignores RDY outside its handshake.
-        // Check the wrapper's generation negotiation under the same rule.
-        if (state !== "awaiting-rdy") return;
-        if (manifest.generation <= parsed.lastGeneration) {
-          await retryWith(parsed.lastGeneration);
-          return;
-        }
+      if (parsed.kind === "rdy" && state !== "awaiting-rdy") return;
+      const progress = session.handle({ kind: "line", line });
+      // Let the pure session validate maxBytes/protocol/board first. Only its
+      // exact monotonicity failure authorizes the wrapper's one fresh attempt.
+      if (parsed.kind === "rdy" && progress.state === "failed" && progress.failure === "generation not monotonic") {
+        await retryWith(parsed.lastGeneration, progress);
+        return;
       }
-      await apply(session.handle({ kind: "line", line }));
+      await apply(progress);
     };
     const enqueue = (action: () => Promise<void>): void => {
       eventQueue = eventQueue
@@ -213,7 +260,11 @@ export async function runDevicePush(
         if (parsed.kind === "noise") return;
         enqueue(async () => handleProtocolLine(line, parsed));
       });
-      unsubscribeError = channel.onError((error) => enqueue(async () => fail(error)));
+      unsubscribeError = channel.onError((error) => {
+        // An I/O error must not queue behind a hung write. `fail` cancels that
+        // bounded operation and owns exactly-once abort/close settlement.
+        void fail(error).catch(() => {});
+      });
       enqueue(async () => apply(session.begin()));
     } catch (error) {
       void fail(error);
