@@ -11,20 +11,34 @@ export const NODE_ENGINE_RANGE = ">=24.19.0 <25";
 export function validateNodeEngine(
   packageValue: Readonly<Record<string, unknown>>,
   nodeVersion: string,
+  subject: "consumer" | "sdk" = "consumer",
 ): string {
+  const codes = subject === "sdk"
+    ? {
+      missing: DIAGNOSTIC_CODES.SDK_NODE_ENGINE_MISSING,
+      invalid: DIAGNOSTIC_CODES.SDK_NODE_ENGINE_INVALID,
+      unsupported: DIAGNOSTIC_CODES.SDK_UNSUPPORTED_NODE,
+      label: "installed SDK package",
+    }
+    : {
+      missing: DIAGNOSTIC_CODES.NODE_ENGINE_MISSING,
+      invalid: DIAGNOSTIC_CODES.NODE_ENGINE_INVALID,
+      unsupported: DIAGNOSTIC_CODES.UNSUPPORTED_NODE,
+      label: "package.json",
+    };
   const engines = isRecord(packageValue.engines) ? packageValue.engines : undefined;
   const range = engines?.node;
   if (typeof range !== "string" || range.trim().length === 0) {
-    throw new CliError(DIAGNOSTIC_CODES.NODE_ENGINE_MISSING, "package.json must declare an engines.node SemVer range");
+    throw new CliError(codes.missing, `${codes.label} must declare an engines.node SemVer range`);
   }
   const normalizedRange = validRange(range);
   if (normalizedRange === null) {
-    throw new CliError(DIAGNOSTIC_CODES.NODE_ENGINE_INVALID, "package.json engines.node must be a valid SemVer range");
+    throw new CliError(codes.invalid, `${codes.label} engines.node must be a valid SemVer range`);
   }
   if (!satisfies(nodeVersion, normalizedRange)) {
     throw new CliError(
-      DIAGNOSTIC_CODES.UNSUPPORTED_NODE,
-      `Node ${nodeVersion} is outside the configured engine ${range}`,
+      codes.unsupported,
+      `Node ${nodeVersion} is outside the configured ${subject} engine ${range}`,
     );
   }
   return `Node ${nodeVersion} satisfies ${range}`;

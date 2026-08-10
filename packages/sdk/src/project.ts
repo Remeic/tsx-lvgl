@@ -2,12 +2,10 @@ import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -25,16 +23,10 @@ import {
   SDK_PACKAGE_NAME,
 } from "./metadata.js";
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
-import {
-  collectDoctorCheck,
-  completeDoctorChecks,
-  DOCTOR_CHECK_IDS,
-  DOCTOR_SUCCESS_CODES,
-  type DoctorCheck,
-  type DoctorResult,
-} from "./doctor.js";
+import { runDoctor, type DoctorResult } from "./doctor.js";
 import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
 import { buildInstallInvocation, resolvePackageManager } from "./package-manager.js";
+import { withInstallTransaction } from "./install-transaction.js";
 import ts from "typescript";
 
 export interface ProjectConfig {
@@ -155,7 +147,7 @@ export async function createProject(
   const generatedArtifact = artifactArgument === undefined;
   const artifactPath = generatedArtifact ? packInstalledSdk() : resolve(artifactArgument);
   try {
-    return await withProjectInstallTransaction(root, async () => {
+    return await withInstallTransaction(root, async () => {
       const lock = installArtifactIntoProject(root, artifactPath);
       await installLockedArtifact(root, lock);
       return { root, lock };
@@ -168,7 +160,7 @@ export async function createProject(
 export async function syncProject(root: string): Promise<{ readonly lock: FrameworkLock }> {
   const project = readProjectFiles(root);
   verifyArtifact(project);
-  return withProjectInstallTransaction(project.root, async () => {
+  return withInstallTransaction(project.root, async () => {
     await installLockedArtifact(project.root, project.lock);
     return { lock: project.lock };
   });
@@ -195,7 +187,7 @@ export async function updateProject(root: string, explicitSource?: string): Prom
     if (metadata.sourceDirty) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_DIRTY, "framework source checkout has uncommitted changes");
     }
-    return await withProjectInstallTransaction(projectRoot, async () => {
+    return await withInstallTransaction(projectRoot, async () => {
       const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
       await installLockedArtifact(projectRoot, lock);
       return { lock };
@@ -248,45 +240,39 @@ export function doctorProject(
   { nodeVersion = process.versions.node }: { readonly nodeVersion?: string } = {},
 ): DoctorResult {
   const projectRoot = resolve(root);
-  const checks: DoctorCheck[] = [];
   let config: ProjectConfig | undefined;
   let lock: FrameworkLock | undefined;
-
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.CONFIG, DOCTOR_SUCCESS_CODES.CONFIG_OK, () => {
-    config = readProjectConfig(projectRoot);
-    return "tsx-lvgl.json is valid";
+  return runDoctor({
+    config: () => {
+      config = readProjectConfig(projectRoot);
+      return "tsx-lvgl.json is valid";
+    },
+    lock: () => {
+      lock = readFrameworkLock(projectRoot);
+      return "framework.lock.json is valid";
+    },
+    artifact: () => {
+      if (lock === undefined || config === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
+      verifyArtifact({ artifactPath: resolveArtifactPath(projectRoot, lock), lock });
+      return "artifact digest and byte length match";
+    },
+    package: () => {
+      if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect package without a valid lock");
+      verifyPackageDependency(projectRoot, lock);
+      return "package.json uses the project-local artifact";
+    },
+    installation: () => {
+      if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect installation without a valid lock");
+      verifyInstalledSdk(projectRoot, lock);
+      return "installed SDK matches the lock";
+    },
+    portability: () => {
+      verifyPortableConfig(projectRoot);
+      return "portable config contains no source checkout path or workspace alias";
+    },
+    consumerNodeEngine: () => validateNodeEngine(readJson(join(projectRoot, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID), nodeVersion),
+    sdkNodeEngine: () => validateInstalledSdkNodeEngine(projectRoot, nodeVersion),
   });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.LOCK, DOCTOR_SUCCESS_CODES.LOCK_OK, () => {
-    lock = readFrameworkLock(projectRoot);
-    return "framework.lock.json is valid";
-  });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.ARTIFACT, DOCTOR_SUCCESS_CODES.ARTIFACT_OK, () => {
-    if (lock === undefined || config === undefined) {
-      throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
-    }
-    verifyArtifact({ artifactPath: resolveArtifactPath(projectRoot, lock), lock });
-    return "artifact digest and byte length match";
-  });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.PACKAGE, DOCTOR_SUCCESS_CODES.PACKAGE_OK, () => {
-    if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect package without a valid lock");
-    verifyPackageDependency(projectRoot, lock);
-    return "package.json uses the project-local artifact";
-  });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.INSTALLATION, DOCTOR_SUCCESS_CODES.INSTALLATION_OK, () => {
-    if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect installation without a valid lock");
-    verifyInstalledSdk(projectRoot, lock);
-    return "installed SDK matches the lock";
-  });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.PORTABILITY, DOCTOR_SUCCESS_CODES.PORTABILITY_OK, () => {
-    verifyPortableConfig(projectRoot);
-    return "portable config contains no source checkout path or workspace alias";
-  });
-  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.NODE_ENGINE, DOCTOR_SUCCESS_CODES.NODE_ENGINE_OK, () => {
-    const packageValue = readJson(join(projectRoot, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
-    return validateNodeEngine(packageValue, nodeVersion);
-  });
-
-  return completeDoctorChecks(checks);
 }
 
 export function readProjectFiles(root: string): Project {
@@ -430,6 +416,14 @@ function verifyInstalledSdk(root: string, lock: FrameworkLock): void {
   }
 }
 
+function validateInstalledSdkNodeEngine(root: string, nodeVersion: string): string {
+  const packagePath = join(root, "node_modules", "@tsx-lvgl", "sdk", "package.json");
+  if (!existsSync(packagePath)) {
+    throw new CliError(DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED, "the locked SDK artifact is not installed");
+  }
+  return validateNodeEngine(readJson(packagePath, DIAGNOSTIC_CODES.PACKAGE_NOT_INSTALLED), nodeVersion, "sdk");
+}
+
 function verifyPortableConfig(root: string): void {
   const packageValue = readJson(join(root, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
   const dependency = isRecord(packageValue.dependencies) ? packageValue.dependencies[SDK_PACKAGE_NAME] : undefined;
@@ -521,137 +515,6 @@ function installArtifactIntoProject(root: string, artifactPath: string, metadata
       byteLength: bytes.byteLength,
     },
   };
-}
-
-interface FileSnapshot {
-  readonly path: string;
-  readonly existed: boolean;
-  readonly bytes?: Buffer;
-}
-
-interface PathBackup {
-  readonly path: string;
-  readonly backupPath: string;
-}
-
-async function withProjectInstallTransaction<T>(root: string, action: () => Promise<T>): Promise<T> {
-  const rollbackRoot = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "tsx-lvgl-install-rollback-"));
-  const snapshotPaths = [
-    "package.json",
-    "package-lock.json",
-    "npm-shrinkwrap.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
-    "yarn.lock",
-    "bun.lock",
-    "bun.lockb",
-    ".tsx-lvgl/framework.lock.json",
-    "node_modules/.package-lock.json",
-    "node_modules/.modules.yaml",
-    "node_modules/.pnpm/lock.yaml",
-    "node_modules/.yarn-state.yml",
-    "node_modules/.yarn_integrity",
-  ].map((path) => join(root, path));
-  const fileSnapshots = snapshotPaths.map(snapshotFile);
-  const artifactsRoot = join(root, ".tsx-lvgl", "artifacts");
-  const artifactSnapshots = snapshotDirectoryFiles(artifactsRoot);
-  const installBackups = backupInstallPaths(root, rollbackRoot);
-
-  try {
-    const result = await action();
-    rmSync(rollbackRoot, { recursive: true, force: true });
-    return result;
-  } catch (error) {
-    removeInstalledSdkPaths(root);
-    restorePathBackups(installBackups);
-    restoreFiles(fileSnapshots);
-    restoreDirectoryFiles(artifactsRoot, artifactSnapshots);
-    rmSync(rollbackRoot, { recursive: true, force: true });
-    throw error;
-  }
-}
-
-function removeInstalledSdkPaths(root: string): void {
-  rmSync(join(root, "node_modules", "@tsx-lvgl", "sdk"), { recursive: true, force: true });
-  rmSync(join(root, "node_modules", ".bin", "tsx-lvgl"), { recursive: true, force: true });
-  const pnpmRoot = join(root, "node_modules", ".pnpm");
-  if (existsSync(pnpmRoot)) {
-    for (const entry of readdirSync(pnpmRoot)) {
-      if (entry.includes("@tsx-lvgl+sdk@")) {
-        rmSync(join(pnpmRoot, entry), { recursive: true, force: true });
-      }
-    }
-  }
-}
-
-function backupInstallPaths(root: string, rollbackRoot: string): readonly PathBackup[] {
-  const pnpmRoot = join(root, "node_modules", ".pnpm");
-  const pnpmSdkPaths = existsSync(pnpmRoot)
-    ? readdirSync(pnpmRoot)
-      .filter((entry) => entry.includes("@tsx-lvgl+sdk@"))
-      .map((entry) => join(pnpmRoot, entry))
-    : [];
-  const paths = [
-    join(root, "node_modules", "@tsx-lvgl", "sdk"),
-    join(root, "node_modules", ".bin", "tsx-lvgl"),
-    ...pnpmSdkPaths,
-  ];
-  return paths.flatMap((path, index) => {
-    if (!pathExistsWithoutFollowingSymlinks(path)) return [];
-    const backupPath = join(rollbackRoot, `install-path-${index}`);
-    renameSync(path, backupPath);
-    return [{ path, backupPath }];
-  });
-}
-
-function pathExistsWithoutFollowingSymlinks(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function restorePathBackups(backups: readonly PathBackup[]): void {
-  for (const backup of backups) {
-    rmSync(backup.path, { recursive: true, force: true });
-    mkdirSync(dirname(backup.path), { recursive: true });
-    renameSync(backup.backupPath, backup.path);
-  }
-}
-
-function snapshotFile(path: string): FileSnapshot {
-  return existsSync(path)
-    ? { path, existed: true, bytes: readFileSync(path) }
-    : { path, existed: false };
-}
-
-function snapshotDirectoryFiles(root: string): readonly FileSnapshot[] {
-  if (!existsSync(root)) return [];
-  return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => snapshotFile(join(root, entry.name)));
-}
-
-function restoreFiles(snapshots: readonly FileSnapshot[]): void {
-  for (const snapshot of snapshots) {
-    rmSync(snapshot.path, { force: true });
-    if (snapshot.existed && snapshot.bytes !== undefined) {
-      mkdirSync(dirname(snapshot.path), { recursive: true });
-      writeFileSync(snapshot.path, snapshot.bytes);
-    }
-  }
-}
-
-function restoreDirectoryFiles(root: string, snapshots: readonly FileSnapshot[]): void {
-  rmSync(root, { recursive: true, force: true });
-  for (const snapshot of snapshots) {
-    if (snapshot.existed && snapshot.bytes !== undefined) {
-      mkdirSync(dirname(snapshot.path), { recursive: true });
-      writeFileSync(snapshot.path, snapshot.bytes);
-    }
-  }
 }
 
 function writeSdkDependency(root: string, lock: FrameworkLock): void {
