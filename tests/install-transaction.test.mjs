@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -155,4 +156,32 @@ test("a failed artifact backup leaves the original artifact untouched", async (t
 
   assert.equal(invoked, false);
   assert.equal(await readFile(artifactPath, "utf8"), "original artifact\n");
+});
+
+test("artifact snapshot preflight rejects symlinks and FIFOs before action or rollback mutation", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-special-artifact-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  for (const kind of ["symlink", "fifo"]) {
+    const root = join(sandbox, kind);
+    const artifacts = join(root, ".tsx-lvgl", "artifacts");
+    await mkdir(artifacts, { recursive: true });
+    const special = join(artifacts, kind);
+    if (kind === "symlink") {
+      symlinkSync(join(sandbox, "outside"), special);
+    } else {
+      const result = spawnSync("mkfifo", [special], { encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    }
+    let invoked = false;
+    await assert.rejects(
+      withInstallTransaction(root, async () => {
+        invoked = true;
+      }),
+      /artifact transaction source contains an unsupported entry/,
+    );
+    assert.equal(invoked, false);
+    assert.equal(kind === "symlink" ? lstatSync(special).isSymbolicLink() : lstatSync(special).isFIFO(), true);
+    assert.deepEqual(readdirSync(artifacts), [kind]);
+  }
 });

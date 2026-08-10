@@ -3,7 +3,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  lstatSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -25,6 +27,7 @@ export interface InstallTransactionFs {
   remove(path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }): void;
   makeDirectory(path: string): void;
   writeFile(path: string, bytes: Buffer): void;
+  validateArtifactDirectory?(path: string): void;
 }
 
 export const DEFAULT_INSTALL_TRANSACTION_FS: InstallTransactionFs = {
@@ -36,6 +39,7 @@ export const DEFAULT_INSTALL_TRANSACTION_FS: InstallTransactionFs = {
   remove: rmSync,
   makeDirectory: (path) => mkdirSync(path, { recursive: true }),
   writeFile: writeFileSync,
+  validateArtifactDirectory: validateFlatArtifactDirectory,
 };
 
 const METADATA_PATHS = [
@@ -135,10 +139,26 @@ function snapshotDirectory(
 function captureDirectories(directories: readonly DirectorySnapshot[], filesystem: InstallTransactionFs): void {
   for (const directory of directories) {
     if (!directory.existed) continue;
+    if (!directory.move) {
+      (filesystem.validateArtifactDirectory ?? validateFlatArtifactDirectory)(directory.path);
+    }
     filesystem.makeDirectory(dirname(directory.backupPath));
     if (directory.move) filesystem.rename(directory.path, directory.backupPath);
     else filesystem.copy(directory.path, directory.backupPath);
     directory.captured = true;
+  }
+}
+
+function validateFlatArtifactDirectory(path: string): void {
+  const directory = lstatSync(path);
+  if (!directory.isDirectory() || directory.isSymbolicLink()) {
+    throw new Error("artifact transaction source must be a regular directory");
+  }
+  for (const entry of readdirSync(path)) {
+    const details = lstatSync(join(path, entry));
+    if (!details.isFile() || details.isSymbolicLink()) {
+      throw new Error("artifact transaction source contains an unsupported entry");
+    }
   }
 }
 
