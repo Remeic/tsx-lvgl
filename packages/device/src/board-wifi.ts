@@ -68,6 +68,8 @@ export class NativeBoardWifiService implements WifiService {
   private disposed = false;
   private readonly now: () => number;
   private readonly commandTimeoutMs: number;
+  private lastSequence = 0;
+  private lastObservedAtMs = Number.NEGATIVE_INFINITY;
 
   public constructor(private readonly adapter: BoardPlatformAdapter, options: NativeBoardWifiOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -114,9 +116,11 @@ export class NativeBoardWifiService implements WifiService {
   /** Called only by BoardRuntime's single adapter sink. */
   public accept(event: NativeBoardEvent): boolean {
     if (event.instanceId !== WIFI_INSTANCE_ID) return false;
+    if (!isNewerWifiEvent(event, this.lastSequence, this.lastObservedAtMs)) return true;
     if (event.kind === "state") {
       const state = decodeWifiState(event);
       if (state === undefined) return false;
+      this.acceptSequence(event);
       this.setState(state);
       return true;
     }
@@ -129,11 +133,13 @@ export class NativeBoardWifiService implements WifiService {
     const payload = decodeBoardPayload(event.payload);
     if (payload === undefined || payload.correlationId !== String(record.id)) return false;
     if (payload.status === "succeeded") {
+      this.acceptSequence(event);
       this.finish(record, { status: "succeeded", id: record.id, value: record.commandId === "scan" ? Object.freeze([]) : undefined });
       return true;
     }
     const rawIssue = payload.issue;
     if (payload.status !== "failed" || !validIssue(rawIssue)) return false;
+    this.acceptSequence(event);
     this.finish(record, { status: "failed", id: record.id, issue: issue(rawIssue.code, rawIssue.retry, rawIssue.diagnosticId) });
     return true;
   }
@@ -180,6 +186,7 @@ export class NativeBoardWifiService implements WifiService {
   }
   private pending(): number { return this.operations.size; }
   private setState(state: CapabilityState<WifiLink>): void { this.state = state; for (const listener of [...this.listeners]) listener(state); }
+  private acceptSequence(event: NativeBoardEvent): void { this.lastSequence = event.sequence; this.lastObservedAtMs = event.observedAtMs; }
 }
 
 function decodeWifiState(event: NativeBoardEvent | undefined): CapabilityState<WifiLink> | undefined {
@@ -198,3 +205,6 @@ function validIssue(value: unknown): value is { code: BoardIssue["code"]; retry:
 }
 function ready<T>(value: T): CapabilityState<T> { return Object.freeze({ status: "ready" as const, value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
 function isQueueFull(error: unknown): boolean { return error instanceof Error && error.message === "board.submit: wifi-command-queue-full"; }
+function isNewerWifiEvent(event: NativeBoardEvent, sequence: number, observedAtMs: number): boolean {
+  return Number.isSafeInteger(event.sequence) && event.sequence > sequence && Number.isFinite(event.observedAtMs) && event.observedAtMs >= observedAtMs;
+}

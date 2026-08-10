@@ -33,6 +33,9 @@ struct waveshare_v1_wifi {
     QueueHandle_t events;
     QueueHandle_t overflows;
     SemaphoreHandle_t stopped;
+    /* Serializes submit, cancel, destroy, and command-side effects. A cancel
+     * cannot return while a stale queued command can still start. */
+    SemaphoreHandle_t command_lock;
     TaskHandle_t task;
     esp_netif_t *station;
     waveshare_v1_wifi_phase_t phase;
@@ -43,7 +46,40 @@ struct waveshare_v1_wifi {
     volatile bool disconnected;
     uint32_t pending_connect;
     TickType_t connect_deadline;
+    uint32_t cancelled_correlations[WIFI_COMMAND_QUEUE_DEPTH];
 };
+
+static void mark_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
+{
+    for (uint32_t index = 0; index < WIFI_COMMAND_QUEUE_DEPTH; index++) {
+        if (wifi->cancelled_correlations[index] == correlation_id) return;
+        if (wifi->cancelled_correlations[index] == 0U) {
+            wifi->cancelled_correlations[index] = correlation_id;
+            return;
+        }
+    }
+}
+
+static bool take_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
+{
+    for (uint32_t index = 0; index < WIFI_COMMAND_QUEUE_DEPTH; index++) {
+        if (wifi->cancelled_correlations[index] != correlation_id) continue;
+        wifi->cancelled_correlations[index] = 0U;
+        return true;
+    }
+    return false;
+}
+
+static void purge_cancelled_command(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
+{
+    wifi_command_t retained[WIFI_COMMAND_QUEUE_DEPTH];
+    uint32_t retained_count = 0U;
+    wifi_command_t entry;
+    while (xQueueReceive(wifi->commands, &entry, 0) == pdTRUE) {
+        if (entry.correlation_id != correlation_id && retained_count < WIFI_COMMAND_QUEUE_DEPTH) retained[retained_count++] = entry;
+    }
+    for (uint32_t index = 0; index < retained_count; index++) (void)xQueueSend(wifi->commands, &retained[index], 0);
+}
 
 static bool send_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_kind_t kind,
                        waveshare_v1_wifi_command_t command, uint32_t correlation_id,
@@ -118,23 +154,29 @@ static void wifi_task(void *argument)
 {
     waveshare_v1_wifi_t *wifi = argument;
     wifi_command_t command;
-    while (wifi->active) {
-        if (xQueueReceive(wifi->commands, &command, pdMS_TO_TICKS(100)) == pdTRUE) switch (command.command) {
-            case WAVESHARE_V1_WIFI_SCAN:
-                if (!wifi->configured) send_event(wifi, WAVESHARE_V1_WIFI_EVENT_FAILED, command.command, command.correlation_id, "wifi-disabled");
-                else send_event(wifi, WAVESHARE_V1_WIFI_EVENT_SUCCEEDED, command.command, command.correlation_id, NULL);
-                break;
-            case WAVESHARE_V1_WIFI_CONNECT:
-                connect_station(wifi, command.correlation_id);
-                break;
-            case WAVESHARE_V1_WIFI_DISCONNECT:
-                if (wifi->configured) (void)esp_wifi_disconnect();
-                wifi->pending_connect = 0U;
-                wifi->phase = wifi->configured ? WAVESHARE_V1_WIFI_IDLE : WAVESHARE_V1_WIFI_DISABLED;
-                send_event(wifi, WAVESHARE_V1_WIFI_EVENT_STATE, command.command, command.correlation_id, NULL);
-                send_event(wifi, WAVESHARE_V1_WIFI_EVENT_SUCCEEDED, command.command, command.correlation_id, NULL);
-                break;
+    while (true) {
+        const bool received = xQueueReceive(wifi->commands, &command, pdMS_TO_TICKS(100)) == pdTRUE;
+        if (xSemaphoreTake(wifi->command_lock, portMAX_DELAY) != pdTRUE) break;
+        if (!wifi->active) {
+            xSemaphoreGive(wifi->command_lock);
+            break;
         }
+        if (received && !take_cancelled_command(wifi, command.correlation_id)) switch (command.command) {
+                case WAVESHARE_V1_WIFI_SCAN:
+                    if (!wifi->configured) send_event(wifi, WAVESHARE_V1_WIFI_EVENT_FAILED, command.command, command.correlation_id, "wifi-disabled");
+                    else send_event(wifi, WAVESHARE_V1_WIFI_EVENT_SUCCEEDED, command.command, command.correlation_id, NULL);
+                    break;
+                case WAVESHARE_V1_WIFI_CONNECT:
+                    connect_station(wifi, command.correlation_id);
+                    break;
+                case WAVESHARE_V1_WIFI_DISCONNECT:
+                    if (wifi->configured) (void)esp_wifi_disconnect();
+                    wifi->pending_connect = 0U;
+                    wifi->phase = wifi->configured ? WAVESHARE_V1_WIFI_IDLE : WAVESHARE_V1_WIFI_DISABLED;
+                    send_event(wifi, WAVESHARE_V1_WIFI_EVENT_STATE, command.command, command.correlation_id, NULL);
+                    send_event(wifi, WAVESHARE_V1_WIFI_EVENT_SUCCEEDED, command.command, command.correlation_id, NULL);
+                    break;
+            }
         if (wifi->pending_connect != 0U) {
             const uint32_t correlation_id = wifi->pending_connect;
             if (wifi->got_ip) {
@@ -150,6 +192,7 @@ static void wifi_task(void *argument)
                            wifi->disconnected ? "wifi-association" : "wifi-command-timeout");
             }
         }
+        xSemaphoreGive(wifi->command_lock);
     }
     xSemaphoreGive(wifi->stopped);
     vTaskDelete(NULL);
@@ -165,9 +208,10 @@ esp_err_t waveshare_v1_wifi_create(waveshare_v1_wifi_t **out_wifi)
     wifi->events = xQueueCreate(WIFI_EVENT_QUEUE_DEPTH, sizeof(waveshare_v1_wifi_event_t));
     wifi->overflows = xQueueCreate(WIFI_OVERFLOW_QUEUE_DEPTH, sizeof(waveshare_v1_wifi_event_t));
     wifi->stopped = xSemaphoreCreateBinary();
+    wifi->command_lock = xSemaphoreCreateMutex();
     wifi->configured = TSX_WIFI_STATION_CONFIGURED;
     wifi->phase = wifi->configured ? WAVESHARE_V1_WIFI_IDLE : WAVESHARE_V1_WIFI_DISABLED;
-    if (wifi->commands == NULL || wifi->events == NULL || wifi->overflows == NULL || wifi->stopped == NULL) { waveshare_v1_wifi_destroy(wifi); return ESP_ERR_NO_MEM; }
+    if (wifi->commands == NULL || wifi->events == NULL || wifi->overflows == NULL || wifi->stopped == NULL || wifi->command_lock == NULL) { waveshare_v1_wifi_destroy(wifi); return ESP_ERR_NO_MEM; }
     const esp_err_t netif_result = esp_netif_init();
     if (netif_result != ESP_OK && netif_result != ESP_ERR_INVALID_STATE) { waveshare_v1_wifi_destroy(wifi); return netif_result; }
     const esp_err_t loop_result = esp_event_loop_create_default();
@@ -193,7 +237,12 @@ void waveshare_v1_wifi_destroy(waveshare_v1_wifi_t *wifi)
 {
     if (wifi == NULL) return;
     if (wifi->task != NULL) {
+        (void)xSemaphoreTake(wifi->command_lock, portMAX_DELAY);
         wifi->active = false;
+        (void)xQueueReset(wifi->commands);
+        if (wifi->pending_connect != 0U && wifi->configured) (void)esp_wifi_disconnect();
+        wifi->pending_connect = 0U;
+        xSemaphoreGive(wifi->command_lock);
         /* The worker wakes within 100ms, signals stopped, then deletes itself.
          * Do not destroy its queues until this bounded join has succeeded. */
         if (xSemaphoreTake(wifi->stopped, pdMS_TO_TICKS(WIFI_TASK_STOP_TIMEOUT_MS)) != pdTRUE) return;
@@ -208,24 +257,34 @@ void waveshare_v1_wifi_destroy(waveshare_v1_wifi_t *wifi)
     if (wifi->events != NULL) vQueueDelete(wifi->events);
     if (wifi->overflows != NULL) vQueueDelete(wifi->overflows);
     if (wifi->stopped != NULL) vSemaphoreDelete(wifi->stopped);
+    if (wifi->command_lock != NULL) vSemaphoreDelete(wifi->command_lock);
     free(wifi);
 }
 
 esp_err_t waveshare_v1_wifi_submit(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_command_t command,
                                    uint32_t correlation_id)
 {
-    if (wifi == NULL || !wifi->active || correlation_id == 0U) return ESP_ERR_INVALID_STATE;
+    if (wifi == NULL || correlation_id == 0U || wifi->command_lock == NULL) return ESP_ERR_INVALID_STATE;
     const wifi_command_t entry = { .command = command, .correlation_id = correlation_id };
-    return xQueueSend(wifi->commands, &entry, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    if (xSemaphoreTake(wifi->command_lock, portMAX_DELAY) != pdTRUE) return ESP_ERR_TIMEOUT;
+    const esp_err_t result = !wifi->active ? ESP_ERR_INVALID_STATE : xQueueSend(wifi->commands, &entry, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    xSemaphoreGive(wifi->command_lock);
+    return result;
 }
 
 void waveshare_v1_wifi_cancel(waveshare_v1_wifi_t *wifi, uint32_t correlation_id)
 {
-    if (wifi != NULL && wifi->pending_connect == correlation_id) {
+    if (wifi == NULL || correlation_id == 0U || wifi->command_lock == NULL) return;
+    if (xSemaphoreTake(wifi->command_lock, portMAX_DELAY) != pdTRUE) return;
+    mark_cancelled_command(wifi, correlation_id);
+    purge_cancelled_command(wifi, correlation_id);
+    if (wifi->pending_connect == correlation_id) {
         wifi->pending_connect = 0U;
-        (void)esp_wifi_disconnect();
+        if (wifi->configured) (void)esp_wifi_disconnect();
+        wifi->phase = wifi->configured ? WAVESHARE_V1_WIFI_IDLE : WAVESHARE_V1_WIFI_DISABLED;
+        send_event(wifi, WAVESHARE_V1_WIFI_EVENT_STATE, WAVESHARE_V1_WIFI_CONNECT, correlation_id, NULL);
     }
-    /* JS completes cancellation locally. The provider never retains secrets or a caller pointer. */
+    xSemaphoreGive(wifi->command_lock);
 }
 
 bool waveshare_v1_wifi_take_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_t *out_event)

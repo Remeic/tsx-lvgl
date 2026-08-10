@@ -138,6 +138,29 @@ test("native Wi-Fi command deadline terminalizes a lost owner-queue event", () =
   wifi.dispose();
 });
 
+test("native Wi-Fi state never regresses when overflow delivery precedes older FIFO events", () => {
+  const adapter = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
+  const board = new BoardRuntime(adapter);
+  board.wifi.connect(context);
+  adapter.emit({
+    version: 1, kind: "state", instanceId: "wifi.station", handle: 1, reloadEpoch: 1, sequence: 2, observedAtMs: 20,
+    payload: encodeBoardPayload({ status: "ok", value: { phase: "connected", station: { rssiDbm: -42, channel: 1, authKind: "wpa2" } } }),
+  });
+  adapter.emit({
+    version: 1, kind: "state", instanceId: "wifi.station", handle: 1, reloadEpoch: 1, sequence: 1, observedAtMs: 10,
+    payload: encodeBoardPayload({ status: "ok", value: { phase: "connecting" } }),
+  });
+  adapter.emit({
+    version: 1, kind: "state", instanceId: "wifi.station", handle: 1, reloadEpoch: 1, sequence: 3, observedAtMs: 19,
+    payload: encodeBoardPayload({ status: "ok", value: { phase: "idle" } }),
+  });
+  assert.deepEqual(board.wifi.getState(), {
+    status: "ready", value: { phase: "connected", station: { rssiDbm: -42, channel: 1, authKind: "wpa2" } },
+    observedAtMs: 0, sequence: 0, droppedSincePrevious: 0,
+  });
+  board.dispose();
+});
+
 test("native Wi-Fi queue-full rejection is observable and terminal", () => {
   class FullQueueAdapter extends MemoryBoardAdapter {
     public override submit(_request: NativeBoardRequest): number { throw new Error("board.submit: wifi-command-queue-full"); }

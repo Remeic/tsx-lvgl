@@ -40,8 +40,8 @@ test("Wi-Fi provider keeps build-local credentials redacted and joins its worker
   assert.match(source, /credentials=redacted/);
   const destroy = component.match(/void waveshare_v1_wifi_destroy\([\s\S]*?\n}\n\nesp_err_t waveshare_v1_wifi_submit/);
   assert.ok(destroy, "Wi-Fi destroy implementation must remain present");
-  assert.ok(destroy[0].indexOf("wifi->active = false") < destroy[0].indexOf("xSemaphoreTake"));
-  assert.ok(destroy[0].indexOf("xSemaphoreTake") < destroy[0].indexOf("esp_event_handler_unregister"));
+  assert.ok(destroy[0].indexOf("xSemaphoreTake") < destroy[0].indexOf("wifi->active = false"));
+  assert.ok(destroy[0].indexOf("wifi->active = false") < destroy[0].indexOf("esp_event_handler_unregister"));
   assert.ok(destroy[0].indexOf("esp_event_handler_unregister") < destroy[0].indexOf("vQueueDelete"));
 });
 
@@ -57,4 +57,17 @@ test("Wi-Fi queue exhaustion and lost events remain bounded and terminal without
   assert.match(source, /wifi-owner-timeout/);
   assert.match(source, /"resource-exhausted"/);
   assert.doesNotMatch(source, /"ssid"|"passphrase"/i);
+});
+
+test("Wi-Fi cancellation fences commands already dequeued or waiting in the provider queue", () => {
+  assert.match(component, /SemaphoreHandle_t command_lock/);
+  assert.match(component, /mark_cancelled_command/);
+  assert.match(component, /purge_cancelled_command/);
+  assert.match(component, /take_cancelled_command/);
+  assert.match(component, /xSemaphoreTake\(wifi->command_lock, portMAX_DELAY\)/);
+  assert.match(component, /if \(!wifi->active\) \{[\s\S]*break;/);
+  const cancel = component.match(/void waveshare_v1_wifi_cancel\([\s\S]*?\n}\n\nbool waveshare_v1_wifi_take_event/);
+  assert.ok(cancel, "Wi-Fi cancellation implementation must remain present");
+  assert.ok(cancel[0].indexOf("mark_cancelled_command") < cancel[0].indexOf("purge_cancelled_command"));
+  assert.ok(cancel[0].indexOf("purge_cancelled_command") < cancel[0].indexOf("xSemaphoreGive"));
 });

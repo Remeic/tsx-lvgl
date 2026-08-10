@@ -1793,6 +1793,8 @@ class NativeBoardWifiService {
         this.highWater = 0;
         this.terminalHistory = 0;
         this.disposed = false;
+        this.lastSequence = 0;
+        this.lastObservedAtMs = Number.NEGATIVE_INFINITY;
         this.now = options.now ?? (() => Date.now());
         this.commandTimeoutMs = options.commandTimeoutMs ?? 16000;
         if (!Number.isSafeInteger(this.commandTimeoutMs) || this.commandTimeoutMs <= 0)
@@ -1842,10 +1844,13 @@ class NativeBoardWifiService {
     accept(event) {
         if (event.instanceId !== WIFI_INSTANCE_ID)
             return false;
+        if (!isNewerWifiEvent(event, this.lastSequence, this.lastObservedAtMs))
+            return true;
         if (event.kind === "state") {
             const state = decodeWifiState(event);
             if (state === undefined)
                 return false;
+            this.acceptSequence(event);
             this.setState(state);
             return true;
         }
@@ -1860,12 +1865,14 @@ class NativeBoardWifiService {
         if (payload === undefined || payload.correlationId !== String(record.id))
             return false;
         if (payload.status === "succeeded") {
+            this.acceptSequence(event);
             this.finish(record, { status: "succeeded", id: record.id, value: record.commandId === "scan" ? Object.freeze([]) : undefined });
             return true;
         }
         const rawIssue = payload.issue;
         if (payload.status !== "failed" || !validIssue(rawIssue))
             return false;
+        this.acceptSequence(event);
         this.finish(record, { status: "failed", id: record.id, issue: (0, capabilities_1.issue)(rawIssue.code, rawIssue.retry, rawIssue.diagnosticId) });
         return true;
     }
@@ -1917,6 +1924,7 @@ class NativeBoardWifiService {
     pending() { return this.operations.size; }
     setState(state) { this.state = state; for (const listener of [...this.listeners])
         listener(state); }
+    acceptSequence(event) { this.lastSequence = event.sequence; this.lastObservedAtMs = event.observedAtMs; }
 }
 exports.NativeBoardWifiService = NativeBoardWifiService;
 function decodeWifiState(event) {
@@ -1946,6 +1954,9 @@ function validIssue(value) {
 }
 function ready(value) { return Object.freeze({ status: "ready", value, observedAtMs: 0, sequence: 0, droppedSincePrevious: 0 }); }
 function isQueueFull(error) { return error instanceof Error && error.message === "board.submit: wifi-command-queue-full"; }
+function isNewerWifiEvent(event, sequence, observedAtMs) {
+    return Number.isSafeInteger(event.sequence) && event.sequence > sequence && Number.isFinite(event.observedAtMs) && event.observedAtMs >= observedAtMs;
+}
 
 });
 __tsxDefine("@tsx-lvgl/device/index.js", function (require, module, exports) {
