@@ -6,7 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { withInstallTransaction } from "../packages/sdk/dist/install-transaction.js";
+import {
+  InstallTransactionInterruptedError,
+  recoverInterruptedInstall,
+  withInstallTransaction,
+} from "../packages/sdk/dist/install-transaction.js";
 
 test("failed install restores all prior dependency and metadata state atomically", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-transaction-"));
@@ -183,5 +187,59 @@ test("artifact snapshot preflight rejects symlinks and FIFOs before action or ro
     assert.equal(invoked, false);
     assert.equal(kind === "symlink" ? lstatSync(special).isSymbolicLink() : lstatSync(special).isFIFO(), true);
     assert.deepEqual(readdirSync(artifacts), [kind]);
+  }
+});
+
+test("restart recovery restores every durable transaction checkpoint idempotently", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-restart-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  for (const checkpoint of [
+    "journal-created",
+    "node_modules-captured",
+    "artifacts-captured",
+    "action-completed",
+  ]) {
+    const root = join(sandbox, checkpoint);
+    const packagePath = join(root, "package.json");
+    const artifactPath = join(root, ".tsx-lvgl", "artifacts", "sdk.tgz");
+    await mkdir(join(root, "node_modules", "keep"), { recursive: true });
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await Promise.all([
+      writeFile(packagePath, "{\"name\":\"before\"}\n"),
+      writeFile(join(root, "node_modules", "keep", "marker.txt"), "before node modules\n"),
+      writeFile(artifactPath, "before artifact\n"),
+    ]);
+
+    await assert.rejects(
+      withInstallTransaction(
+        root,
+        async () => {
+          await mkdir(join(root, "node_modules", "new"), { recursive: true });
+          await writeFile(join(root, "node_modules", "new", "marker.txt"), "after node modules\n");
+          await writeFile(packagePath, "{\"name\":\"after\"}\n");
+          await writeFile(artifactPath, "after artifact\n");
+        },
+        undefined,
+        {
+          afterTransition: (transition) => {
+            if (transition === checkpoint) throw new InstallTransactionInterruptedError();
+          },
+        },
+      ),
+      InstallTransactionInterruptedError,
+    );
+
+    recoverInterruptedInstall(root);
+    recoverInterruptedInstall(root);
+    assert.equal(await readFile(packagePath, "utf8"), "{\"name\":\"before\"}\n");
+    assert.equal(await readFile(join(root, "node_modules", "keep", "marker.txt"), "utf8"), "before node modules\n");
+    await assert.rejects(readFile(join(root, "node_modules", "new", "marker.txt")), { code: "ENOENT" });
+    assert.equal(await readFile(artifactPath, "utf8"), "before artifact\n");
+    assert.equal(existsSync(join(root, ".tsx-lvgl", "install-transaction.json")), false);
+    assert.equal(
+      readdirSync(dirname(root)).some((entry) => entry.startsWith(`.${checkpoint}.tsx-lvgl-install-rollback-`)),
+      false,
+    );
   }
 });

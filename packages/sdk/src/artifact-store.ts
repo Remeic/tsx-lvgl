@@ -31,6 +31,7 @@ export interface ArtifactStoreHooks {
   afterFirstRename?(): void;
   beforeSecondRename?(stagePath: string): void;
   failSecondRename?(): void;
+  afterSecondRename?(): void;
 }
 
 export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactStore {
@@ -85,6 +86,27 @@ export function createArtifactStore(hooks: ArtifactStoreHooks = {}): ArtifactSto
 }
 
 export const DEFAULT_ARTIFACT_STORE = createArtifactStore();
+
+/**
+ * Finish the artifact-directory half of an interrupted install before any
+ * command reads the framework lock. It keeps a completed second rename and
+ * restores the old artifacts when only the first rename completed.
+ */
+export function recoverProjectArtifactState(root: string): void {
+  const projectRoot = resolve(root);
+  const state = join(projectRoot, ".tsx-lvgl");
+  if (!existsSync(state)) return;
+  assertStateDirectory(state);
+  const artifacts = join(state, "artifacts");
+  const backup = join(state, ".artifacts-backup");
+  recoverArtifactSwap(artifacts, backup);
+  for (const entry of readdirSync(state)) {
+    if (!entry.startsWith(".artifacts-stage-")) continue;
+    const stage = join(state, entry);
+    const details = lstatSync(stage);
+    if (details.isDirectory() && !details.isSymbolicLink()) rmSync(stage, { recursive: true, force: true });
+  }
+}
 
 export function validateArtifactReference(file: string): void {
   const artifactPrefix = ".tsx-lvgl/artifacts/";
@@ -157,17 +179,15 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
   const projectRoot = resolve(root);
   const state = join(projectRoot, ".tsx-lvgl");
   if (existsSync(state)) {
-    const details = lstatSync(state);
-    if (!details.isDirectory() || details.isSymbolicLink()) {
-      throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
-    }
+    assertStateDirectory(state);
   }
   mkdirSync(state, { recursive: true });
   const artifacts = join(state, "artifacts");
   const backup = join(state, ".artifacts-backup");
-  recoverArtifactSwap(artifacts, backup);
+  recoverProjectArtifactState(projectRoot);
   const stage = mkdtempSync(join(state, ".artifacts-stage-"));
   let movedPrevious = false;
+  let interrupted = false;
   try {
     if (existsSync(artifacts)) copyAllowedArtifacts(artifacts, stage);
     writeFileSync(join(stage, artifactFile), bytes, { mode: 0o600 });
@@ -181,6 +201,7 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
     hooks.beforeSecondRename?.(stage);
     hooks.failSecondRename?.();
     renameSync(stage, artifacts);
+    hooks.afterSecondRename?.();
     try {
       assertArtifactDirectory(artifacts);
     } catch (error) {
@@ -192,9 +213,21 @@ function replaceProjectStateAtomically(root: string, artifactFile: string, bytes
       throw error;
     }
     if (movedPrevious) rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    interrupted = error instanceof Error && error.name === "InstallTransactionInterruptedError";
+    throw error;
   } finally {
-    if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
-    if (movedPrevious && existsSync(backup) && !existsSync(artifacts)) renameSync(backup, artifacts);
+    if (!interrupted) {
+      if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
+      if (movedPrevious && existsSync(backup) && !existsSync(artifacts)) renameSync(backup, artifacts);
+    }
+  }
+}
+
+function assertStateDirectory(path: string): void {
+  const details = lstatSync(path);
+  if (!details.isDirectory() || details.isSymbolicLink()) {
+    throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
   }
 }
 
