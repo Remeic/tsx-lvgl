@@ -25,6 +25,15 @@ import {
   SDK_PACKAGE_NAME,
 } from "./metadata.js";
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
+import {
+  collectDoctorCheck,
+  completeDoctorChecks,
+  DOCTOR_CHECK_IDS,
+  DOCTOR_SUCCESS_CODES,
+  type DoctorCheck,
+  type DoctorResult,
+} from "./doctor.js";
+import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
 import { buildInstallInvocation, resolvePackageManager } from "./package-manager.js";
 import ts from "typescript";
 
@@ -70,17 +79,6 @@ export interface CheckResult {
 
 export interface DevResult extends HeadlessResult {
   readonly bundleId: string;
-}
-
-export interface DoctorCheck {
-  readonly code: string;
-  readonly ok: boolean;
-  readonly detail: string;
-}
-
-export interface DoctorResult {
-  readonly ok: boolean;
-  readonly checks: readonly DoctorCheck[];
 }
 
 interface PackProvenance {
@@ -138,6 +136,9 @@ export async function createProject(
     version: "0.1.0",
     private: true,
     type: "module",
+    engines: {
+      node: NODE_ENGINE_RANGE,
+    },
     scripts: {
       sync: "tsx-lvgl sync",
       update: "tsx-lvgl update",
@@ -156,9 +157,7 @@ export async function createProject(
   try {
     return await withProjectInstallTransaction(root, async () => {
       const lock = installArtifactIntoProject(root, artifactPath);
-      writeSdkDependency(root, lock);
-      await runPackageManagerInstall(root, resolveArtifactPath(root, lock));
-      verifyInstalledSdk(root, lock);
+      await installLockedArtifact(root, lock);
       return { root, lock };
     });
   } finally {
@@ -170,9 +169,7 @@ export async function syncProject(root: string): Promise<{ readonly lock: Framew
   const project = readProjectFiles(root);
   verifyArtifact(project);
   return withProjectInstallTransaction(project.root, async () => {
-    writeSdkDependency(project.root, project.lock);
-    await runPackageManagerInstall(project.root, project.artifactPath);
-    verifyInstalledSdk(project.root, project.lock);
+    await installLockedArtifact(project.root, project.lock);
     return { lock: project.lock };
   });
 }
@@ -200,9 +197,7 @@ export async function updateProject(root: string, explicitSource?: string): Prom
     }
     return await withProjectInstallTransaction(projectRoot, async () => {
       const lock = installArtifactIntoProject(projectRoot, metadata.artifactPath, metadata);
-      writeSdkDependency(projectRoot, lock);
-      await runPackageManagerInstall(projectRoot, resolveArtifactPath(projectRoot, lock));
-      verifyInstalledSdk(projectRoot, lock);
+      await installLockedArtifact(projectRoot, lock);
       return { lock };
     });
   } finally {
@@ -248,61 +243,50 @@ export async function devProject(root: string): Promise<DevResult> {
   }
 }
 
-export function doctorProject(root: string): DoctorResult {
+export function doctorProject(
+  root: string,
+  { nodeVersion = process.versions.node }: { readonly nodeVersion?: string } = {},
+): DoctorResult {
   const projectRoot = resolve(root);
   const checks: DoctorCheck[] = [];
   let config: ProjectConfig | undefined;
   let lock: FrameworkLock | undefined;
 
-  const check = (code: string, action: () => string): void => {
-    try {
-      checks.push({ code, ok: true, detail: action() });
-    } catch (error) {
-      const cliError = error instanceof CliError ? error : new CliError("CHECK_FAILED", String(error));
-      checks.push({ code: cliError.code, ok: false, detail: cliError.message });
-    }
-  };
-
-  check(DIAGNOSTIC_CODES.CONFIG_NOT_FOUND, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.CONFIG, DOCTOR_SUCCESS_CODES.CONFIG_OK, () => {
     config = readProjectConfig(projectRoot);
     return "tsx-lvgl.json is valid";
   });
-  check(DIAGNOSTIC_CODES.LOCK_NOT_FOUND, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.LOCK, DOCTOR_SUCCESS_CODES.LOCK_OK, () => {
     lock = readFrameworkLock(projectRoot);
     return "framework.lock.json is valid";
   });
-  check(DIAGNOSTIC_CODES.ARTIFACT_NOT_FOUND, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.ARTIFACT, DOCTOR_SUCCESS_CODES.ARTIFACT_OK, () => {
     if (lock === undefined || config === undefined) {
       throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect artifact without a valid lock");
     }
     verifyArtifact({ artifactPath: resolveArtifactPath(projectRoot, lock), lock });
     return "artifact digest and byte length match";
   });
-  check(DIAGNOSTIC_CODES.PACKAGE_INVALID, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.PACKAGE, DOCTOR_SUCCESS_CODES.PACKAGE_OK, () => {
     if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect package without a valid lock");
     verifyPackageDependency(projectRoot, lock);
     return "package.json uses the project-local artifact";
   });
-  check(DIAGNOSTIC_CODES.SDK_NOT_INSTALLED, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.INSTALLATION, DOCTOR_SUCCESS_CODES.INSTALLATION_OK, () => {
     if (lock === undefined) throw new CliError(DIAGNOSTIC_CODES.LOCK_INVALID, "cannot inspect installation without a valid lock");
     verifyInstalledSdk(projectRoot, lock);
     return "installed SDK matches the lock";
   });
-  check(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.PORTABILITY, DOCTOR_SUCCESS_CODES.PORTABILITY_OK, () => {
     verifyPortableConfig(projectRoot);
     return "portable config contains no source checkout path or workspace alias";
   });
-  check(DIAGNOSTIC_CODES.UNSUPPORTED_NODE, () => {
+  collectDoctorCheck(checks, DOCTOR_CHECK_IDS.NODE_ENGINE, DOCTOR_SUCCESS_CODES.NODE_ENGINE_OK, () => {
     const packageValue = readJson(join(projectRoot, "package.json"), DIAGNOSTIC_CODES.PACKAGE_INVALID);
-    const engines = isRecord(packageValue.engines) ? packageValue.engines : {};
-    const required = typeof engines.node === "string" ? engines.node : undefined;
-    if (required !== undefined && required !== process.versions.node) {
-      throw new CliError(DIAGNOSTIC_CODES.UNSUPPORTED_NODE, `Node ${process.versions.node} is outside the configured engine ${required}`);
-    }
-    return `Node ${process.versions.node}`;
+    return validateNodeEngine(packageValue, nodeVersion);
   });
 
-  return { ok: checks.every((entry) => entry.ok), checks };
+  return completeDoctorChecks(checks);
 }
 
 export function readProjectFiles(root: string): Project {
@@ -682,6 +666,13 @@ function writeSdkDependency(root: string, lock: FrameworkLock): void {
     `${JSON.stringify(lock, null, 2)}\n`,
     "utf8",
   );
+}
+
+/** Keep create, sync and update on the same write-install-verify lifecycle. */
+async function installLockedArtifact(root: string, lock: FrameworkLock): Promise<void> {
+  writeSdkDependency(root, lock);
+  await runPackageManagerInstall(root, resolveArtifactPath(root, lock));
+  verifyInstalledSdk(root, lock);
 }
 
 async function runPackageManagerInstall(root: string, artifactPath: string): Promise<void> {

@@ -4,6 +4,9 @@
   "private": true,
   "description": "The supported application facade and local CLI for TSX-LVGL",
   "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
   "bin": {
     "tsx-lvgl": "./dist/cli.js"
   },
@@ -31,15 +34,17 @@
     "@tsx-lvgl/runtime": "0.1.0",
     "@tsx-lvgl/sensors": "0.1.0",
     "package-manager-detector": "1.8.0",
+    "semver": "7.8.5",
     "typescript": "5.9.2"
   },
-  "bundledDependencies": [
+  "bundleDependencies": [
     "@tsx-lvgl/bundler",
     "@tsx-lvgl/core",
     "@tsx-lvgl/device",
     "@tsx-lvgl/runtime",
     "@tsx-lvgl/sensors",
     "package-manager-detector",
+    "semver",
     "typescript"
   ]
 }

@@ -272,13 +272,22 @@ process.exit(17);
   assert.deepEqual(dev.texts, ["Hello TSX-LVGL"]);
   const doctor = runJson(process.execPath, [cliPath, "doctor", "--json"], appRoot);
   assert.equal(doctor.code, "DOCTOR_OK");
+  assert.equal(doctor.resultCode, "DOCTOR_OK");
+  for (const check of doctor.checks as Array<Record<string, unknown>>) {
+    assert.equal(check.ok, true);
+    assert.equal(typeof check.id, "string");
+    assert.match(String(check.successCode), /^DOCTOR_[A-Z_]+_OK$/);
+    assert.equal(check.diagnosticCode, undefined);
+  }
 
   const packageJson = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
     workspaces?: unknown;
+    engines?: { node?: unknown };
   };
   assert.deepEqual(Object.keys(packageJson.dependencies), ["@tsx-lvgl/sdk"]);
   assert.equal(packageJson.workspaces, undefined);
+  assert.equal(packageJson.engines?.node, ">=24.19.0 <25");
   assert.equal(existsSync(join(appRoot, "node_modules/@tsx-lvgl/core")), false);
 
   const portableFiles = [

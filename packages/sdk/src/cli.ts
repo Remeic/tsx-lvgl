@@ -144,9 +144,12 @@ async function main(): Promise<void> {
       case "doctor": {
         const result = doctorProject(process.cwd());
         if (parsed.json) {
-          console.log(JSON.stringify({ ok: result.ok, code: result.ok ? "DOCTOR_OK" : "DOCTOR_FAILED", checks: result.checks }));
+          console.log(JSON.stringify({ ok: result.ok, code: result.resultCode, resultCode: result.resultCode, checks: result.checks }));
         } else {
-          for (const check of result.checks) console.log(`${check.ok ? "PASS" : "FAIL"} ${check.code}: ${check.detail}`);
+          for (const check of result.checks) {
+            const outcome = check.ok ? check.successCode : check.diagnosticCode;
+            console.log(`${check.ok ? "PASS" : "FAIL"} ${check.id} ${outcome}: ${check.detail}`);
+          }
         }
         if (!result.ok) process.exitCode = 1;
         return;

@@ -73,6 +73,7 @@ function main() {
     cpSync(resolve(SDK_ROOT, "README.md"), resolve(stagingRoot, "README.md"));
     for (const name of PACKAGE_NAMES) copyInternalDist(name, stagingDist);
     copyPackageManagerDetector(stagingDist);
+    copySemver(stagingDist);
     copyTypeScript(stagingDist);
     rewriteInternalImports(stagingDist);
 
@@ -159,6 +160,14 @@ function copyPackageManagerDetector(stagingDist) {
   cpSync(resolve(sourceRoot, "LICENSE"), resolve(destination, "LICENSE"));
 }
 
+function copySemver(stagingDist) {
+  const sourceRoot = resolve(ROOT, "node_modules/semver");
+  if (!existsSync(sourceRoot)) {
+    throw new Error("missing semver; run npm ci first");
+  }
+  cpSync(sourceRoot, resolve(stagingDist, "vendor/semver"), { recursive: true });
+}
+
 function rewriteInternalImports(stagingDist) {
   const replacements = {
     "@tsx-lvgl/core/jsx-runtime": ["core", "jsx-runtime.js"],
@@ -170,6 +179,7 @@ function rewriteInternalImports(stagingDist) {
     "package-manager-detector/detect": ["package-manager-detector", "dist", "detect.mjs"],
     "package-manager-detector/commands": ["package-manager-detector", "dist", "commands.mjs"],
     "package-manager-detector/constants": ["package-manager-detector", "dist", "constants.mjs"],
+    semver: ["semver", "index.js"],
     typescript: ["typescript", "lib", "typescript.js"],
   };
 
