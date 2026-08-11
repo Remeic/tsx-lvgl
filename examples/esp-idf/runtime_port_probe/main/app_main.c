@@ -13,6 +13,12 @@
 static const char *TAG = "tsx_runtime_probe";
 static RTC_DATA_ATTR uint32_t probe_boot_count;
 
+/* QuickJS mount and the owner pump share one bounded task. The board cannot
+ * reliably reserve a second native owner stack after the runtime and
+ * providers are live; keeping one owner also preserves the single LVGL lock
+ * boundary. */
+#define RUNTIME_PROBE_BOOT_STACK_WORDS (12288U)
+
 static void runtime_probe_boot_task(void *arg)
 {
     (void)arg;
@@ -51,18 +57,14 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
-    if (xTaskCreate(runtime_probe_task, "runtime_probe", 8192, probe, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "PROBE checkpoint=runtime_task status=fail");
-        runtime_probe_destroy(probe);
-        vTaskDelete(NULL);
-        return;
-    }
-
     const esp_err_t transport_result = bundle_transport_start(probe);
     ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
              transport_result == ESP_OK ? "pass" : "fail");
 
-    vTaskDelete(NULL);
+    /* Keep one owner for all QuickJS/LVGL calls. runtime_probe_task deletes
+     * the current task when the probe is stopped, so no second stack is
+     * allocated after QuickJS and the providers are live. */
+    runtime_probe_task(probe);
 }
 
 void app_main(void)
@@ -81,7 +83,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");
 
-    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", 12288, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", RUNTIME_PROBE_BOOT_STACK_WORDS, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "PROBE checkpoint=boot_task status=fail");
         return;
     }

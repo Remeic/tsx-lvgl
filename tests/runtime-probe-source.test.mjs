@@ -86,6 +86,9 @@ test("optional providers report unavailable state without aborting application b
   assert.match(appMain, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
   assert.match(appMain, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
   assert.match(appMain, /status=unavailable/);
+  assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(12288U\)/);
+  assert.doesNotMatch(appMain, /xTaskCreate\(runtime_probe_task/);
+  assert.match(appMain, /runtime_probe_task\(probe\);/);
   assert.ok(appMain.indexOf("runtime_probe_start_connectivity(probe)") < appMain.indexOf("runtime_probe_boot(probe)"));
   assert.doesNotMatch(appMain, /if \(runtime_probe_start_sensors\(probe\)/);
   assert.doesNotMatch(appMain, /if \(runtime_probe_start_connectivity\(probe\)/);
