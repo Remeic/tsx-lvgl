@@ -23,7 +23,7 @@ static const char *TAG = "tsx_bundle_transport";
 #define READ_POLL_MS 50U
 #define INACTIVITY_TIMEOUT_MS 2000U
 #define RELOAD_TIMEOUT_MS 5000U
-#define BUNDLE_TRANSPORT_STACK_WORDS (4096U)
+#define BUNDLE_TRANSPORT_STACK_WORDS (8192U)
 /* (DATA_CHUNK_BASE64_LIMIT / 4) * 3, mirrors packages/bundler/src/transport.ts. */
 #define DATA_CHUNK_MAX_BYTES 288U
 
