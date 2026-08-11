@@ -1,0 +1,10 @@
+{
+  "bundleId": "counter",
+  "format": "js",
+  "engine": "quickjs-ng",
+  "protocolVersion": 1,
+  "boardId": "waveshare.esp32s3.touch-amoled-1.8",
+  "generation": 1,
+  "sha256": "7cb37dd68df0a0f079261901a749d8868dab5c346950d5bbf9ddca72c3a003af",
+  "byteLength": 837
+}
