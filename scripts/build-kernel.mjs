@@ -15,6 +15,7 @@ const ROOT = resolve(__dirname, "..");
 const PACKAGES = ["core", "capabilities", "connectivity", "sensors", "runtime", "device"];
 
 const DEFAULT_OUT = resolve(ROOT, "examples/esp-idf/runtime_port_probe/main/kernel.js");
+const KERNEL_BUDGET_BYTES = 128 * 1024;
 
 const ALIASES = [
   { specifier: "@tsx-lvgl/core", target: "@tsx-lvgl/core/index.js" },
@@ -171,11 +172,19 @@ function build() {
   }
 
   const final = escaped.endsWith("\n") ? escaped : `${escaped}\n`;
+  const finalBytes = Buffer.byteLength(final, "ascii");
+  if (finalBytes > KERNEL_BUDGET_BYTES) {
+    throw new Error(
+      `build-kernel: generated kernel is ${finalBytes} bytes, over the ${KERNEL_BUDGET_BYTES}-byte budget`,
+    );
+  }
   mkdirSync(dirname(parsed.out), { recursive: true });
   writeFileSync(parsed.out, final, "ascii");
 
   console.log(`build-kernel: wrote ${parsed.out}`);
-  console.log(`build-kernel: ${Buffer.byteLength(final, "ascii")} bytes, ${allModules.length} modules`);
+  console.log(
+    `build-kernel: ${finalBytes} bytes (budget ${KERNEL_BUDGET_BYTES}), ${allModules.length} modules`,
+  );
 }
 
 build();

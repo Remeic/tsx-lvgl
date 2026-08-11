@@ -8,6 +8,7 @@ const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/mai
 const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
+const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
 const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
@@ -48,6 +49,8 @@ function createReservationFence(slotCount = 4) {
 test("runtime probe trims the ESP-IDF embedded kernel terminator before QuickJS evaluation", () => {
   assert.match(source, /size_t kernel_length = \(size_t\)\(_binary_kernel_js_end - _binary_kernel_js_start\);/);
   assert.match(source, /if \(kernel_length > 0U && _binary_kernel_js_start\[kernel_length - 1U\] == '\\0'\) kernel_length--;/);
+  assert.match(kernelBuilder, /const KERNEL_BUDGET_BYTES = 128 \* 1024;/);
+  assert.match(kernelBuilder, /finalBytes > KERNEL_BUDGET_BYTES/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {

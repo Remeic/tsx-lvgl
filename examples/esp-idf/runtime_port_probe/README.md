@@ -33,6 +33,11 @@ This writes `main/counter.g1.js`, `main/counter.g1.manifest.json` and
 kernel/app change needs a firmware rebuild — only later hot-reloaded bundles
 skip that).
 
+The embedded kernel budget is 128 KiB (131,072 bytes), enforced by
+`scripts/build-kernel.mjs`. The current generated kernel is 100,782 bytes,
+leaving 30,290 bytes of headroom; this slice does not import dormant capability
+surfaces to grow that budget.
+
 ## Build without flashing
 
 ```bash
