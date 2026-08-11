@@ -216,12 +216,19 @@ void lvgl_host_load_screen(lvgl_host_t *host, int id)
 {
     if (id == 0) {
         if (host->blank_screen == NULL) host->blank_screen = lv_obj_create(NULL);
-        if (host->blank_screen != NULL) lv_screen_load(host->blank_screen);
+        if (host->blank_screen != NULL) {
+            lv_screen_load(host->blank_screen);
+            lv_refr_now(lv_display_get_default());
+        }
         return;
     }
     lvgl_host_entry_t *entry = entry_at(host, id);
     if (entry == NULL || entry->object == NULL) return;
     lv_screen_load(entry->object);
+    /* The LVGL timer task normally services this deferred screen load. The
+     * runtime swaps roots inside a single owner-task transaction, so force the
+     * first frame while the caller still owns the LVGL lock. */
+    lv_refr_now(lv_display_get_default());
     if (host->blank_screen != NULL) {
         lv_obj_delete(host->blank_screen);
         host->blank_screen = NULL;

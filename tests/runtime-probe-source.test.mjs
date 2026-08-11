@@ -5,6 +5,7 @@ import { test } from "node:test";
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
 const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/app_main.c", import.meta.url), "utf8");
+const lvglHost = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.c", import.meta.url), "utf8");
 const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
@@ -80,6 +81,11 @@ test("display startup owns one bounded FT3168 recovery path and keeps SH8601 ali
   assert.doesNotMatch(displayStartup, /i2c_new_master_bus\(/);
   assert.match(appMain, /waveshare_v1_display_start\(\)/);
   assert.doesNotMatch(appMain, /ESP_ERROR_CHECK\(bsp_display_brightness_set/);
+});
+
+test("native root replacement forces the first LVGL frame while the owner lock is held", () => {
+  assert.match(lvglHost, /lv_screen_load\(entry->object\);[\s\S]*lv_refr_now\(lv_display_get_default\(\)\);/);
+  assert.match(lvglHost, /lv_screen_load\(host->blank_screen\);[\s\S]*lv_refr_now\(lv_display_get_default\(\)\);/);
 });
 
 test("optional providers report unavailable state without aborting application boot", () => {
