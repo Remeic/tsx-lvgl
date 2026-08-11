@@ -323,7 +323,8 @@ static void handle_line(transport_state_t *state, const char *line)
 
     /* Malformed TSXB-prefixed line: noise while idle, a protocol error mid-transfer. */
     if (state->session.active) {
-        ESP_LOGW(TAG, "PROBE transport frame_error tag=%.*s", (int)tag_length, rest);
+        /* The remainder can contain bundle bytes; keep payload out of UART logs. */
+        ESP_LOGW(TAG, "PROBE transport frame_error tag_length=%u", (unsigned)tag_length);
         reset_session(&state->session);
         write_response("TSXB ERR frame");
     }

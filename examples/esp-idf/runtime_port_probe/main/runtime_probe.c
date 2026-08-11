@@ -122,8 +122,8 @@ static JSValue new_wifi_board_event(JSContext *context, int32_t handle, uint32_t
 
 extern const uint8_t _binary_kernel_js_start[] asm("_binary_kernel_js_start");
 extern const uint8_t _binary_kernel_js_end[] asm("_binary_kernel_js_end");
-extern const uint8_t _binary_shakeface_g1_js_start[] asm("_binary_shakeface_g1_js_start");
-extern const uint8_t _binary_shakeface_g1_manifest_json_start[] asm("_binary_shakeface_g1_manifest_json_start");
+extern const uint8_t _binary_counter_g1_js_start[] asm("_binary_counter_g1_js_start");
+extern const uint8_t _binary_counter_g1_manifest_json_start[] asm("_binary_counter_g1_manifest_json_start");
 
 static void log_checkpoint(const char *checkpoint, const char *status, const char *detail)
 {
@@ -139,16 +139,58 @@ static size_t free_heap_bytes(void)
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
 }
 
+static const char *safe_exception_class(JSContext *context, JSValueConst exception)
+{
+    JSValue name_value = JS_GetPropertyStr(context, exception, "name");
+    if (JS_IsException(name_value)) {
+        JS_FreeValue(context, name_value);
+        return "unknown";
+    }
+    const char *name = JS_ToCString(context, name_value);
+    const char *result = "other";
+    if (name != NULL) {
+        if (strcmp(name, "Error") == 0) result = "error";
+        else if (strcmp(name, "InternalError") == 0) result = "internal-error";
+        else if (strcmp(name, "RangeError") == 0) result = "range-error";
+        else if (strcmp(name, "ReferenceError") == 0) result = "reference-error";
+        else if (strcmp(name, "SyntaxError") == 0) result = "syntax-error";
+        else if (strcmp(name, "TypeError") == 0) result = "type-error";
+        else if (strcmp(name, "URIError") == 0) result = "uri-error";
+        JS_FreeCString(context, name);
+    }
+    JS_FreeValue(context, name_value);
+    return result;
+}
+
+static uint32_t safe_exception_line(JSContext *context, JSValueConst exception)
+{
+    JSValue stack_value = JS_GetPropertyStr(context, exception, "stack");
+    if (JS_IsException(stack_value)) {
+        JS_FreeValue(context, stack_value);
+        return 0U;
+    }
+    const char *stack = JS_ToCString(context, stack_value);
+    uint32_t line = 0U;
+    if (stack != NULL) {
+        const char *marker = strstr(stack, "kernel.js:");
+        if (marker != NULL) {
+            char *end = NULL;
+            const unsigned long parsed = strtoul(marker + strlen("kernel.js:"), &end, 10);
+            if (end != marker + strlen("kernel.js:") && parsed <= UINT32_MAX) line = (uint32_t)parsed;
+        }
+        JS_FreeCString(context, stack);
+    }
+    JS_FreeValue(context, stack_value);
+    return line;
+}
+
 static void dump_exception(JSContext *context, const char *checkpoint)
 {
     JSValue exception = JS_GetException(context);
-    const char *message = JS_ToCString(context, exception);
-    if (message == NULL) {
-        ESP_LOGE(TAG, "PROBE checkpoint=%s status=fail error=<unprintable>", checkpoint);
-    } else {
-        ESP_LOGE(TAG, "PROBE checkpoint=%s status=fail error=%s", checkpoint, message);
-        JS_FreeCString(context, message);
-    }
+    /* Exception text is application-controlled; retain only fixed metadata. */
+    ESP_LOGE(TAG, "PROBE checkpoint=%s status=fail error=js-exception class=%s line=%u",
+             checkpoint, safe_exception_class(context, exception),
+             (unsigned)safe_exception_line(context, exception));
     JS_FreeValue(context, exception);
 }
 
@@ -245,22 +287,10 @@ static void native_timer_fired(void *arg)
 
 static JSValue js_console_log(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
+    (void)context;
     (void)this_value;
-    char message[256] = {0};
-    size_t used = 0;
-    for (int index = 0; index < argc && used + 1 < sizeof(message); index++) {
-        const char *part = JS_ToCString(context, argv[index]);
-        if (part == NULL) continue;
-        const int written = snprintf(message + used, sizeof(message) - used, "%s%s", index == 0 ? "" : " ", part);
-        JS_FreeCString(context, part);
-        if (written <= 0) break;
-        used += (size_t)written;
-        if (used >= sizeof(message)) {
-            used = sizeof(message) - 1;
-            message[used] = '\0';
-        }
-    }
-    ESP_LOGI(TAG, "JS %s", message);
+    (void)argv;
+    ESP_LOGI(TAG, "JS log argc=%d", argc);
     return JS_UNDEFINED;
 }
 
@@ -494,6 +524,9 @@ static JSValue js_native_board_list(JSContext *context, JSValueConst this_value,
     (void)argc;
     (void)argv;
     JSValue entries = JS_NewArray(context);
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL) return entries;
+    if (probe->sensors == NULL) return entries;
     JSValue descriptor = JS_NewObject(context);
     JS_SetPropertyStr(context, descriptor, "familyCode", JS_NewInt32(context, 0x0101));
     JS_SetPropertyStr(context, descriptor, "semanticId", JS_NewString(context, "device.motion"));
@@ -519,11 +552,12 @@ static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this
     const bool is_motion = instance_id != NULL && strcmp(instance_id, "motion") == 0;
     const bool is_wifi = instance_id != NULL && strcmp(instance_id, "wifi.station") == 0;
     JS_FreeCString(context, instance_id);
-    if (is_wifi) {
+    if (is_wifi && probe->wifi != NULL) {
         const waveshare_v1_wifi_event_t state = waveshare_v1_wifi_state(probe->wifi);
         return new_wifi_board_event(context, 0, 1U, &state);
     }
     if (!is_motion) return JS_UNDEFINED;
+    if (probe->sensors == NULL) return JS_UNDEFINED;
     const int32_t handle = probe->board_handle == 0 ? 1 : probe->board_handle;
     const uint32_t epoch = probe->board_reload_epoch == 0 ? 1U : probe->board_reload_epoch;
     waveshare_v1_motion_frame_t frame = {0};
@@ -543,6 +577,7 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
     JS_FreeCString(context, kind_name);
     JS_FreeValue(context, kind);
     if (is_command) {
+        if (probe->wifi == NULL) return JS_ThrowInternalError(context, "board.submit: Wi-Fi command unavailable");
         JSValue instance = JS_GetPropertyStr(context, argv[0], "instanceId");
         JSValue command = JS_GetPropertyStr(context, argv[0], "commandId");
         JSValue correlation = JS_GetPropertyStr(context, argv[0], "correlationId");
@@ -599,6 +634,7 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
     JS_FreeValue(context, epoch);
     JS_FreeValue(context, period);
     if (!valid) return JS_ThrowTypeError(context, "board.submit: invalid motion observation");
+    if (probe->sensors == NULL) return JS_ThrowInternalError(context, "board.submit: motion cadence unavailable");
     if (waveshare_v1_sensors_set_period_ms(probe->sensors, (uint32_t)period_ms) != ESP_OK) {
         return JS_ThrowInternalError(context, "board.submit: motion cadence unavailable");
     }
@@ -619,7 +655,7 @@ static JSValue js_native_board_cancel(JSContext *context, JSValueConst this_valu
     for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
         wifi_operation_slot_t *slot = &probe->wifi_operations[index];
         if (slot->active && slot->handle == handle) {
-            waveshare_v1_wifi_cancel(probe->wifi, slot->correlation_id);
+            if (probe->wifi != NULL) waveshare_v1_wifi_cancel(probe->wifi, slot->correlation_id);
             slot->active = false;
         }
     }
@@ -645,7 +681,9 @@ static JSValue js_native_board_dispose(JSContext *context, JSValueConst this_val
     if (probe != NULL) {
         probe->board_active = false;
         for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
-            if (probe->wifi_operations[index].active) waveshare_v1_wifi_cancel(probe->wifi, probe->wifi_operations[index].correlation_id);
+            if (probe->wifi != NULL && probe->wifi_operations[index].active) {
+                waveshare_v1_wifi_cancel(probe->wifi, probe->wifi_operations[index].correlation_id);
+            }
             probe->wifi_operations[index].active = false;
         }
     }
@@ -654,7 +692,7 @@ static JSValue js_native_board_dispose(JSContext *context, JSValueConst this_val
 
 static void emit_board_reading(runtime_probe_t *probe)
 {
-    if (!probe->board_active || JS_IsUndefined(probe->board_sink)) return;
+    if (probe->sensors == NULL || !probe->board_active || JS_IsUndefined(probe->board_sink)) return;
     waveshare_v1_motion_frame_t frame = {0};
     if (!waveshare_v1_sensors_read_motion(probe->sensors, &frame) || frame.sequence <= probe->board_last_sequence) return;
     JSValue event = new_board_event(probe->context, probe, probe->board_handle, probe->board_reload_epoch, &frame, true);
@@ -811,7 +849,7 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     JSValue sample = JS_NewObject(context);
     if (JS_IsException(sample)) return sample;
     waveshare_v1_motion_frame_t frame = {0};
-    if (!waveshare_v1_sensors_read_motion(probe->sensors, &frame)) {
+    if (probe->sensors == NULL || !waveshare_v1_sensors_read_motion(probe->sensors, &frame)) {
         JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "unavailable"));
         JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, esp_timer_get_time() / 1000));
         if (is_first_call) log_checkpoint("sensor_read", "fail", "sensor=device.motion cache-unavailable");
@@ -899,13 +937,16 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     return ESP_OK;
 }
 
-/* --- Boot: evaluate kernel.js, then mount the baked-in ShakeFace bundle (generation 1) --- */
+/* --- Boot: evaluate kernel.js, then mount the baked-in Counter bundle (generation 1) --- */
 
 esp_err_t runtime_probe_boot(runtime_probe_t *probe)
 {
-    if (probe == NULL || probe->sensors == NULL || probe->wifi == NULL) return ESP_ERR_INVALID_STATE;
+    if (probe == NULL) return ESP_ERR_INVALID_STATE;
     JSContext *context = probe->context;
-    const size_t kernel_length = (size_t)(_binary_kernel_js_end - _binary_kernel_js_start);
+    size_t kernel_length = (size_t)(_binary_kernel_js_end - _binary_kernel_js_start);
+    /* ESP-IDF EMBED_TXTFILES appends a C-string terminator; QuickJS parses the
+     * explicit byte range and rejects that NUL as an unexpected token. */
+    if (kernel_length > 0U && _binary_kernel_js_start[kernel_length - 1U] == '\0') kernel_length--;
     JSValue eval_result = JS_Eval(context, (const char *)_binary_kernel_js_start, kernel_length, "kernel.js",
                                   JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(eval_result)) {
@@ -935,8 +976,8 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     log_checkpoint("kernel_start", "pass", "boot_glue=present");
 
-    JSValue manifest_value = JS_NewString(context, (const char *)_binary_shakeface_g1_manifest_json_start);
-    JSValue source_value = JS_NewString(context, (const char *)_binary_shakeface_g1_js_start);
+    JSValue manifest_value = JS_NewString(context, (const char *)_binary_counter_g1_manifest_json_start);
+    JSValue source_value = JS_NewString(context, (const char *)_binary_counter_g1_js_start);
     JSValue argv[2] = {manifest_value, source_value};
     JSValue boot_result = JS_Call(context, boot_fn, JS_UNDEFINED, 2, argv);
     JS_FreeValue(context, manifest_value);
@@ -950,7 +991,7 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     JS_FreeValue(context, boot_result);
     process_pending_jobs(probe);
-    log_checkpoint("app_mount", "pass", "bundle=shakeface generation=1");
+    log_checkpoint("app_mount", "pass", "bundle=counter generation=1");
 
     JSValue lastgen_result = JS_Call(context, probe->lastgen_fn, JS_UNDEFINED, 0, NULL);
     int32_t last_generation = 1;
