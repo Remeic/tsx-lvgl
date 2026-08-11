@@ -76,7 +76,8 @@ test("display startup owns one bounded FT3168 recovery path and keeps SH8601 ali
   assert.match(displayStartup, /esp_lcd_touch_new_i2c_ft5x06/);
   assert.match(displayStartup, /lvgl_port_add_touch/);
   assert.match(displayStartup, /esp_lcd_panel_io_del\(touch_io\)/);
-  assert.match(displayStartup, /lvgl_port_add_disp_rgb/);
+  assert.match(displayStartup, /lvgl_port_add_disp\(&display_config_lvgl\)/);
+  assert.doesNotMatch(displayStartup, /lvgl_port_add_disp_rgb/);
   assert.doesNotMatch(displayStartup, /bsp_display_start\(/);
   assert.doesNotMatch(displayStartup, /i2c_new_master_bus\(/);
   assert.match(appMain, /waveshare_v1_display_start\(\)/);

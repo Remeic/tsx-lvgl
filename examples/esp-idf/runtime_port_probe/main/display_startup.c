@@ -84,21 +84,10 @@ static lv_display_t *start_display_lcd(void)
 #endif
         },
     };
-    const lvgl_port_display_rgb_cfg_t rgb_config = {
-        .flags = {
-#if CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE
-            .bb_mode = 1,
-#else
-            .bb_mode = 0,
-#endif
-#if CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR
-            .avoid_tearing = true,
-#else
-            .avoid_tearing = false,
-#endif
-        },
-    };
-    return lvgl_port_add_disp_rgb(&display_config_lvgl, &rgb_config);
+    /* SH8601 is a QSPI/SPI panel. Use the generic display registration so the
+     * port waits for the panel-IO color-transfer callback before reusing the
+     * LVGL draw buffer; the RGB registration path is for RGB LCD peripherals. */
+    return lvgl_port_add_disp(&display_config_lvgl);
 }
 
 static esp_err_t start_touch(lv_display_t *display)
