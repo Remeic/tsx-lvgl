@@ -55,3 +55,20 @@ void lvgl_host_remove(lvgl_host_t *host, int parent, int child);
 void lvgl_host_dispose(lvgl_host_t *host, int id);
 /** `id == 0` loads a fresh blank screen; otherwise loads the screen at `id`. */
 void lvgl_host_load_screen(lvgl_host_t *host, int id);
+
+/** Mirrors NATIVE_STYLE_PROP in packages/device/src/style.ts. Append-only; never renumber. */
+typedef enum {
+    LVGL_HOST_STYLE_BACKGROUND_COLOR = 0,
+    LVGL_HOST_STYLE_BORDER_COLOR = 1,
+    LVGL_HOST_STYLE_BORDER_WIDTH = 2,
+    LVGL_HOST_STYLE_BORDER_RADIUS = 3,
+    LVGL_HOST_STYLE_PADDING_TOP = 4,
+    LVGL_HOST_STYLE_PADDING_RIGHT = 5,
+    LVGL_HOST_STYLE_PADDING_BOTTOM = 6,
+    LVGL_HOST_STYLE_PADDING_LEFT = 7,
+    LVGL_HOST_STYLE_COLOR = 8,
+    LVGL_HOST_STYLE_TEXT_ALIGN = 9,
+    LVGL_HOST_STYLE_PROP_COUNT
+} lvgl_host_style_prop_t;
+void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value);
+void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop);

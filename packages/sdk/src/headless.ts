@@ -7,6 +7,7 @@ interface HeadlessNode {
   text: string | undefined;
   parent: number | null;
   readonly children: number[];
+  readonly style: Map<number, number>;
 }
 export interface HeadlessResult {
   readonly texts: readonly string[];
@@ -36,6 +37,7 @@ export function createHeadlessNative(boardId: string): {
   readonly native: NativeBindings;
   readonly logs: string[];
   activeTexts(): readonly string[];
+  styleOf(id: number, prop: number): number | undefined;
 } {
   const nodes = new Map<number, HeadlessNode>();
   const logs: string[] = [];
@@ -46,7 +48,7 @@ export function createHeadlessNative(boardId: string): {
   const lvgl = {
     create(kind: NativeWidgetKind): number {
       const id = nextNodeId++;
-      nodes.set(id, { id, kind, text: undefined, parent: null, children: [] });
+      nodes.set(id, { id, kind, text: undefined, parent: null, children: [], style: new Map() });
       return id;
     },
 
@@ -85,6 +87,14 @@ export function createHeadlessNative(boardId: string): {
 
     loadScreen(id: number): void {
       activeScreen = id;
+    },
+
+    setStyle(id: number, prop: number, value: number): void {
+      requireNode(nodes, id).style.set(prop, value);
+    },
+
+    resetStyle(id: number, prop: number): void {
+      requireNode(nodes, id).style.delete(prop);
     },
   };
 
@@ -140,6 +150,9 @@ export function createHeadlessNative(boardId: string): {
       const result: string[] = [];
       collectTexts(nodes, activeScreen, result);
       return result;
+    },
+    styleOf(id: number, prop: number): number | undefined {
+      return requireNode(nodes, id).style.get(prop);
     },
   };
 }

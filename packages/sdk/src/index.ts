@@ -2,11 +2,13 @@ import {
   Button,
   Fragment,
   Screen,
+  StyleSheet,
   Text,
   View,
   createApplicationFacade,
 } from "@tsx-lvgl/core";
 export type { Component, VNode, VNodeChild } from "@tsx-lvgl/core";
+export type { ViewStyle, TextStyle, StyleColor, StyleProp } from "@tsx-lvgl/core";
 
 import {
   useEffect,
@@ -30,6 +32,7 @@ const applicationFacade = createApplicationFacade({
   Button,
   Fragment,
   Screen,
+  StyleSheet,
   Text,
   View,
   isShake,
@@ -42,6 +45,7 @@ const applicationFacade = createApplicationFacade({
   Button: typeof Button;
   Fragment: typeof Fragment;
   Screen: typeof Screen;
+  StyleSheet: typeof StyleSheet;
   Text: typeof Text;
   View: typeof View;
   isShake: typeof isShake;
@@ -56,6 +60,7 @@ const {
   Button: FacadeButton,
   Fragment: FacadeFragment,
   Screen: FacadeScreen,
+  StyleSheet: FacadeStyleSheet,
   Text: FacadeText,
   View: FacadeView,
   isShake: facadeIsShake,
@@ -70,6 +75,7 @@ export {
   FacadeButton as Button,
   FacadeFragment as Fragment,
   FacadeScreen as Screen,
+  FacadeStyleSheet as StyleSheet,
   FacadeText as Text,
   FacadeView as View,
   facadeIsShake as isShake,

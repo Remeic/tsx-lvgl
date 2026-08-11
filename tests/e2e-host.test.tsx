@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { BOARD_ID, PROTOCOL_VERSION, compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
-import { createKernel } from "@tsx-lvgl/device";
+import { NATIVE_STYLE_PROP, createKernel } from "@tsx-lvgl/device";
 import {
   RUNTIME_BUNDLE_MAX_BYTES,
   validateRuntimeBundle,
@@ -216,6 +216,60 @@ test("compiling ShakeFace twice is byte-for-byte and manifest-for-manifest deter
   const second = compileShakeFace(1);
   assert.deepEqual([...first.bytes], [...second.bytes]);
   assert.deepEqual(first.manifest, second.manifest);
+});
+
+const styledSource = `
+  import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
+  export default function Styled() {
+    const [step, setStep] = useState(0);
+    const style = step === 0
+      ? { backgroundColor: "red", borderWidth: 1 }
+      : step === 1
+        ? { backgroundColor: "red", borderWidth: 2 }
+        : { backgroundColor: "red" };
+    return (
+      <Screen>
+        <Text text="styled" style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a styled component render, changing one style key emits exactly one setStyle, and removing a key emits exactly one resetStyle", () => {
+  const output = compileTsxBundle({
+    fileName: "Styled.tsx",
+    source: styledSource,
+    bundleId: "styled",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [textId] = fake.lvgl.liveIdsOfKind("text");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(textId, "expected a live text widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(textId, NATIVE_STYLE_PROP.borderWidth), 1);
+
+  const setBeforeFirstClick = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emittedOnFirstClick = fake.lvgl.setStyleCalls.slice(setBeforeFirstClick);
+  assert.deepEqual(emittedOnFirstClick, [{ id: textId, prop: NATIVE_STYLE_PROP.borderWidth, value: 2 }]);
+
+  const setBeforeSecondClick = fake.lvgl.setStyleCalls.length;
+  const resetBeforeSecondClick = fake.lvgl.resetStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  assert.equal(fake.lvgl.setStyleCalls.length, setBeforeSecondClick, "backgroundColor is unchanged, so no setStyle");
+  assert.deepEqual(
+    fake.lvgl.resetStyleCalls.slice(resetBeforeSecondClick),
+    [{ id: textId, prop: NATIVE_STYLE_PROP.borderWidth }],
+  );
 });
 
 test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {

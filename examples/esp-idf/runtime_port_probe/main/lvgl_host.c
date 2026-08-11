@@ -264,6 +264,109 @@ void lvgl_host_dispose(lvgl_host_t *host, int id)
     invalidate_descendants(host, id);
 }
 
+/** COLOR/TEXT_ALIGN target the inner label when present (Button), else the object itself. */
+static lv_obj_t *style_target(lvgl_host_entry_t *entry, int prop)
+{
+    if (prop == LVGL_HOST_STYLE_COLOR || prop == LVGL_HOST_STYLE_TEXT_ALIGN) {
+        return entry->label != NULL ? entry->label : entry->object;
+    }
+    return entry->object;
+}
+
+void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
+{
+    lvgl_host_entry_t *entry = entry_at(host, id);
+    if (entry == NULL) return;
+    lv_obj_t *target = style_target(entry, prop);
+    if (target == NULL) return;
+
+    switch (prop) {
+        case LVGL_HOST_STYLE_BACKGROUND_COLOR:
+            lv_obj_set_style_bg_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            lv_obj_set_style_bg_opa(target, LV_OPA_COVER, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_COLOR:
+            lv_obj_set_style_border_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_WIDTH:
+            lv_obj_set_style_border_width(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_RADIUS:
+            lv_obj_set_style_radius(target, value > LV_RADIUS_CIRCLE ? LV_RADIUS_CIRCLE : value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_TOP:
+            lv_obj_set_style_pad_top(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_RIGHT:
+            lv_obj_set_style_pad_right(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_BOTTOM:
+            lv_obj_set_style_pad_bottom(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_LEFT:
+            lv_obj_set_style_pad_left(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_COLOR:
+            lv_obj_set_style_text_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            break;
+        case LVGL_HOST_STYLE_TEXT_ALIGN: {
+            lv_text_align_t align = LV_TEXT_ALIGN_LEFT;
+            if (value == 1) align = LV_TEXT_ALIGN_CENTER;
+            else if (value == 2) align = LV_TEXT_ALIGN_RIGHT;
+            lv_obj_set_style_text_align(target, align, 0);
+            break;
+        }
+        default:
+            /* Unknown codes are rejected at the binding layer; ignore defensively. */
+            break;
+    }
+}
+
+void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
+{
+    lvgl_host_entry_t *entry = entry_at(host, id);
+    if (entry == NULL) return;
+    lv_obj_t *target = style_target(entry, prop);
+    if (target == NULL) return;
+
+    switch (prop) {
+        case LVGL_HOST_STYLE_BACKGROUND_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BG_COLOR, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BG_OPA, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BORDER_COLOR, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_WIDTH:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BORDER_WIDTH, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_RADIUS:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_RADIUS, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_TOP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_TOP, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_RIGHT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_RIGHT, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_BOTTOM:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_BOTTOM, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_LEFT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_LEFT, 0);
+            break;
+        case LVGL_HOST_STYLE_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_COLOR, 0);
+            break;
+        case LVGL_HOST_STYLE_TEXT_ALIGN:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_ALIGN, 0);
+            break;
+        default:
+            /* Unknown codes are rejected at the binding layer; ignore defensively. */
+            break;
+    }
+}
+
 void lvgl_host_load_screen(lvgl_host_t *host, int id)
 {
     if (id == 0) {

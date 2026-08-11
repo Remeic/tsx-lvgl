@@ -12,12 +12,37 @@ export const elementTypes = ["Screen", "View", "Text", "Button"] as const;
 
 export type ElementType = (typeof elementTypes)[number];
 
+/** S1 box style keys. Named colors resolve to fixed RGB ints; `transparent` means "absent". */
+export type StyleColor = `#${string}` | "red" | "green" | "blue" | "black" | "white" | "gray" | "yellow" | "cyan" | "magenta" | "transparent";
+
+export interface ViewStyle {
+  readonly backgroundColor?: StyleColor;
+  readonly borderColor?: StyleColor;
+  readonly borderWidth?: number;
+  readonly borderRadius?: number;
+  readonly padding?: number;
+  readonly paddingTop?: number;
+  readonly paddingRight?: number;
+  readonly paddingBottom?: number;
+  readonly paddingLeft?: number;
+  readonly paddingHorizontal?: number;
+  readonly paddingVertical?: number;
+}
+
+export interface TextStyle extends ViewStyle {
+  readonly color?: StyleColor;
+  readonly textAlign?: "left" | "center" | "right";
+}
+
+/** RN-style style prop: a single style object, or an array where later entries win and falsy entries are skipped. */
+export type StyleProp<T> = T | ReadonlyArray<T | false | null | undefined>;
+
 /** `extends Record<ElementType, object>` fails the build if a tag has no props. */
 export interface WidgetProps extends Record<ElementType, object> {
-  readonly Screen: { readonly children?: VNodeChild };
-  readonly View: { readonly children?: VNodeChild };
-  readonly Text: { readonly text: string | number };
-  readonly Button: { readonly label: string; readonly onClick?: () => void };
+  readonly Screen: { readonly children?: VNodeChild; readonly style?: StyleProp<ViewStyle> };
+  readonly View: { readonly children?: VNodeChild; readonly style?: StyleProp<ViewStyle> };
+  readonly Text: { readonly text: string | number; readonly style?: StyleProp<TextStyle> };
+  readonly Button: { readonly label: string; readonly onClick?: () => void; readonly style?: StyleProp<TextStyle> };
 }
 
 /**
@@ -30,11 +55,20 @@ export const View = "View";
 export const Text = "Text";
 export const Button = "Button";
 
+/** Freezes each style object and the sheet itself; mirrors React Native's `StyleSheet.create`. */
+export const StyleSheet = Object.freeze({
+  create<T extends Record<string, TextStyle>>(styles: T): Readonly<T> {
+    for (const key of Object.keys(styles)) Object.freeze(styles[key]);
+    return Object.freeze(styles);
+  },
+});
+
 /** One descriptor keeps the SDK facade and device module resolver in lockstep. */
 export const APPLICATION_FACADE_KEYS = [
   "Button",
   "Fragment",
   "Screen",
+  "StyleSheet",
   "Text",
   "View",
   "isShake",
