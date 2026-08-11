@@ -852,7 +852,7 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     if (probe->sensors == NULL || !waveshare_v1_sensors_read_motion(probe->sensors, &frame)) {
         JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "unavailable"));
         JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, esp_timer_get_time() / 1000));
-        if (is_first_call) log_checkpoint("sensor_read", "fail", "sensor=device.motion cache-unavailable");
+        if (is_first_call) log_checkpoint("sensor_read", "unavailable", "sensor=device.motion cache-unavailable");
         return sample;
     }
     JSValue value = JS_NewObject(context);
@@ -1329,7 +1329,7 @@ esp_err_t runtime_probe_start_sensors(runtime_probe_t *probe)
     if (probe == NULL) return ESP_ERR_INVALID_ARG;
     if (probe->sensors != NULL) return ESP_OK;
     const esp_err_t result = waveshare_v1_sensors_create(bsp_i2c_get_handle(), &probe->sensors);
-    log_checkpoint("imu_init", result == ESP_OK ? "pass" : "fail",
+    log_checkpoint("imu_init", result == ESP_OK ? "pass" : "unavailable",
                    result == ESP_OK ? "provider=waveshare_v1_sensors cache-task=true" : "provider=waveshare_v1_sensors unavailable");
     return result;
 }

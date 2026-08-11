@@ -87,10 +87,13 @@ static bool find_number_field(const char *json, const char *key, uint32_t *out)
 static bool find_string_field(const char *json, const char *key, char *out, size_t out_capacity)
 {
     char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
     const char *at = strstr(json, pattern);
     if (at == NULL) return false;
     at += strlen(pattern);
+    while (*at == ' ' || *at == '\t' || *at == '\r' || *at == '\n') at++;
+    if (*at != '"') return false;
+    at++;
     const char *end = strchr(at, '"');
     if (end == NULL) return false;
     const size_t length = (size_t)(end - at);

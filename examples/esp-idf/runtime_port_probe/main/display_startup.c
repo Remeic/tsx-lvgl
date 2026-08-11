@@ -104,8 +104,19 @@ static lv_display_t *start_display_lcd(void)
 static esp_err_t start_touch(lv_display_t *display)
 {
     if (display == NULL) return ESP_ERR_INVALID_ARG;
+
+    const esp_err_t i2c_result = bsp_i2c_init();
+    if (i2c_result != ESP_OK) {
+        ESP_LOGW(TAG, "touch_bus_init status=unavailable");
+        ESP_LOGW(TAG, "touch_init status=unavailable attempts=0");
+        return i2c_result;
+    }
+
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
-    if (bus == NULL) return ESP_ERR_INVALID_STATE;
+    if (bus == NULL) {
+        ESP_LOGW(TAG, "touch_init status=unavailable attempts=0");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     esp_err_t last_result = ESP_ERR_INVALID_STATE;
     for (uint32_t attempt = 0; attempt < WAVESHARE_V1_TOUCH_INIT_ATTEMPTS; attempt++) {

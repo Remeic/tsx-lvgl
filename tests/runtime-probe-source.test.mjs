@@ -7,6 +7,7 @@ const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/m
 const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/app_main.c", import.meta.url), "utf8");
 const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
+const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
@@ -58,10 +59,13 @@ test("native runtime diagnostics are bounded metadata and never stringify payloa
   assert.match(source, /line=%u/);
   assert.doesNotMatch(transport, /frame_error tag=%\.\*s/);
   assert.match(transport, /frame_error tag_length=%u/);
+  assert.match(transport, /snprintf\(pattern, sizeof\(pattern\), "\\\"%s\\\":"/);
+  assert.match(transport, /while \(\*at == ' ' \|\| \*at == '\\t'/);
 });
 
 test("display startup owns one bounded FT3168 recovery path and keeps SH8601 alive", () => {
   assert.match(mainCmake, /display_startup\.c/);
+  assert.match(displayStartup, /bsp_i2c_init\(\)/);
   assert.match(displayStartup, /i2c_master_bus_handle_t bus = bsp_i2c_get_handle\(\);/);
   assert.match(displayStartup, /i2c_master_bus_reset\(bus\)/);
   assert.match(displayStartup, /WAVESHARE_V1_TOUCH_INIT_ATTEMPTS/);
@@ -84,6 +88,14 @@ test("optional providers report unavailable state without aborting application b
   assert.doesNotMatch(appMain, /if \(runtime_probe_start_connectivity\(probe\)/);
   assert.doesNotMatch(source, /probe == NULL \|\| probe->sensors == NULL \|\| probe->wifi == NULL/);
   assert.match(source, /if \(probe->sensors == NULL\) return entries;/);
+});
+
+test("UART acceptance keeps optional touch and motion capability checks fail-soft", () => {
+  assert.match(checker, /const optionalCapabilities = new Map\(\[/);
+  assert.match(checker, /\[\"imu_init\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
+  assert.match(checker, /\[\"sensor_read\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
+  assert.match(checker, /\"display_init\"/);
+  assert.match(checker, /\"touch_init\"/);
 });
 
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {

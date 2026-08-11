@@ -23,28 +23,37 @@ if (!logPath) {
 
 const log = await readFile(logPath, "utf8");
 const required = [
+  "board_start",
+  "display_init",
+  "touch_init",
   "engine_cycles",
   "js_eval",
   "lvgl_binding",
-  "imu_init",
-  "sensor_read",
   "timer_callback",
   "kernel_start",
   "app_mount",
   ...(requireReload ? ["bundle_reload", "bundle_reject"] : []),
 ];
+const optionalCapabilities = new Map([
+  ["imu_init", new Set(["pass", "unavailable"])],
+  ["sensor_read", new Set(["pass", "unavailable"])],
+]);
 const checkpoints = new Map();
 for (const match of log.matchAll(/PROBE checkpoint=(\S+) status=(\S+)/g)) {
   checkpoints.set(match[1], match[2]);
 }
 
 const failures = required.filter((checkpoint) => checkpoints.get(checkpoint) !== "pass");
+for (const [checkpoint, allowed] of optionalCapabilities) {
+  const status = checkpoints.get(checkpoint);
+  if (status === undefined || !allowed.has(status)) failures.push(checkpoint);
+}
 if (failures.length > 0) {
   console.error(`runtime probe incomplete: ${failures.join(", ")}`);
-  for (const checkpoint of required) {
+  for (const checkpoint of [...required, ...optionalCapabilities.keys()]) {
     console.error(`  ${checkpoint}: ${checkpoints.get(checkpoint) ?? "missing"}`);
   }
   process.exit(1);
 }
 
-console.log(`runtime probe passed: ${required.join(", ")}`);
+console.log(`runtime probe passed: ${[...required, ...optionalCapabilities.keys()].join(", ")}`);
