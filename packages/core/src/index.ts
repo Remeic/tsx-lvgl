@@ -15,6 +15,9 @@ export type ElementType = (typeof elementTypes)[number];
 /** S1 box style keys. Named colors resolve to fixed RGB ints; `transparent` means "absent". */
 export type StyleColor = `#${string}` | "red" | "green" | "blue" | "black" | "white" | "gray" | "yellow" | "cyan" | "magenta" | "transparent";
 
+/** S2 size key: px, a `"N%"` percent string, or `"auto"` (content-sized). */
+export type StyleDim = number | `${number}%` | "auto";
+
 export interface ViewStyle {
   readonly backgroundColor?: StyleColor;
   readonly borderColor?: StyleColor;
@@ -27,6 +30,16 @@ export interface ViewStyle {
   readonly paddingLeft?: number;
   readonly paddingHorizontal?: number;
   readonly paddingVertical?: number;
+  readonly width?: StyleDim;
+  readonly height?: StyleDim;
+  /** v1: absolute and relative are equivalent, no native effect. */
+  readonly position?: "absolute" | "relative";
+  /** px, may be negative; LVGL translate so it composes with future flex parents. */
+  readonly left?: number;
+  /** px, may be negative; LVGL translate so it composes with future flex parents. */
+  readonly top?: number;
+  /** "none" hides without unmounting. */
+  readonly display?: "flex" | "none";
 }
 
 export interface TextStyle extends ViewStyle {
@@ -34,12 +47,15 @@ export interface TextStyle extends ViewStyle {
   readonly textAlign?: "left" | "center" | "right";
 }
 
+/** A screen has no parent to size/position/hide itself against; S2 size/position/display keys don't apply. */
+export type ScreenStyle = Omit<ViewStyle, "position" | "left" | "top" | "width" | "height" | "display">;
+
 /** RN-style style prop: a single style object, or an array where later entries win and falsy entries are skipped. */
 export type StyleProp<T> = T | ReadonlyArray<T | false | null | undefined>;
 
 /** `extends Record<ElementType, object>` fails the build if a tag has no props. */
 export interface WidgetProps extends Record<ElementType, object> {
-  readonly Screen: { readonly children?: VNodeChild; readonly style?: StyleProp<ViewStyle> };
+  readonly Screen: { readonly children?: VNodeChild; readonly style?: StyleProp<ScreenStyle> };
   readonly View: { readonly children?: VNodeChild; readonly style?: StyleProp<ViewStyle> };
   readonly Text: { readonly text: string | number; readonly style?: StyleProp<TextStyle> };
   readonly Button: { readonly label: string; readonly onClick?: () => void; readonly style?: StyleProp<TextStyle> };

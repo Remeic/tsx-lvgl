@@ -1,6 +1,6 @@
 # Feature 0011 — Widget styling
 
-Status: S1 (box styles) implemented.
+Status: S1 (box styles), S2 (size/position/display) implemented.
 
 ## Objective
 
@@ -25,9 +25,31 @@ lookup indirection — the returned objects are the same style objects).
 paddingTop, paddingRight, paddingBottom, paddingLeft, paddingHorizontal,
 paddingVertical, color, textAlign`.
 
+## S2 key set
+
+`width, height, position, left, top, display`, on `ViewStyle` (so `TextStyle`
+too). `ScreenStyle` (Screen's `style` prop type) excludes `width, height,
+position, left, top, display` — a screen has no parent to size/position/hide
+itself against — via `Omit<ViewStyle, ...>`.
+
+- `width`/`height`: `number | \`${number}%\` | "auto"` (`StyleDim`, exported
+  from core). px is `value >= 0`, rounded; negative px is invalid and skips
+  the key. `"N%"` is `N` parsed as a float, rounded, clamped to 0..1000, then
+  value-encoded (see ABI below). `"auto"` sizes to content. Anything else
+  (bad string, non-number/string) skips the key.
+- `position?: "absolute" | "relative"`: accepted for RN-shape compat, but v1
+  gives both **no native effect** — LVGL absolute-like semantics are the
+  default already, so the key is a documented equivalent, not yet wired.
+- `left`/`top`: any finite `number`, rounded; negative is valid. Maps to
+  LVGL translate (not a position offset), so it composes with future flex
+  parents (S3) instead of fighting layout.
+- `display?: "flex" | "none"`: `"none"` hides the widget (LVGL
+  `LV_OBJ_FLAG_HIDDEN`) without unmounting it — state and children are
+  preserved, `"flex"` (or removing the key) shows it again. `"flex"` is not
+  itself a layout mode yet (that's S3); it is just "shown".
+
 Planned, not yet implemented:
 
-- S2: `width, height, minWidth/maxWidth, minHeight/maxHeight, top/right/bottom/left, position`.
 - S3: `flexDirection, justifyContent, alignItems, alignSelf, flexGrow/flexShrink/flexBasis, gap`.
 - S4: `opacity, transform: [{ rotate }, { scale }]`.
 
@@ -64,6 +86,25 @@ resetStyle(id: number, prop: number): void;
 committed test (`tests/runtime-probe-source.test.mjs`) regex-extracts
 `lvgl_host_style_prop_t` from the C header and asserts it deep-equals
 `NATIVE_STYLE_PROP`; the two can never drift silently.
+
+S2 value encoding is our own stable ABI, never an LVGL bit encoding — mirrored
+in both `packages/device/src/style.ts` and `lvgl_host.h`:
+
+- `width`/`height` (codes 10/11): one code per LVGL prop across px, percent
+  and auto, so a px<->% transition diffs as a single `setStyle` — two codes
+  would emit a `setStyle` + `resetStyle` pair touching the same LVGL prop,
+  and the trailing reset would wipe the new value. `value >= 0` is px
+  (`lv_obj_set_style_width/height`); `value == -2000` is `"auto"`
+  (`LV_SIZE_CONTENT`); `-1001 <= value <= -1` is percent `N`, recovered as
+  `lv_pct(-(value) - 1)`.
+- `left`/`top` (codes 12/13): any int32, applied via
+  `lv_obj_set_style_translate_x/y`.
+- `display` (code 14): 1 sets `LV_OBJ_FLAG_HIDDEN`, 0 (or reset) clears it —
+  a widget flag, not an `LV_STYLE_*` prop, so `resetStyle` for this code
+  clears the flag instead of calling `lv_obj_remove_local_style_prop`.
+- `position` has no code at all: its normalizer is registered (so
+  `STYLE_NORMALIZERS` stays an exhaustive `Record<keyof TextStyle, ...>`)
+  but intentionally emits nothing.
 
 Button routing: `color`/`textAlign` (codes 8-9) target the button's inner
 label; every other code targets the widget's own object. Resetting

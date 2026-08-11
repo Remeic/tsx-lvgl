@@ -56,7 +56,16 @@ void lvgl_host_dispose(lvgl_host_t *host, int id);
 /** `id == 0` loads a fresh blank screen; otherwise loads the screen at `id`. */
 void lvgl_host_load_screen(lvgl_host_t *host, int id);
 
-/** Mirrors NATIVE_STYLE_PROP in packages/device/src/style.ts. Append-only; never renumber. */
+/**
+ * Mirrors NATIVE_STYLE_PROP in packages/device/src/style.ts. Append-only; never renumber.
+ *
+ * Value encoding is the TS normalizer's stable ABI, never an LVGL bit
+ * encoding:
+ * - WIDTH/HEIGHT: `value >= 0` is px; `value == -2000` is LV_SIZE_CONTENT
+ *   ("auto"); `-1001 <= value <= -1` is a percent, `lv_pct(-(value) - 1)`.
+ * - LEFT/TOP: any int32, applied as LVGL translate (negatives valid).
+ * - DISPLAY: 1 hides (LV_OBJ_FLAG_HIDDEN), 0 shows.
+ */
 typedef enum {
     LVGL_HOST_STYLE_BACKGROUND_COLOR = 0,
     LVGL_HOST_STYLE_BORDER_COLOR = 1,
@@ -68,6 +77,11 @@ typedef enum {
     LVGL_HOST_STYLE_PADDING_LEFT = 7,
     LVGL_HOST_STYLE_COLOR = 8,
     LVGL_HOST_STYLE_TEXT_ALIGN = 9,
+    LVGL_HOST_STYLE_WIDTH = 10,
+    LVGL_HOST_STYLE_HEIGHT = 11,
+    LVGL_HOST_STYLE_LEFT = 12,
+    LVGL_HOST_STYLE_TOP = 13,
+    LVGL_HOST_STYLE_DISPLAY = 14,
     LVGL_HOST_STYLE_PROP_COUNT
 } lvgl_host_style_prop_t;
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value);

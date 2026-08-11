@@ -272,6 +272,46 @@ test("a styled component render, changing one style key emits exactly one setSty
   );
 });
 
+const sizedSource = `
+  import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
+  export default function Sized() {
+    const [step, setStep] = useState(0);
+    const style = step === 0 ? { width: "50%" } : { width: 120 };
+    return (
+      <Screen>
+        <Text text="sized" style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a width style re-rendered from percent to px emits a single setStyle per change, encoded per the S2 ABI", () => {
+  const output = compileTsxBundle({
+    fileName: "Sized.tsx",
+    source: sizedSource,
+    bundleId: "sized",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [textId] = fake.lvgl.liveIdsOfKind("text");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(textId, "expected a live text widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(textId, NATIVE_STYLE_PROP.width), -51);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: textId, prop: NATIVE_STYLE_PROP.width, value: 120 }]);
+});
+
 test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {
   const generated = compileEmbeddedShakeFace(1);
   assert.equal(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.js"), "utf8"), generated.code);

@@ -154,6 +154,78 @@ test("array styles skip falsy entries and merge with later entries winning", () 
 });
 
 // ---------------------------------------------------------------------------
+// width/height (S2)
+// ---------------------------------------------------------------------------
+
+test("width and height accept non-negative px, rounded", () => {
+  const style = normalizeStyle({ width: 10.4, height: 20.6 });
+  assert.equal(style.get(P.width), 10);
+  assert.equal(style.get(P.height), 21);
+});
+
+test("negative px width/height is skipped", () => {
+  assert.equal(normalizeStyle({ width: -1 }).has(P.width), false);
+});
+
+test("percent strings encode as -(N + 1), rounded", () => {
+  assert.equal(normalizeStyle({ width: "50%" }).get(P.width), -51);
+  assert.equal(normalizeStyle({ width: "0%" }).get(P.width), -1);
+  assert.equal(normalizeStyle({ width: "100%" }).get(P.width), -101);
+});
+
+test("percent above 1000 clamps to 1000 before encoding", () => {
+  assert.equal(normalizeStyle({ width: "2000%" }).get(P.width), -1001);
+});
+
+test('"auto" encodes as -2000', () => {
+  assert.equal(normalizeStyle({ width: "auto" }).get(P.width), -2000);
+  assert.equal(normalizeStyle({ height: "auto" }).get(P.height), -2000);
+});
+
+test("an invalid dimension string or NaN is skipped", () => {
+  assert.equal(normalizeStyle({ width: "abc%" }).has(P.width), false);
+  assert.equal(normalizeStyle({ width: "big" }).has(P.width), false, "not a percent string and not \"auto\"");
+  assert.equal(normalizeStyle({ width: Number.NaN }).has(P.width), false);
+});
+
+// ---------------------------------------------------------------------------
+// left/top (S2)
+// ---------------------------------------------------------------------------
+
+test("left and top accept any finite number, rounded, negatives preserved", () => {
+  const style = normalizeStyle({ left: -4, top: 2.6 });
+  assert.equal(style.get(P.left), -4);
+  assert.equal(style.get(P.top), 3);
+});
+
+test("non-finite left/top is skipped", () => {
+  assert.equal(normalizeStyle({ left: Number.NaN }).has(P.left), false);
+  assert.equal(normalizeStyle({ top: Number.POSITIVE_INFINITY }).has(P.top), false);
+});
+
+// ---------------------------------------------------------------------------
+// display (S2)
+// ---------------------------------------------------------------------------
+
+test("display maps none/flex to 1/0", () => {
+  assert.equal(normalizeStyle({ display: "none" }).get(P.display), 1);
+  assert.equal(normalizeStyle({ display: "flex" }).get(P.display), 0);
+});
+
+test("an unrecognized display is skipped", () => {
+  assert.equal(normalizeStyle({ display: "block" as unknown as "flex" }).has(P.display), false);
+});
+
+// ---------------------------------------------------------------------------
+// position (S2, no-op)
+// ---------------------------------------------------------------------------
+
+test("position emits nothing for either accepted value", () => {
+  assert.equal(normalizeStyle({ position: "absolute" }).size, 0);
+  assert.equal(normalizeStyle({ position: "relative" }).size, 0);
+});
+
+// ---------------------------------------------------------------------------
 // applyStyleDiff
 // ---------------------------------------------------------------------------
 
@@ -191,6 +263,16 @@ test("applyStyleDiff is a no-op for two normalizations of the same style content
   const next = normalizeStyle({ backgroundColor: "red", padding: 4 });
   applyStyleDiff(lvgl, id, previous, next);
   assert.deepEqual(lvgl.setStyleCalls, []);
+  assert.deepEqual(lvgl.resetStyleCalls, []);
+});
+
+test("a px-to-percent width transition diffs as exactly one setStyle, never a reset (same code, both forms)", () => {
+  const lvgl = new FakeNativeLvgl();
+  const id = lvgl.create("view");
+  const previous = normalizeStyle({ width: 120 });
+  const next = normalizeStyle({ width: "50%" });
+  applyStyleDiff(lvgl, id, previous, next);
+  assert.deepEqual(lvgl.setStyleCalls, [{ id, prop: P.width, value: -51 }]);
   assert.deepEqual(lvgl.resetStyleCalls, []);
 });
 

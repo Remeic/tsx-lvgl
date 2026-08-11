@@ -288,6 +288,28 @@ test("updateInstance with a re-normalized identical style makes zero native call
   assert.equal(lvgl.resetStyleCalls.length, resetBefore);
 });
 
+test("createInstance and updateInstance apply S2 width/left/display through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { width: 120, left: -4, display: "none" } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.width), 120);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.left), -4);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.display), 1);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { width: 120, left: -4, display: "none" } },
+    { style: { width: "50%", left: -4, display: "flex" } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.width, value: -51 },
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.display, value: 0 },
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------

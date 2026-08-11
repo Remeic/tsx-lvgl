@@ -8,7 +8,7 @@ import {
   createApplicationFacade,
 } from "@tsx-lvgl/core";
 export type { Component, VNode, VNodeChild } from "@tsx-lvgl/core";
-export type { ViewStyle, TextStyle, StyleColor, StyleProp } from "@tsx-lvgl/core";
+export type { ViewStyle, TextStyle, ScreenStyle, StyleColor, StyleDim, StyleProp } from "@tsx-lvgl/core";
 
 import {
   useEffect,

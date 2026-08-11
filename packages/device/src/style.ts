@@ -8,7 +8,19 @@
 import type { TextStyle } from "@tsx-lvgl/core";
 import type { NativeLvgl } from "./native.js";
 
-/** Mirrors `lvgl_host_style_prop_t` in lvgl_host.h. Append-only; never renumber. */
+/**
+ * Mirrors `lvgl_host_style_prop_t` in lvgl_host.h. Append-only; never renumber.
+ *
+ * Value encoding is OUR stable ABI, never an LVGL bit encoding:
+ * - `width`/`height` (10/11): px is `value >= 0` (rounded); percent is
+ *   `-(N + 1)` for `N` in 0..1000 (so -1..-1001); `"auto"` is -2000. One code
+ *   per LVGL prop across all three forms — a px<->% transition must diff as a
+ *   single `setStyle`, never a `setStyle` + `resetStyle` pair on the same
+ *   underlying LVGL prop (the trailing reset would wipe the new value).
+ * - `left`/`top` (12/13): any finite number, rounded; negatives are valid
+ *   (LVGL translate, not position).
+ * - `display` (14): "none" is 1 (hidden), "flex" is 0 (shown).
+ */
 export const NATIVE_STYLE_PROP = Object.freeze({
   backgroundColor: 0,
   borderColor: 1,
@@ -20,6 +32,11 @@ export const NATIVE_STYLE_PROP = Object.freeze({
   paddingLeft: 7,
   color: 8,
   textAlign: 9,
+  width: 10,
+  height: 11,
+  left: 12,
+  top: 13,
+  display: 14,
 } as const);
 
 export type NormalizedStyle = ReadonlyMap<number, number>;
@@ -59,6 +76,33 @@ function normalizeTextAlign(value: unknown): number | undefined {
   return undefined;
 }
 
+/** width/height: px (>=0, rounded) | "N%" (rounded, clamped 0..1000, -(N+1)) | "auto" (-2000). */
+function normalizeDimension(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) return undefined;
+    return Math.round(value);
+  }
+  if (typeof value !== "string") return undefined;
+  if (value === "auto") return -2000;
+  if (!value.endsWith("%")) return undefined;
+  const percent = Number.parseFloat(value.slice(0, -1));
+  if (!Number.isFinite(percent)) return undefined;
+  const clamped = Math.min(1000, Math.max(0, Math.round(percent)));
+  return -(clamped + 1);
+}
+
+/** left/top: any finite number, rounded; negatives are valid (LVGL translate). */
+function normalizeTranslate(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.round(value);
+}
+
+function normalizeDisplay(value: unknown): number | undefined {
+  if (value === "none") return 1;
+  if (value === "flex") return 0;
+  return undefined;
+}
+
 type StyleNormalizer = (value: unknown, out: Map<number, number>) => void;
 
 function colorProp(prop: number): StyleNormalizer {
@@ -89,6 +133,28 @@ function textAlignProp(value: unknown, out: Map<number, number>): void {
   if (code !== undefined) out.set(NATIVE_STYLE_PROP.textAlign, code);
 }
 
+function dimProp(prop: number): StyleNormalizer {
+  return (value, out) => {
+    const dim = normalizeDimension(value);
+    if (dim !== undefined) out.set(prop, dim);
+  };
+}
+
+function translateProp(prop: number): StyleNormalizer {
+  return (value, out) => {
+    const translate = normalizeTranslate(value);
+    if (translate !== undefined) out.set(prop, translate);
+  };
+}
+
+function displayProp(value: unknown, out: Map<number, number>): void {
+  const code = normalizeDisplay(value);
+  if (code !== undefined) out.set(NATIVE_STYLE_PROP.display, code);
+}
+
+/** v1: absolute and relative are equivalent; no native effect. */
+function positionProp(): void {}
+
 const P = NATIVE_STYLE_PROP;
 
 /**
@@ -111,6 +177,12 @@ const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizer>> = Ob
   borderRadius: intProp(P.borderRadius),
   color: colorProp(P.color),
   textAlign: textAlignProp,
+  width: dimProp(P.width),
+  height: dimProp(P.height),
+  position: positionProp,
+  left: translateProp(P.left),
+  top: translateProp(P.top),
+  display: displayProp,
 });
 
 /**
@@ -132,6 +204,12 @@ const STYLE_KEY_ORDER: readonly (keyof TextStyle)[] = [
   "borderRadius",
   "color",
   "textAlign",
+  "width",
+  "height",
+  "position",
+  "left",
+  "top",
+  "display",
 ];
 
 /** Later array entries win at the key level; falsy entries are skipped. */

@@ -273,6 +273,15 @@ static lv_obj_t *style_target(lvgl_host_entry_t *entry, int prop)
     return entry->object;
 }
 
+/** Decodes the TS normalizer's width/height ABI (see lvgl_host.h) into an LVGL size value. */
+static int32_t decode_dimension(int32_t value)
+{
+    if (value >= 0) return value;
+    if (value == -2000) return LV_SIZE_CONTENT;
+    if (value <= -1 && value >= -1001) return lv_pct(-(value) - 1);
+    return LV_SIZE_CONTENT; /* unreachable via TS normalizer; safe fallback */
+}
+
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
 {
     lvgl_host_entry_t *entry = entry_at(host, id);
@@ -316,6 +325,22 @@ void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
             lv_obj_set_style_text_align(target, align, 0);
             break;
         }
+        case LVGL_HOST_STYLE_WIDTH:
+            lv_obj_set_style_width(target, decode_dimension(value), 0);
+            break;
+        case LVGL_HOST_STYLE_HEIGHT:
+            lv_obj_set_style_height(target, decode_dimension(value), 0);
+            break;
+        case LVGL_HOST_STYLE_LEFT:
+            lv_obj_set_style_translate_x(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_TOP:
+            lv_obj_set_style_translate_y(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_DISPLAY:
+            if (value == 1) lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+            break;
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */
             break;
@@ -360,6 +385,22 @@ void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
             break;
         case LVGL_HOST_STYLE_TEXT_ALIGN:
             lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_ALIGN, 0);
+            break;
+        case LVGL_HOST_STYLE_WIDTH:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_WIDTH, 0);
+            break;
+        case LVGL_HOST_STYLE_HEIGHT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_HEIGHT, 0);
+            break;
+        case LVGL_HOST_STYLE_LEFT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSLATE_X, 0);
+            break;
+        case LVGL_HOST_STYLE_TOP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSLATE_Y, 0);
+            break;
+        case LVGL_HOST_STYLE_DISPLAY:
+            /* Flag, not a style prop: reset means "shown". */
+            lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
             break;
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */

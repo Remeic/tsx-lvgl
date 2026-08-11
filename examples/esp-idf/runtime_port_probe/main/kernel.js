@@ -2352,6 +2352,11 @@ exports.NATIVE_STYLE_PROP = Object.freeze({
     paddingLeft: 7,
     color: 8,
     textAlign: 9,
+    width: 10,
+    height: 11,
+    left: 12,
+    top: 13,
+    display: 14,
 });
 const NAMED_COLORS = Object.freeze({
     red: 0xff0000,
@@ -2390,6 +2395,36 @@ function normalizeTextAlign(value) {
         return 2;
     return undefined;
 }
+function normalizeDimension(value) {
+    if (typeof value === "number") {
+        if (!Number.isFinite(value) || value < 0)
+            return undefined;
+        return Math.round(value);
+    }
+    if (typeof value !== "string")
+        return undefined;
+    if (value === "auto")
+        return -2000;
+    if (!value.endsWith("%"))
+        return undefined;
+    const percent = Number.parseFloat(value.slice(0, -1));
+    if (!Number.isFinite(percent))
+        return undefined;
+    const clamped = Math.min(1000, Math.max(0, Math.round(percent)));
+    return -(clamped + 1);
+}
+function normalizeTranslate(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    return Math.round(value);
+}
+function normalizeDisplay(value) {
+    if (value === "none")
+        return 1;
+    if (value === "flex")
+        return 0;
+    return undefined;
+}
 function colorProp(prop) {
     return (value, out) => {
         const color = normalizeColor(value);
@@ -2418,6 +2453,26 @@ function textAlignProp(value, out) {
     if (code !== undefined)
         out.set(exports.NATIVE_STYLE_PROP.textAlign, code);
 }
+function dimProp(prop) {
+    return (value, out) => {
+        const dim = normalizeDimension(value);
+        if (dim !== undefined)
+            out.set(prop, dim);
+    };
+}
+function translateProp(prop) {
+    return (value, out) => {
+        const translate = normalizeTranslate(value);
+        if (translate !== undefined)
+            out.set(prop, translate);
+    };
+}
+function displayProp(value, out) {
+    const code = normalizeDisplay(value);
+    if (code !== undefined)
+        out.set(exports.NATIVE_STYLE_PROP.display, code);
+}
+function positionProp() { }
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
     padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
@@ -2433,6 +2488,12 @@ const STYLE_NORMALIZERS = Object.freeze({
     borderRadius: intProp(P.borderRadius),
     color: colorProp(P.color),
     textAlign: textAlignProp,
+    width: dimProp(P.width),
+    height: dimProp(P.height),
+    position: positionProp,
+    left: translateProp(P.left),
+    top: translateProp(P.top),
+    display: displayProp,
 });
 const STYLE_KEY_ORDER = [
     "padding",
@@ -2448,6 +2509,12 @@ const STYLE_KEY_ORDER = [
     "borderRadius",
     "color",
     "textAlign",
+    "width",
+    "height",
+    "position",
+    "left",
+    "top",
+    "display",
 ];
 function mergeStyle(style) {
     if (Array.isArray(style)) {
