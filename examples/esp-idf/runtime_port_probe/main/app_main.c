@@ -32,6 +32,13 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
+    /* Reserve the bounded transport worker while the runtime still owns the
+     * most available task memory. Optional providers are started afterwards;
+     * they must not be able to starve the device-backed development path. */
+    const esp_err_t transport_result = bundle_transport_start(probe);
+    ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
+             transport_result == ESP_OK ? "pass" : "fail");
+
     /* Providers are optional. They report unavailable state to the existing
      * runtime while the display and app remain alive. */
     const esp_err_t sensors_result = runtime_probe_start_sensors(probe);
@@ -56,10 +63,6 @@ static void runtime_probe_boot_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-
-    const esp_err_t transport_result = bundle_transport_start(probe);
-    ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
-             transport_result == ESP_OK ? "pass" : "fail");
 
     /* Keep one owner for all QuickJS/LVGL calls. runtime_probe_task deletes
      * the current task when the probe is stopped, so no second stack is
