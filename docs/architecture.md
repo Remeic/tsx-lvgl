@@ -64,6 +64,11 @@ component. `VNode` is a discriminated union on `kind`. Keys, component type
 references, props and children are part of the VNode identity contract. Core
 has no LVGL, ESP-IDF, filesystem or transport dependency.
 
+Core also owns the typed `style` contract: `ViewStyle`/`TextStyle` (and the
+Screen-narrowed `ScreenStyle`) plus `StyleSheet.create`. These are pure TS
+types and a freezing helper — no LVGL knowledge crosses into core; `style` is
+just typed data on the VNode until it reaches the device boundary.
+
 ### `@tsx-lvgl/runtime`
 
 Owns component identity, keyed reconciliation, state/effect hooks, scheduler
@@ -96,6 +101,18 @@ Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
 only; the SDK facade adapts the app bundle's public module specifiers to the
 same device-kernel aliases. Core/runtime/sensors/bundler/device workspace
 imports remain framework-internal implementation details.
+
+`@tsx-lvgl/device` owns the style/LVGL boundary: `NATIVE_STYLE_PROP` (the
+append-only int code table), `normalizeStyle` (typed style object to a
+`ReadonlyMap<code, value>`) and `applyStyleDiff` (per-key diff against the
+previous normalized map — this is what absorbs a fresh style-literal's object
+identity churning every render into zero native calls when its content is
+unchanged). The native ABI is two calls, `setStyle(id, prop, value)` and
+`resetStyle(id, prop)`; `prop` codes are mirrored on the C side by
+`lvgl_host_style_prop_t` in `lvgl_host.h`, and a committed test
+(`tests/runtime-probe-source.test.mjs`) regex-extracts that enum and asserts
+it deep-equals `NATIVE_STYLE_PROP`, so the two tables can never drift
+silently.
 
 ## First vertical slice
 
