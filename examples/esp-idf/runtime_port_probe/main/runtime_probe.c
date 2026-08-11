@@ -134,6 +134,14 @@ static void log_checkpoint(const char *checkpoint, const char *status, const cha
     ESP_LOGI(TAG, "PROBE checkpoint=%s status=%s %s", checkpoint, status, detail);
 }
 
+static void log_sensor_checkpoint(runtime_probe_t *probe, bool available)
+{
+    if (probe == NULL || probe->sensor_checkpoint_logged) return;
+    probe->sensor_checkpoint_logged = true;
+    log_checkpoint("sensor_read", available ? "pass" : "unavailable",
+                   available ? "sensor=device.motion cache=true" : "sensor=device.motion cache-unavailable");
+}
+
 static size_t free_heap_bytes(void)
 {
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -526,7 +534,10 @@ static JSValue js_native_board_list(JSContext *context, JSValueConst this_value,
     JSValue entries = JS_NewArray(context);
     runtime_probe_t *probe = probe_from_context(context);
     if (probe == NULL) return entries;
-    if (probe->sensors == NULL) return entries;
+    if (probe->sensors == NULL) {
+        log_sensor_checkpoint(probe, false);
+        return entries;
+    }
     JSValue descriptor = JS_NewObject(context);
     JS_SetPropertyStr(context, descriptor, "familyCode", JS_NewInt32(context, 0x0101));
     JS_SetPropertyStr(context, descriptor, "semanticId", JS_NewString(context, "device.motion"));
@@ -557,11 +568,15 @@ static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this
         return new_wifi_board_event(context, 0, 1U, &state);
     }
     if (!is_motion) return JS_UNDEFINED;
-    if (probe->sensors == NULL) return JS_UNDEFINED;
+    if (probe->sensors == NULL) {
+        log_sensor_checkpoint(probe, false);
+        return JS_UNDEFINED;
+    }
     const int32_t handle = probe->board_handle == 0 ? 1 : probe->board_handle;
     const uint32_t epoch = probe->board_reload_epoch == 0 ? 1U : probe->board_reload_epoch;
     waveshare_v1_motion_frame_t frame = {0};
     const bool available = waveshare_v1_sensors_read_motion(probe->sensors, &frame);
+    log_sensor_checkpoint(probe, available);
     return new_board_event(context, probe, handle, epoch, &frame, available);
 }
 
@@ -843,16 +858,13 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     JS_FreeCString(context, sensor_id);
     if (!is_motion) return JS_ThrowTypeError(context, "sensors.read: unknown sensorId");
 
-    const bool is_first_call = !probe->sensor_checkpoint_logged;
-    probe->sensor_checkpoint_logged = true;
-
     JSValue sample = JS_NewObject(context);
     if (JS_IsException(sample)) return sample;
     waveshare_v1_motion_frame_t frame = {0};
     if (probe->sensors == NULL || !waveshare_v1_sensors_read_motion(probe->sensors, &frame)) {
         JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "unavailable"));
         JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, esp_timer_get_time() / 1000));
-        if (is_first_call) log_checkpoint("sensor_read", "unavailable", "sensor=device.motion cache-unavailable");
+        log_sensor_checkpoint(probe, false);
         return sample;
     }
     JSValue value = JS_NewObject(context);
@@ -864,7 +876,7 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "ok"));
     JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, frame.observed_at_ms));
     JS_SetPropertyStr(context, sample, "value", value);
-    if (is_first_call) log_checkpoint("sensor_read", "pass", "sensor=device.motion cache=true");
+    log_sensor_checkpoint(probe, true);
     return sample;
 }
 

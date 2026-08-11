@@ -87,7 +87,9 @@ test("optional providers report unavailable state without aborting application b
   assert.doesNotMatch(appMain, /if \(runtime_probe_start_sensors\(probe\)/);
   assert.doesNotMatch(appMain, /if \(runtime_probe_start_connectivity\(probe\)/);
   assert.doesNotMatch(source, /probe == NULL \|\| probe->sensors == NULL \|\| probe->wifi == NULL/);
-  assert.match(source, /if \(probe->sensors == NULL\) return entries;/);
+  assert.match(source, /if \(probe->sensors == NULL\) \{/);
+  assert.match(source, /static void log_sensor_checkpoint\(runtime_probe_t \*probe, bool available\)/);
+  assert.match(source, /log_sensor_checkpoint\(probe, available\);/);
 });
 
 test("UART acceptance keeps optional touch and motion capability checks fail-soft", () => {
