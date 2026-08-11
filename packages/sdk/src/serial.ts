@@ -23,7 +23,7 @@ export interface SerialRuntime {
 interface ClosableSerialResources {
   readonly lines: { close(): void };
   readonly input: { destroy(): void };
-  readonly output: { readonly destroyed: boolean; end(callback: (error?: Error | null) => void): void };
+  readonly output: { readonly destroyed: boolean; destroy(): void };
 }
 
 const POSIX_SERIAL_PORT = /^\/dev\/(?:cu|tty)\.[A-Za-z0-9._-]+$/;
@@ -89,31 +89,22 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
 
 /** Closes the three Node resources as one observable async operation. */
 export function closeSerialResources({ lines, input, output }: ClosableSerialResources): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    let synchronousError: unknown;
-    try {
-      lines.close();
-    } catch (error) {
-      synchronousError = error;
-    }
-    try {
-      input.destroy();
-    } catch (error) {
-      synchronousError ??= error;
-    }
-    try {
-      if (output.destroyed) {
-        synchronousError === undefined ? resolve() : reject(synchronousError);
-      } else {
-        output.end((error) => {
-          const closeError = synchronousError ?? error;
-          closeError === undefined || closeError === null ? resolve() : reject(closeError);
-        });
-      }
-    } catch (error) {
-      reject(synchronousError ?? error);
-    }
-  });
+  try {
+    lines.close();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  try {
+    input.destroy();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  try {
+    if (!output.destroyed) output.destroy();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return Promise.resolve();
 }
 
 function configurePort(port: string): void {

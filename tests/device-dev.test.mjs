@@ -366,14 +366,12 @@ test("serial port validation is machine-local and never accepts shell-shaped inp
   }
 });
 
-test("serial resource close propagates the asynchronous Writable.end callback error", async () => {
-  const callbackError = new Error("end callback failed");
-  await assert.rejects(
-    closeSerialResources({
-      lines: { close() {} },
-      input: { destroy() {} },
-      output: { destroyed: false, end: (callback) => callback(callbackError) },
-    }),
-    callbackError,
-  );
+test("serial resource close destroys the output immediately", async () => {
+  let destroyed = false;
+  await closeSerialResources({
+    lines: { close() {} },
+    input: { destroy() {} },
+    output: { destroyed: false, destroy: () => { destroyed = true; } },
+  });
+  assert.equal(destroyed, true);
 });
