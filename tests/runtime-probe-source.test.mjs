@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
+const transportHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.h", import.meta.url), "utf8");
 const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/app_main.c", import.meta.url), "utf8");
 const lvglHost = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.c", import.meta.url), "utf8");
 const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
@@ -128,9 +129,17 @@ test("UART acceptance keeps optional touch and motion capability checks fail-sof
   assert.match(checker, /\[\"imu_init\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
   assert.match(checker, /\[\"sensor_read\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
   assert.match(checker, /\"display_init\"/);
-  assert.match(checker, /\"touch_init\"/);
+  assert.match(checker, /\[\"touch_init\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
+  assert.match(checker, /\"bundle_transport_start\"/);
   assert.match(transport, /#define BUNDLE_TRANSPORT_STACK_WORDS \(8192U\)/);
   assert.match(transport, /xTaskCreate\(bundle_transport_task, \"bundle_transport\", BUNDLE_TRANSPORT_STACK_WORDS/);
+});
+
+test("transport teardown joins the USB task before runtime probe ownership is released", () => {
+  assert.match(transportHeader, /void bundle_transport_stop\(void\);/);
+  assert.match(transport, /static SemaphoreHandle_t s_stopped;/);
+  assert.match(transport, /xSemaphoreTake\(s_stopped, portMAX_DELAY\)/);
+  assert.match(source, /s_active_probe = NULL;[\s\S]*bundle_transport_stop\(\);/);
 });
 
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {

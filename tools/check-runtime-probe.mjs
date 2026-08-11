@@ -29,12 +29,14 @@ const required = [
   "engine_cycles",
   "js_eval",
   "lvgl_binding",
+  "bundle_transport_start",
   "timer_callback",
   "kernel_start",
   "app_mount",
   ...(requireReload ? ["bundle_reload", "bundle_reject"] : []),
 ];
 const optionalCapabilities = new Map([
+  ["touch_init", new Set(["pass", "unavailable"])],
   ["imu_init", new Set(["pass", "unavailable"])],
   ["sensor_read", new Set(["pass", "unavailable"])],
 ]);

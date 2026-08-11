@@ -1406,6 +1406,7 @@ void runtime_probe_destroy(runtime_probe_t *probe)
     if (probe == NULL) return;
     probe->active = false;
     if (s_active_probe == probe) s_active_probe = NULL;
+    bundle_transport_stop();
 
     /* Join the I2C task before destroying queues/QuickJS state it may still
      * indirectly service after its bounded 100ms transfer returns. */

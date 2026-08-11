@@ -72,6 +72,7 @@ PROBE checkpoint=touch_init status=pass        # unavailable is fail-soft
 PROBE checkpoint=engine_cycles status=pass
 PROBE checkpoint=js_eval status=pass
 PROBE checkpoint=lvgl_binding status=pass
+PROBE checkpoint=bundle_transport_start status=pass
 PROBE checkpoint=timer_callback status=pass
 PROBE checkpoint=kernel_start status=pass
 PROBE checkpoint=app_mount status=pass
