@@ -68,6 +68,15 @@ test("native runtime diagnostics are bounded metadata and never stringify payloa
   assert.match(transport, /while \(\*at == ' ' \|\| \*at == '\\t'/);
 });
 
+test("reload responses stay within the documented TSXB error vocabulary", () => {
+  assert.match(source, /static bool is_runtime_rejection_reason\(const char \*reason\)/);
+  assert.match(source, /strncmp\(status, "rejected ", 9\) == 0 && is_runtime_rejection_reason\(status \+ 9\)/);
+  assert.match(source, /outcome\.kind = RUNTIME_PROBE_RELOAD_ROLLED_BACK;/);
+  assert.match(source, /reason=evaluate-rolled-back/);
+  assert.doesNotMatch(source, /snprintf\(outcome\.reason, sizeof\(outcome\.reason\), "js-exception"/);
+  assert.doesNotMatch(source, /snprintf\(outcome\.reason, sizeof\(outcome\.reason\), "unprintable-status"/);
+});
+
 test("display startup owns one bounded FT3168 recovery path and keeps SH8601 alive", () => {
   assert.match(mainCmake, /display_startup\.c/);
   assert.match(displayStartup, /bsp_i2c_init\(\)/);
@@ -126,6 +135,9 @@ test("optional providers report unavailable state without aborting application b
 
 test("UART acceptance keeps optional touch and motion capability checks fail-soft", () => {
   assert.match(checker, /const optionalCapabilities = new Map\(\[/);
+  const required = checker.match(/const required = \[[\s\S]*?\n\];/);
+  assert.ok(required, "checker must declare its required checkpoints");
+  assert.doesNotMatch(required[0], /"touch_init"/);
   assert.match(checker, /\[\"imu_init\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
   assert.match(checker, /\[\"sensor_read\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
   assert.match(checker, /\"display_init\"/);

@@ -25,7 +25,6 @@ const log = await readFile(logPath, "utf8");
 const required = [
   "board_start",
   "display_init",
-  "touch_init",
   "engine_cycles",
   "js_eval",
   "lvgl_binding",

@@ -99,11 +99,11 @@ Build a new generation and push it over the probe's USB Serial/JTAG port
 while it's running:
 
 ```bash
-node scripts/bundle-app.mjs --entry tests/fixtures/shakeface-a.tsx \
-  --out /tmp/shakeface-g2 --bundle-id shakeface --generation 2
+node scripts/bundle-app.mjs --entry examples/apps/counter.tsx \
+  --out /tmp/counter-g2 --bundle-id counter --generation 2
 ./tools/push-bundle --port /dev/cu.usbmodemXXX \
-  --bundle /tmp/shakeface-g2/shakeface.g2.js \
-  --manifest /tmp/shakeface-g2/shakeface.g2.manifest.json
+  --bundle /tmp/counter-g2/counter.g2.js \
+  --manifest /tmp/counter-g2/counter.g2.manifest.json
 ```
 
 This is the "Bundle transport v1 (dev only)" protocol: line-oriented ASCII

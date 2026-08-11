@@ -1112,6 +1112,25 @@ static void call_kernel_pump(runtime_probe_t *probe)
     JS_FreeValue(probe->context, result);
 }
 
+static bool is_runtime_rejection_reason(const char *reason)
+{
+    static const char *const allowed[] = {
+        "empty-bundle-id",
+        "unsupported-format",
+        "engine-mismatch",
+        "protocol-mismatch",
+        "board-mismatch",
+        "generation-not-monotonic",
+        "invalid-hash",
+        "byte-length-mismatch",
+        "bundle-too-large",
+    };
+    for (size_t index = 0; index < sizeof(allowed) / sizeof(allowed[0]); index++) {
+        if (strcmp(reason, allowed[index]) == 0) return true;
+    }
+    return false;
+}
+
 /** Parses `stageReload`'s return string (packages/device/src/kernel.ts): "committed <epoch>" | "rejected <reason>" | "rolled_back". */
 static void parse_reload_status(const char *status, runtime_probe_reload_result_t *out)
 {
@@ -1126,9 +1145,14 @@ static void parse_reload_status(const char *status, runtime_probe_reload_result_
         out->kind = RUNTIME_PROBE_RELOAD_ROLLED_BACK;
         return;
     }
-    const char *reason = strncmp(status, "rejected ", 9) == 0 ? status + 9 : "unknown";
-    out->kind = RUNTIME_PROBE_RELOAD_REJECTED;
-    snprintf(out->reason, sizeof(out->reason), "%s", reason);
+    if (strncmp(status, "rejected ", 9) == 0 && is_runtime_rejection_reason(status + 9)) {
+        out->kind = RUNTIME_PROBE_RELOAD_REJECTED;
+        snprintf(out->reason, sizeof(out->reason), "%s", status + 9);
+        return;
+    }
+    /* Keep the wire vocabulary closed if the kernel returns a future or
+     * malformed status. The active root is still the last-known-good one. */
+    out->kind = RUNTIME_PROBE_RELOAD_ROLLED_BACK;
 }
 
 static void process_reload_handoff(runtime_probe_t *probe)
@@ -1148,17 +1172,15 @@ static void process_reload_handoff(runtime_probe_t *probe)
     memset(&outcome, 0, sizeof(outcome));
     if (JS_IsException(call_result)) {
         dump_exception(context, "bundle_reload");
-        outcome.kind = RUNTIME_PROBE_RELOAD_REJECTED;
-        snprintf(outcome.reason, sizeof(outcome.reason), "js-exception");
-        log_checkpoint("bundle_reject", "pass", "reason=js-exception");
+        outcome.kind = RUNTIME_PROBE_RELOAD_ROLLED_BACK;
+        log_checkpoint("bundle_reject", "pass", "reason=evaluate-rolled-back");
     } else {
         const char *status = JS_ToCString(context, call_result);
         if (status != NULL) {
             parse_reload_status(status, &outcome);
             JS_FreeCString(context, status);
         } else {
-            outcome.kind = RUNTIME_PROBE_RELOAD_REJECTED;
-            snprintf(outcome.reason, sizeof(outcome.reason), "unprintable-status");
+            outcome.kind = RUNTIME_PROBE_RELOAD_ROLLED_BACK;
         }
 
         if (outcome.kind == RUNTIME_PROBE_RELOAD_COMMITTED) {
