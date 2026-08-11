@@ -374,6 +374,13 @@ esp_err_t bundle_transport_start(runtime_probe_t *probe)
     memset(&s_state, 0, sizeof(s_state));
     s_state.probe = probe;
 
+    /* The ESP mbedtls SHA port creates its hardware-lock mutex lazily on
+     * first use, and that internal-RAM allocation aborts the chip on OOM
+     * (newlib lock_init_generic). Hash once now, while boot-time internal
+     * heap is guaranteed, so handle_end never triggers the lazy init. */
+    unsigned char warmup_digest[32];
+    mbedtls_sha256((const unsigned char *)"", 0U, warmup_digest, 0);
+
     usb_serial_jtag_driver_config_t usj_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usj_config.rx_buffer_size = 1024;
     const esp_err_t install_result = usb_serial_jtag_driver_install(&usj_config);

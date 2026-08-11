@@ -147,6 +147,51 @@ static size_t free_heap_bytes(void)
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
 }
 
+/*
+ * All QuickJS heap traffic is pinned to PSRAM. With the default allocator,
+ * every small JS allocation lands in internal RAM first
+ * (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL) and evaluating the ~100KB kernel
+ * exhausts it; later strictly-internal allocations (FreeRTOS mutexes, SPI DMA
+ * descriptors, the lazy mbedtls SHA hardware lock) then fail — the SHA one
+ * aborts the chip mid-reload. Internal RAM must stay free for those.
+ */
+static void *js_psram_calloc(void *opaque, size_t count, size_t size)
+{
+    (void)opaque;
+    return heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void *js_psram_malloc(void *opaque, size_t size)
+{
+    (void)opaque;
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static void js_psram_free(void *opaque, void *ptr)
+{
+    (void)opaque;
+    heap_caps_free(ptr);
+}
+
+static void *js_psram_realloc(void *opaque, void *ptr, size_t size)
+{
+    (void)opaque;
+    return heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+
+static size_t js_psram_usable_size(const void *ptr)
+{
+    return ptr == NULL ? 0U : heap_caps_get_allocated_size((void *)ptr);
+}
+
+static const JSMallocFunctions JS_PSRAM_MALLOC_FUNCTIONS = {
+    .js_calloc = js_psram_calloc,
+    .js_malloc = js_psram_malloc,
+    .js_free = js_psram_free,
+    .js_realloc = js_psram_realloc,
+    .js_malloc_usable_size = js_psram_usable_size,
+};
+
 static const char *safe_exception_class(JSContext *context, JSValueConst exception)
 {
     JSValue name_value = JS_GetPropertyStr(context, exception, "name");
@@ -224,7 +269,7 @@ static esp_err_t run_engine_smoke_cycles(void)
 {
     const size_t before = free_heap_bytes();
     for (uint32_t cycle = 0; cycle < ENGINE_SMOKE_CYCLES; cycle++) {
-        JSRuntime *runtime = JS_NewRuntime();
+        JSRuntime *runtime = JS_NewRuntime2(&JS_PSRAM_MALLOC_FUNCTIONS, NULL);
         if (runtime == NULL) return ESP_ERR_NO_MEM;
         JS_SetRuntimeInfo(runtime, "tsx-lvgl-runtime-probe");
         JS_SetMemoryLimit(runtime, ENGINE_MEMORY_LIMIT);
@@ -1282,7 +1327,7 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
         return ESP_ERR_NO_MEM;
     }
 
-    probe->runtime = JS_NewRuntime();
+    probe->runtime = JS_NewRuntime2(&JS_PSRAM_MALLOC_FUNCTIONS, NULL);
     if (probe->runtime == NULL) {
         runtime_probe_destroy(probe);
         return ESP_ERR_NO_MEM;
