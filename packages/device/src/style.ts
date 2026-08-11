@@ -18,13 +18,13 @@ import type { NativeLvgl } from "./native.js";
  *   single `setStyle`, never a `setStyle` + `resetStyle` pair on the same
  *   underlying LVGL prop (the trailing reset would wipe the new value).
  * - `left`/`top` (12/13): any finite number, rounded; negatives are valid
- *   (LVGL translate, not position).
+ *   (LVGL translate, not position); values outside signed int32 are skipped.
  * - `display` (14): "none" is 1 (hidden), "flex" is 0 (shown).
  * - `flexDirection` (15): row=0, column=1, row-reverse=2, column-reverse=3.
  * - `justifyContent` (16): flex-start=0, flex-end=1, center=2,
  *   space-between=3, space-around=4, space-evenly=5.
  * - `alignItems` (17): flex-start=0, flex-end=1, center=2 (no "stretch").
- * - `gap` (18): finite number >= 0, rounded; negative/non-finite skip.
+ * - `gap` (18): finite number >= 0, rounded; negative/non-finite/int32-overflow skip.
  * - `flexGrow` (19): finite number, rounded, clamped 0..255 (LVGL
  *   `flex_grow` is `uint8_t` — 256 would wrap to 0); negative skips. `flex`
  *   (core alias) normalizes into this same code, no separate code.
@@ -35,8 +35,7 @@ import type { NativeLvgl } from "./native.js";
  *   deci-degrees); a number is taken as-is, a string must match
  *   `` `${number}deg` `` (the leading float is parsed, anything else is
  *   rejected); negatives are valid; non-finite skips.
- * - `scale` (22): finite number >= 0, `Math.round(v * 256)` (256 =
- *   `LV_SCALE_NONE` = 100%); negative/non-finite skips.
+ *   `LV_SCALE_NONE` = 100%); negative/non-finite/int32-overflow skips.
  */
 export const NATIVE_STYLE_PROP = Object.freeze({
   backgroundColor: 0,
@@ -79,6 +78,9 @@ const NAMED_COLORS: Readonly<Record<string, number>> = Object.freeze({
 });
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const PERCENT_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?%$/;
+const INT32_MIN = -0x80000000;
+const INT32_MAX = 0x7fffffff;
 
 function normalizeColor(value: unknown): number | undefined {
   if (typeof value !== "string" || value === "transparent") return undefined;
@@ -88,10 +90,16 @@ function normalizeColor(value: unknown): number | undefined {
   return parseInt(value.slice(1), 16);
 }
 
-function normalizeNonNegativeInt(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+/** Rounds a finite number only when its encoded value fits the signed-int32 ABI. */
+function normalizeInt32(value: number): number | undefined {
+  if (!Number.isFinite(value)) return undefined;
   const rounded = Math.round(value);
-  return rounded < 0 ? undefined : rounded;
+  return rounded < INT32_MIN || rounded > INT32_MAX ? undefined : rounded;
+}
+
+function normalizeNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  return normalizeInt32(value);
 }
 
 function normalizeTextAlign(value: unknown): number | undefined {
@@ -105,12 +113,12 @@ function normalizeTextAlign(value: unknown): number | undefined {
 function normalizeDimension(value: unknown): number | undefined {
   if (typeof value === "number") {
     if (!Number.isFinite(value) || value < 0) return undefined;
-    return Math.round(value);
+    return normalizeInt32(value);
   }
   if (typeof value !== "string") return undefined;
   if (value === "auto") return -2000;
-  if (!value.endsWith("%")) return undefined;
-  const percent = Number.parseFloat(value.slice(0, -1));
+  if (!PERCENT_RE.test(value)) return undefined;
+  const percent = Number(value.slice(0, -1));
   if (!Number.isFinite(percent)) return undefined;
   const clamped = Math.min(1000, Math.max(0, Math.round(percent)));
   return -(clamped + 1);
@@ -119,7 +127,7 @@ function normalizeDimension(value: unknown): number | undefined {
 /** left/top: any finite number, rounded; negatives are valid (LVGL translate). */
 function normalizeTranslate(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return Math.round(value);
+  return normalizeInt32(value);
 }
 
 function normalizeDisplay(value: unknown): number | undefined {
@@ -178,9 +186,9 @@ function enumOf(values: Readonly<Record<string, number>>): (value: unknown) => n
 
 /** flexGrow/flex: finite number, rounded, clamped 0..255 (LVGL flex_grow is uint8); negative skips. */
 function normalizeFlexGrow(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
   const rounded = Math.round(value);
-  return rounded < 0 ? undefined : Math.min(255, rounded);
+  return Math.min(255, rounded);
 }
 
 /** opacity: finite number, clamped 0..1 (CSS clamp, not skip) then scaled to LVGL opa 0..255. */
@@ -205,13 +213,13 @@ function normalizeRotate(value: unknown): number | undefined {
   } else {
     return undefined;
   }
-  return Number.isFinite(degrees) ? Math.round(degrees * 10) : undefined;
+  return Number.isFinite(degrees) ? normalizeInt32(degrees * 10) : undefined;
 }
 
 /** scale: finite number >= 0, scaled to LVGL's 256 == LV_SCALE_NONE == 100%; negative/non-finite skip. */
 function normalizeScale(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
-  return Math.round(value * 256);
+  return normalizeInt32(value * 256);
 }
 
 const P = NATIVE_STYLE_PROP;

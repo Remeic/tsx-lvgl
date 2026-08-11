@@ -124,7 +124,8 @@ include that measurement.
   skips the key — with the S0 neutral baseline, absent means transparent.
   Anything else invalid (bad hex, unknown name, non-string) skips the key.
 - Numbers (borderWidth, borderRadius, paddings): must be `Number.isFinite`,
-  then `Math.round`; negative skips. NaN/Infinity skip.
+  non-negative before rounding, and fit the signed-int32 native ABI; negative,
+  out-of-range, NaN and Infinity skip.
 - `textAlign`: left=0, center=1, right=2; anything else skips.
 - Unknown object keys are ignored (forward-compat with later slices).
 - **Invalid is always skip-silent, never throw.** TS types are the contract;
@@ -159,8 +160,9 @@ in both `packages/device/src/style.ts` and `lvgl_host.h`:
   (`lv_obj_set_style_width/height`); `value == -2000` is `"auto"`
   (`LV_SIZE_CONTENT`); `-1001 <= value <= -1` is percent `N`, recovered as
   `lv_pct(-(value) - 1)`.
-- `left`/`top` (codes 12/13): any int32, applied via
-  `lv_obj_set_style_translate_x/y`.
+- `left`/`top` (codes 12/13): any signed-int32, applied via
+  `lv_obj_set_style_translate_x/y`; values that cannot be represented after
+  rounding are skipped before crossing the native ABI.
 - `display` (code 14): 1 sets `LV_OBJ_FLAG_HIDDEN`, 0 (or reset) clears it —
   a widget flag, not an `LV_STYLE_*` prop, so `resetStyle` for this code
   clears the flag instead of calling `lv_obj_remove_local_style_prop`.

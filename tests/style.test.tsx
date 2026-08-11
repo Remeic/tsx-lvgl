@@ -77,6 +77,13 @@ test("negative padding, borderWidth and borderRadius are skipped", () => {
   assert.equal(normalizeStyle({ paddingTop: -1 }).has(P.paddingTop), false);
 });
 
+test("negative fractional non-negative values are skipped before rounding", () => {
+  assert.equal(normalizeStyle({ padding: -0.1 }).has(P.paddingTop), false);
+  assert.equal(normalizeStyle({ borderWidth: -0.1 }).has(P.borderWidth), false);
+  assert.equal(normalizeStyle({ gap: -0.1 }).has(P.gap), false);
+  assert.equal(normalizeStyle({ flex: -0.1 }).has(P.flexGrow), false);
+});
+
 test("zero is a valid non-negative value", () => {
   assert.equal(normalizeStyle({ borderWidth: 0 }).get(P.borderWidth), 0);
 });
@@ -184,8 +191,24 @@ test('"auto" encodes as -2000', () => {
 
 test("an invalid dimension string or NaN is skipped", () => {
   assert.equal(normalizeStyle({ width: "abc%" }).has(P.width), false);
+  assert.equal(normalizeStyle({ width: "50oops%" }).has(P.width), false);
+  assert.equal(normalizeStyle({ width: "50%oops" }).has(P.width), false);
+  assert.equal(normalizeStyle({ width: " %" }).has(P.width), false);
   assert.equal(normalizeStyle({ width: "big" }).has(P.width), false, "not a percent string and not \"auto\"");
   assert.equal(normalizeStyle({ width: Number.NaN }).has(P.width), false);
+});
+
+test("unbounded encoded numbers outside signed int32 are skipped at the TS ABI boundary", () => {
+  const max = 0x7fffffff;
+  const min = -0x80000000;
+  assert.equal(normalizeStyle({ width: max }).get(P.width), max);
+  assert.equal(normalizeStyle({ width: max + 1 }).has(P.width), false);
+  assert.equal(normalizeStyle({ left: min }).get(P.left), min);
+  assert.equal(normalizeStyle({ left: min - 1 }).has(P.left), false);
+  assert.equal(normalizeStyle({ scale: max / 256 }).get(P.scale), max);
+  assert.equal(normalizeStyle({ scale: (max + 1) / 256 }).has(P.scale), false);
+  assert.equal(normalizeStyle({ rotate: max / 10 }).get(P.rotate), max);
+  assert.equal(normalizeStyle({ rotate: (max + 1) / 10 }).has(P.rotate), false);
 });
 
 // ---------------------------------------------------------------------------
