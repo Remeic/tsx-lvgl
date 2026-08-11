@@ -89,6 +89,23 @@ test("native root replacement forces the first LVGL frame while the owner lock i
   assert.match(lvglHost, /lv_screen_load\(host->blank_screen\);[\s\S]*lv_refr_now\(lv_display_get_default\(\)\);/);
 });
 
+test("native host stages non-screen widgets under a real LVGL parent", () => {
+  assert.match(lvglHost, /lv_obj_t \*staging_screen;/);
+  assert.match(lvglHost, /host->staging_screen = lv_obj_create\(NULL\);/);
+  assert.match(lvglHost, /object = lv_obj_create\(staging\);/);
+  assert.match(lvglHost, /object = lv_label_create\(staging\);/);
+  assert.match(lvglHost, /object = lv_button_create\(staging\);/);
+  assert.doesNotMatch(lvglHost, /object = lv_label_create\(NULL\);/);
+  assert.doesNotMatch(lvglHost, /object = lv_button_create\(NULL\);/);
+  assert.match(lvglHost, /lv_obj_delete\(host->staging_screen\);/);
+});
+
+test("native host gives Screen and View a centered vertical layout", () => {
+  assert.match(lvglHost, /lv_obj_set_flex_flow\(object, LV_FLEX_FLOW_COLUMN\);/);
+  assert.match(lvglHost, /lv_obj_set_flex_align\(object, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER\);/);
+  assert.match(lvglHost, /configure_container\(object\);/);
+});
+
 test("optional providers report unavailable state without aborting application boot", () => {
   assert.match(appMain, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
   assert.match(appMain, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
