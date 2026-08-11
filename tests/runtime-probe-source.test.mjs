@@ -104,6 +104,8 @@ test("UART acceptance keeps optional touch and motion capability checks fail-sof
   assert.match(checker, /\[\"sensor_read\", new Set\(\[\"pass\", \"unavailable\"\]\)\]/);
   assert.match(checker, /\"display_init\"/);
   assert.match(checker, /\"touch_init\"/);
+  assert.match(transport, /#define BUNDLE_TRANSPORT_STACK_WORDS \(4096U\)/);
+  assert.match(transport, /xTaskCreate\(bundle_transport_task, \"bundle_transport\", BUNDLE_TRANSPORT_STACK_WORDS/);
 });
 
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {

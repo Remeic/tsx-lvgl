@@ -23,6 +23,7 @@ static const char *TAG = "tsx_bundle_transport";
 #define READ_POLL_MS 50U
 #define INACTIVITY_TIMEOUT_MS 2000U
 #define RELOAD_TIMEOUT_MS 5000U
+#define BUNDLE_TRANSPORT_STACK_WORDS (4096U)
 /* (DATA_CHUNK_BASE64_LIMIT / 4) * 3, mirrors packages/bundler/src/transport.ts. */
 #define DATA_CHUNK_MAX_BYTES 288U
 
@@ -378,7 +379,7 @@ esp_err_t bundle_transport_start(runtime_probe_t *probe)
     const esp_err_t install_result = usb_serial_jtag_driver_install(&usj_config);
     if (install_result != ESP_OK) return install_result;
 
-    if (xTaskCreate(bundle_transport_task, "bundle_transport", 8192, &s_state, 3, NULL) != pdPASS) {
+    if (xTaskCreate(bundle_transport_task, "bundle_transport", BUNDLE_TRANSPORT_STACK_WORDS, &s_state, 3, NULL) != pdPASS) {
         (void)usb_serial_jtag_driver_uninstall();
         return ESP_FAIL;
     }
