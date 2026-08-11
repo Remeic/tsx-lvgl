@@ -20,6 +20,14 @@ import type { NativeLvgl } from "./native.js";
  * - `left`/`top` (12/13): any finite number, rounded; negatives are valid
  *   (LVGL translate, not position).
  * - `display` (14): "none" is 1 (hidden), "flex" is 0 (shown).
+ * - `flexDirection` (15): row=0, column=1, row-reverse=2, column-reverse=3.
+ * - `justifyContent` (16): flex-start=0, flex-end=1, center=2,
+ *   space-between=3, space-around=4, space-evenly=5.
+ * - `alignItems` (17): flex-start=0, flex-end=1, center=2 (no "stretch").
+ * - `gap` (18): finite number >= 0, rounded; negative/non-finite skip.
+ * - `flexGrow` (19): finite number, rounded, clamped 0..255 (LVGL
+ *   `flex_grow` is `uint8_t` — 256 would wrap to 0); negative skips. `flex`
+ *   (core alias) normalizes into this same code, no separate code.
  */
 export const NATIVE_STYLE_PROP = Object.freeze({
   backgroundColor: 0,
@@ -37,6 +45,11 @@ export const NATIVE_STYLE_PROP = Object.freeze({
   left: 12,
   top: 13,
   display: 14,
+  flexDirection: 15,
+  justifyContent: 16,
+  alignItems: 17,
+  gap: 18,
+  flexGrow: 19,
 } as const);
 
 export type NormalizedStyle = ReadonlyMap<number, number>;
@@ -155,6 +168,46 @@ function displayProp(value: unknown, out: Map<number, number>): void {
 /** v1: absolute and relative are equivalent; no native effect. */
 function positionProp(): void {}
 
+const FLEX_DIRECTION_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  row: 0,
+  column: 1,
+  "row-reverse": 2,
+  "column-reverse": 3,
+});
+
+const JUSTIFY_CONTENT_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  "flex-start": 0,
+  "flex-end": 1,
+  center: 2,
+  "space-between": 3,
+  "space-around": 4,
+  "space-evenly": 5,
+});
+
+const ALIGN_ITEMS_VALUES: Readonly<Record<string, number>> = Object.freeze({
+  "flex-start": 0,
+  "flex-end": 1,
+  center: 2,
+});
+
+function enumProp(prop: number, values: Readonly<Record<string, number>>): StyleNormalizer {
+  return (value, out) => {
+    if (typeof value !== "string") return;
+    const code = values[value];
+    if (code !== undefined) out.set(prop, code);
+  };
+}
+
+/** flexGrow/flex: finite number, rounded, clamped 0..255 (LVGL flex_grow is uint8); negative skips. */
+function flexGrowProp(prop: number): StyleNormalizer {
+  return (value, out) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return;
+    const rounded = Math.round(value);
+    if (rounded < 0) return;
+    out.set(prop, Math.min(255, rounded));
+  };
+}
+
 const P = NATIVE_STYLE_PROP;
 
 /**
@@ -183,6 +236,12 @@ const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizer>> = Ob
   left: translateProp(P.left),
   top: translateProp(P.top),
   display: displayProp,
+  flexDirection: enumProp(P.flexDirection, FLEX_DIRECTION_VALUES),
+  justifyContent: enumProp(P.justifyContent, JUSTIFY_CONTENT_VALUES),
+  alignItems: enumProp(P.alignItems, ALIGN_ITEMS_VALUES),
+  gap: intProp(P.gap),
+  flexGrow: flexGrowProp(P.flexGrow),
+  flex: flexGrowProp(P.flexGrow),
 });
 
 /**
@@ -210,6 +269,12 @@ const STYLE_KEY_ORDER: readonly (keyof TextStyle)[] = [
   "left",
   "top",
   "display",
+  "flexDirection",
+  "justifyContent",
+  "alignItems",
+  "gap",
+  "flex",
+  "flexGrow",
 ];
 
 /** Later array entries win at the key level; falsy entries are skipped. */
@@ -229,6 +294,12 @@ export function normalizeStyle(style: unknown): NormalizedStyle {
   const merged = mergeStyle(style);
   const out = new Map<number, number>();
   for (const key of STYLE_KEY_ORDER) STYLE_NORMALIZERS[key](merged[key], out);
+  // Implied flex: justifyContent/alignItems/gap only matter on a flex
+  // container, so setting any of them without an explicit flexDirection
+  // implies "column" (RN default) instead of silently no-opping.
+  if (!out.has(P.flexDirection) && (out.has(P.justifyContent) || out.has(P.alignItems) || out.has(P.gap))) {
+    out.set(P.flexDirection, 1);
+  }
   return out;
 }
 

@@ -276,6 +276,128 @@ test("a px-to-percent width transition diffs as exactly one setStyle, never a re
   assert.deepEqual(lvgl.resetStyleCalls, []);
 });
 
+// ---------------------------------------------------------------------------
+// flexDirection / justifyContent / alignItems (S3)
+// ---------------------------------------------------------------------------
+
+test("flexDirection maps row/column/row-reverse/column-reverse to 0/1/2/3", () => {
+  assert.equal(normalizeStyle({ flexDirection: "row" }).get(P.flexDirection), 0);
+  assert.equal(normalizeStyle({ flexDirection: "column" }).get(P.flexDirection), 1);
+  assert.equal(normalizeStyle({ flexDirection: "row-reverse" }).get(P.flexDirection), 2);
+  assert.equal(normalizeStyle({ flexDirection: "column-reverse" }).get(P.flexDirection), 3);
+});
+
+test("an unrecognized flexDirection is skipped", () => {
+  assert.equal(normalizeStyle({ flexDirection: "diagonal" as unknown as "row" }).has(P.flexDirection), false);
+});
+
+test("justifyContent maps flex-start/flex-end/center/space-between/space-around/space-evenly to 0..5", () => {
+  const cases: ReadonlyArray<readonly [string, number]> = [
+    ["flex-start", 0],
+    ["flex-end", 1],
+    ["center", 2],
+    ["space-between", 3],
+    ["space-around", 4],
+    ["space-evenly", 5],
+  ];
+  for (const [value, code] of cases) {
+    assert.equal(normalizeStyle({ justifyContent: value }).get(P.justifyContent), code, value);
+  }
+});
+
+test("an unrecognized justifyContent is skipped", () => {
+  assert.equal(normalizeStyle({ justifyContent: "stretch" as unknown as "center" }).has(P.justifyContent), false);
+});
+
+test("alignItems maps flex-start/flex-end/center to 0/1/2", () => {
+  const cases: ReadonlyArray<readonly [string, number]> = [
+    ["flex-start", 0],
+    ["flex-end", 1],
+    ["center", 2],
+  ];
+  for (const [value, code] of cases) {
+    assert.equal(normalizeStyle({ alignItems: value }).get(P.alignItems), code, value);
+  }
+});
+
+test("an unrecognized alignItems, including stretch (no LVGL equivalent), is skipped", () => {
+  assert.equal(normalizeStyle({ alignItems: "stretch" as unknown as "center" }).has(P.alignItems), false);
+});
+
+// ---------------------------------------------------------------------------
+// gap (S3)
+// ---------------------------------------------------------------------------
+
+test("gap accepts a non-negative number, rounded", () => {
+  assert.equal(normalizeStyle({ gap: 4.6 }).get(P.gap), 5);
+  assert.equal(normalizeStyle({ gap: 0 }).get(P.gap), 0);
+});
+
+test("negative or non-finite gap is skipped", () => {
+  assert.equal(normalizeStyle({ gap: -1 }).has(P.gap), false);
+  assert.equal(normalizeStyle({ gap: Number.NaN }).has(P.gap), false);
+  assert.equal(normalizeStyle({ gap: Number.POSITIVE_INFINITY }).has(P.gap), false);
+});
+
+// ---------------------------------------------------------------------------
+// flexGrow / flex alias (S3)
+// ---------------------------------------------------------------------------
+
+test("flexGrow accepts a finite number, rounded", () => {
+  assert.equal(normalizeStyle({ flexGrow: 2.6 }).get(P.flexGrow), 3);
+});
+
+test("flexGrow clamps 256 to 255 (LVGL flex_grow is uint8)", () => {
+  assert.equal(normalizeStyle({ flexGrow: 256 }).get(P.flexGrow), 255);
+});
+
+test("negative flexGrow is skipped", () => {
+  assert.equal(normalizeStyle({ flexGrow: -1 }).has(P.flexGrow), false);
+});
+
+test("flex is an alias of flexGrow: it writes the same code 19, with the same clamp/round rules", () => {
+  assert.equal(normalizeStyle({ flex: 1 }).get(P.flexGrow), 1);
+  assert.equal(normalizeStyle({ flex: 2.6 }).get(P.flexGrow), 3);
+  assert.equal(normalizeStyle({ flex: 256 }).get(P.flexGrow), 255);
+  assert.equal(normalizeStyle({ flex: -1 }).has(P.flexGrow), false);
+});
+
+test("an explicit flexGrow wins over the flex alias, regardless of object key order", () => {
+  assert.equal(normalizeStyle({ flex: 1, flexGrow: 2 }).get(P.flexGrow), 2);
+  assert.equal(normalizeStyle({ flexGrow: 2, flex: 1 }).get(P.flexGrow), 2);
+});
+
+// ---------------------------------------------------------------------------
+// implied flex (S3): justifyContent/alignItems/gap alone imply flexDirection: column
+// ---------------------------------------------------------------------------
+
+test("justifyContent, alignItems or gap alone each implies flexDirection column (code 15 = 1)", () => {
+  assert.equal(normalizeStyle({ justifyContent: "center" }).get(P.flexDirection), 1);
+  assert.equal(normalizeStyle({ alignItems: "center" }).get(P.flexDirection), 1);
+  assert.equal(normalizeStyle({ gap: 4 }).get(P.flexDirection), 1);
+});
+
+test("an explicit flexDirection wins over the implied column", () => {
+  assert.equal(normalizeStyle({ flexDirection: "row", justifyContent: "center" }).get(P.flexDirection), 0);
+});
+
+test("flexGrow/flex alone do not imply flexDirection: they're a child property, not a container setting", () => {
+  assert.equal(normalizeStyle({ flexGrow: 1 }).has(P.flexDirection), false);
+  assert.equal(normalizeStyle({ flex: 1 }).has(P.flexDirection), false);
+});
+
+test("removing the last implied-flex trigger key on re-render diffs away the implied flexDirection", () => {
+  const lvgl = new FakeNativeLvgl();
+  const id = lvgl.create("view");
+  const previous = normalizeStyle({ gap: 4 });
+  const next = normalizeStyle({});
+  applyStyleDiff(lvgl, id, previous, next);
+  assert.deepEqual(lvgl.resetStyleCalls, [
+    { id, prop: P.gap },
+    { id, prop: P.flexDirection },
+  ]);
+});
+
 test("applyStyleDiff against an empty previous emits a setStyle per next entry, in the fixed key order", () => {
   const lvgl = new FakeNativeLvgl();
   const id = lvgl.create("view");

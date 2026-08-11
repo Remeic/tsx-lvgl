@@ -40,6 +40,17 @@ export interface ViewStyle {
   readonly top?: number;
   /** "none" hides without unmounting. */
   readonly display?: "flex" | "none";
+  /** Setting justifyContent/alignItems/gap alone implies "column" (RN default). */
+  readonly flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
+  readonly justifyContent?: "flex-start" | "flex-end" | "center" | "space-between" | "space-around" | "space-evenly";
+  /** No "stretch": LVGL flex has none; idiom is child height "100%". */
+  readonly alignItems?: "flex-start" | "flex-end" | "center";
+  /** px, row and column gap. */
+  readonly gap?: number;
+  /** 0..255 (LVGL uint8). Explicit flexGrow wins over flex. */
+  readonly flexGrow?: number;
+  /** RN shorthand, alias of flexGrow. */
+  readonly flex?: number;
 }
 
 export interface TextStyle extends ViewStyle {

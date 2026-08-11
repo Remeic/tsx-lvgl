@@ -341,6 +341,42 @@ void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
             if (value == 1) lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
             break;
+#if LV_USE_FLEX
+        case LVGL_HOST_STYLE_FLEX_DIRECTION: {
+            lv_flex_flow_t flow = LV_FLEX_FLOW_ROW;
+            if (value == 1) flow = LV_FLEX_FLOW_COLUMN;
+            else if (value == 2) flow = LV_FLEX_FLOW_ROW_REVERSE;
+            else if (value == 3) flow = LV_FLEX_FLOW_COLUMN_REVERSE;
+            lv_obj_set_flex_flow(target, flow); /* also sets LV_STYLE_LAYOUT */
+            break;
+        }
+        case LVGL_HOST_STYLE_JUSTIFY_CONTENT: {
+            lv_flex_align_t align = LV_FLEX_ALIGN_START;
+            if (value == 1) align = LV_FLEX_ALIGN_END;
+            else if (value == 2) align = LV_FLEX_ALIGN_CENTER;
+            else if (value == 3) align = LV_FLEX_ALIGN_SPACE_BETWEEN;
+            else if (value == 4) align = LV_FLEX_ALIGN_SPACE_AROUND;
+            else if (value == 5) align = LV_FLEX_ALIGN_SPACE_EVENLY;
+            lv_obj_set_style_flex_main_place(target, align, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_ALIGN_ITEMS: {
+            lv_flex_align_t align = LV_FLEX_ALIGN_START;
+            if (value == 1) align = LV_FLEX_ALIGN_END;
+            else if (value == 2) align = LV_FLEX_ALIGN_CENTER;
+            lv_obj_set_style_flex_cross_place(target, align, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_GAP:
+            lv_obj_set_style_pad_row(target, value, 0);
+            lv_obj_set_style_pad_column(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_FLEX_GROW: {
+            int32_t clamped = value < 0 ? 0 : (value > 255 ? 255 : value);
+            lv_obj_set_style_flex_grow(target, (uint8_t)clamped, 0);
+            break;
+        }
+#endif
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */
             break;
@@ -402,6 +438,26 @@ void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
             /* Flag, not a style prop: reset means "shown". */
             lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
             break;
+#if LV_USE_FLEX
+        case LVGL_HOST_STYLE_FLEX_DIRECTION:
+            /* lv_obj_set_flex_flow set both on the way in; composite reset. */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_FLOW, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_LAYOUT, 0);
+            break;
+        case LVGL_HOST_STYLE_JUSTIFY_CONTENT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_MAIN_PLACE, 0);
+            break;
+        case LVGL_HOST_STYLE_ALIGN_ITEMS:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_CROSS_PLACE, 0);
+            break;
+        case LVGL_HOST_STYLE_GAP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_ROW, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_COLUMN, 0);
+            break;
+        case LVGL_HOST_STYLE_FLEX_GROW:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_GROW, 0);
+            break;
+#endif
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */
             break;

@@ -65,6 +65,13 @@ void lvgl_host_load_screen(lvgl_host_t *host, int id);
  *   ("auto"); `-1001 <= value <= -1` is a percent, `lv_pct(-(value) - 1)`.
  * - LEFT/TOP: any int32, applied as LVGL translate (negatives valid).
  * - DISPLAY: 1 hides (LV_OBJ_FLAG_HIDDEN), 0 shows.
+ * - FLEX_DIRECTION: row=0, column=1, row-reverse=2, column-reverse=3.
+ * - JUSTIFY_CONTENT: flex-start=0, flex-end=1, center=2, space-between=3,
+ *   space-around=4, space-evenly=5.
+ * - ALIGN_ITEMS: flex-start=0, flex-end=1, center=2 (no "stretch").
+ * - GAP: any non-negative int32, applied to both row and column gap.
+ * - FLEX_GROW: 0..255 (LVGL flex_grow is uint8_t); the TS normalizer already
+ *   clamps, defensively re-clamped on the C side too.
  */
 typedef enum {
     LVGL_HOST_STYLE_BACKGROUND_COLOR = 0,
@@ -82,6 +89,11 @@ typedef enum {
     LVGL_HOST_STYLE_LEFT = 12,
     LVGL_HOST_STYLE_TOP = 13,
     LVGL_HOST_STYLE_DISPLAY = 14,
+    LVGL_HOST_STYLE_FLEX_DIRECTION = 15,
+    LVGL_HOST_STYLE_JUSTIFY_CONTENT = 16,
+    LVGL_HOST_STYLE_ALIGN_ITEMS = 17,
+    LVGL_HOST_STYLE_GAP = 18,
+    LVGL_HOST_STYLE_FLEX_GROW = 19,
     LVGL_HOST_STYLE_PROP_COUNT
 } lvgl_host_style_prop_t;
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value);

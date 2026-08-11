@@ -1,6 +1,6 @@
 # Feature 0011 — Widget styling
 
-Status: S1 (box styles), S2 (size/position/display) implemented.
+Status: S1 (box styles), S2 (size/position/display), S3 (flex layout) implemented.
 
 ## Objective
 
@@ -48,9 +48,38 @@ itself against — via `Omit<ViewStyle, ...>`.
   preserved, `"flex"` (or removing the key) shows it again. `"flex"` is not
   itself a layout mode yet (that's S3); it is just "shown".
 
+## S3 key set
+
+`flexDirection, justifyContent, alignItems, gap, flexGrow, flex`, on
+`ViewStyle` (so `TextStyle` and `ScreenStyle` too — `ScreenStyle`'s `Omit`
+only drops the S2 size/position/display keys, not the S3 flex-container
+keys, so a `Screen` can itself be a flex container).
+
+- `flexDirection?: "row" | "column" | "row-reverse" | "column-reverse"`:
+  row=0, column=1, row-reverse=2, column-reverse=3.
+- `justifyContent?: "flex-start" | "flex-end" | "center" | "space-between" |
+  "space-around" | "space-evenly"`: 0-5 in that order.
+- `alignItems?: "flex-start" | "flex-end" | "center"`: 0-2 in that order. No
+  `"stretch"` — LVGL flex has none; the idiom is a child `height: "100%"`.
+- `gap?: number`: px, applied to both row and column gap. Finite number >= 0,
+  rounded; negative/non-finite skips.
+- `flexGrow?: number`: 0..255 (LVGL `flex_grow` is `uint8_t` — 256 would wrap
+  to 0). Finite number, rounded, clamped to 0..255; negative skips.
+- `flex?: number`: RN shorthand, alias of `flexGrow` — normalizes into the
+  same native code. An explicit `flexGrow` wins if both are present (fixed
+  key order processes `flex` before `flexGrow`, and `Map.set` is
+  last-write-wins).
+
+**Implied flex.** Setting `justifyContent`, `alignItems` or `gap` without an
+explicit `flexDirection` implies `flexDirection: "column"` (RN's default) —
+otherwise those keys would silently no-op on a non-flex container. `flexGrow`
+and `flex` do **not** trigger this: they're a child's own property, not a
+container setting. Removing the last trigger key on re-render naturally diffs
+away the implied `flexDirection` too (`resetStyle`), since `normalizeStyle`
+recomputes it from scratch every render.
+
 Planned, not yet implemented:
 
-- S3: `flexDirection, justifyContent, alignItems, alignSelf, flexGrow/flexShrink/flexBasis, gap`.
 - S4: `opacity, transform: [{ rotate }, { scale }]`.
 
 ## Normalization (`packages/device/src/style.ts`)
@@ -105,6 +134,20 @@ in both `packages/device/src/style.ts` and `lvgl_host.h`:
 - `position` has no code at all: its normalizer is registered (so
   `STYLE_NORMALIZERS` stays an exhaustive `Record<keyof TextStyle, ...>`)
   but intentionally emits nothing.
+- `flexDirection`/`justifyContent`/`alignItems` (codes 15-17): enum ints, see
+  S3 key set above. `gap` (code 18): non-negative int32, fans out on the C
+  side to both `pad_row` and `pad_column`. `flexGrow` (code 19): 0..255;
+  `flex` has no code of its own — it normalizes into 19.
+- All S3 set/reset cases in `lvgl_host.c` are compiled under `#if
+  LV_USE_FLEX` / `#endif`: a consumer building with `LV_USE_FLEX` off would
+  otherwise fail to compile against the flex setter APIs. With it off, codes
+  15-19 fall through to the `default` no-op on both `setStyle` and
+  `resetStyle` (same defensive-ignore path as an unknown code).
+- Two S3 codes are composite on reset, same pattern as `backgroundColor`:
+  - `flexDirection`: `lv_obj_set_flex_flow` sets both `LV_STYLE_FLEX_FLOW`
+    and `LV_STYLE_LAYOUT` on the way in, so its reset removes both.
+  - `gap`: sets both `pad_row` and `pad_column` on the way in, so its reset
+    removes both `LV_STYLE_PAD_ROW` and `LV_STYLE_PAD_COLUMN`.
 
 Button routing: `color`/`textAlign` (codes 8-9) target the button's inner
 label; every other code targets the widget's own object. Resetting

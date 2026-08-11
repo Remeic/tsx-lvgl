@@ -310,6 +310,24 @@ test("createInstance and updateInstance apply S2 width/left/display through the 
   ]);
 });
 
+test("createInstance and updateInstance apply S3 flexDirection/gap through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { flexDirection: "row", gap: 4 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.flexDirection), 0);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.gap), 4);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { flexDirection: "row", gap: 4 } },
+    { style: { flexDirection: "column", gap: 4 } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
+});
+
 // ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------

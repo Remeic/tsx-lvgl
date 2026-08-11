@@ -312,6 +312,51 @@ test("a width style re-rendered from percent to px emits a single setStyle per c
   assert.deepEqual(emitted, [{ id: textId, prop: NATIVE_STYLE_PROP.width, value: 120 }]);
 });
 
+const flexSource = `
+  import { Button, Screen, Text, View, useState } from "@tsx-lvgl/sdk";
+  export default function Flex() {
+    const [step, setStep] = useState(0);
+    const style = step === 0
+      ? { flexDirection: "row", gap: 4 }
+      : { flexDirection: "column", gap: 4 };
+    return (
+      <Screen>
+        <View style={style}>
+          <Text text="flex" />
+        </View>
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a flex row with gap, re-rendered to column, emits a single setStyle(flexDirection, 1)", () => {
+  const output = compileTsxBundle({
+    fileName: "Flex.tsx",
+    source: flexSource,
+    bundleId: "flex",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [viewId] = fake.lvgl.liveIdsOfKind("view");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(viewId, "expected a live view widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.flexDirection), 0);
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.gap), 4);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: viewId, prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
+});
+
 test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {
   const generated = compileEmbeddedShakeFace(1);
   assert.equal(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.js"), "utf8"), generated.code);

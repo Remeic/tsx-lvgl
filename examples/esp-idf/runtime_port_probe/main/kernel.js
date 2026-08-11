@@ -2357,6 +2357,11 @@ exports.NATIVE_STYLE_PROP = Object.freeze({
     left: 12,
     top: 13,
     display: 14,
+    flexDirection: 15,
+    justifyContent: 16,
+    alignItems: 17,
+    gap: 18,
+    flexGrow: 19,
 });
 const NAMED_COLORS = Object.freeze({
     red: 0xff0000,
@@ -2473,6 +2478,44 @@ function displayProp(value, out) {
         out.set(exports.NATIVE_STYLE_PROP.display, code);
 }
 function positionProp() { }
+const FLEX_DIRECTION_VALUES = Object.freeze({
+    row: 0,
+    column: 1,
+    "row-reverse": 2,
+    "column-reverse": 3,
+});
+const JUSTIFY_CONTENT_VALUES = Object.freeze({
+    "flex-start": 0,
+    "flex-end": 1,
+    center: 2,
+    "space-between": 3,
+    "space-around": 4,
+    "space-evenly": 5,
+});
+const ALIGN_ITEMS_VALUES = Object.freeze({
+    "flex-start": 0,
+    "flex-end": 1,
+    center: 2,
+});
+function enumProp(prop, values) {
+    return (value, out) => {
+        if (typeof value !== "string")
+            return;
+        const code = values[value];
+        if (code !== undefined)
+            out.set(prop, code);
+    };
+}
+function flexGrowProp(prop) {
+    return (value, out) => {
+        if (typeof value !== "number" || !Number.isFinite(value))
+            return;
+        const rounded = Math.round(value);
+        if (rounded < 0)
+            return;
+        out.set(prop, Math.min(255, rounded));
+    };
+}
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
     padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
@@ -2494,6 +2537,12 @@ const STYLE_NORMALIZERS = Object.freeze({
     left: translateProp(P.left),
     top: translateProp(P.top),
     display: displayProp,
+    flexDirection: enumProp(P.flexDirection, FLEX_DIRECTION_VALUES),
+    justifyContent: enumProp(P.justifyContent, JUSTIFY_CONTENT_VALUES),
+    alignItems: enumProp(P.alignItems, ALIGN_ITEMS_VALUES),
+    gap: intProp(P.gap),
+    flexGrow: flexGrowProp(P.flexGrow),
+    flex: flexGrowProp(P.flexGrow),
 });
 const STYLE_KEY_ORDER = [
     "padding",
@@ -2515,6 +2564,12 @@ const STYLE_KEY_ORDER = [
     "left",
     "top",
     "display",
+    "flexDirection",
+    "justifyContent",
+    "alignItems",
+    "gap",
+    "flex",
+    "flexGrow",
 ];
 function mergeStyle(style) {
     if (Array.isArray(style)) {
@@ -2533,6 +2588,9 @@ function normalizeStyle(style) {
     const out = new Map();
     for (const key of STYLE_KEY_ORDER)
         STYLE_NORMALIZERS[key](merged[key], out);
+    if (!out.has(P.flexDirection) && (out.has(P.justifyContent) || out.has(P.alignItems) || out.has(P.gap))) {
+        out.set(P.flexDirection, 1);
+    }
     return out;
 }
 function applyStyleDiff(native, id, previous, next) {
