@@ -72,6 +72,9 @@ void lvgl_host_load_screen(lvgl_host_t *host, int id);
  * - GAP: any non-negative int32, applied to both row and column gap.
  * - FLEX_GROW: 0..255 (LVGL flex_grow is uint8_t); the TS normalizer already
  *   clamps, defensively re-clamped on the C side too.
+ * - OPACITY: 0..255 LVGL opa, defensively re-clamped on the C side too.
+ * - ROTATE: deci-degrees (LVGL transform_rotation unit), clockwise.
+ * - SCALE: 256 == LV_SCALE_NONE == 100%.
  */
 typedef enum {
     LVGL_HOST_STYLE_BACKGROUND_COLOR = 0,
@@ -94,6 +97,9 @@ typedef enum {
     LVGL_HOST_STYLE_ALIGN_ITEMS = 17,
     LVGL_HOST_STYLE_GAP = 18,
     LVGL_HOST_STYLE_FLEX_GROW = 19,
+    LVGL_HOST_STYLE_OPACITY = 20,
+    LVGL_HOST_STYLE_ROTATE = 21,
+    LVGL_HOST_STYLE_SCALE = 22,
     LVGL_HOST_STYLE_PROP_COUNT
 } lvgl_host_style_prop_t;
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value);

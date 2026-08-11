@@ -1,6 +1,7 @@
 # Feature 0011 — Widget styling
 
-Status: S1 (box styles), S2 (size/position/display), S3 (flex layout) implemented.
+Status: S1 (box styles), S2 (size/position/display), S3 (flex layout), S4
+(opacity/rotate/scale) implemented.
 
 ## Objective
 
@@ -78,9 +79,41 @@ container setting. Removing the last trigger key on re-render naturally diffs
 away the implied `flexDirection` too (`resetStyle`), since `normalizeStyle`
 recomputes it from scratch every render.
 
-Planned, not yet implemented:
+## S4 key set
 
-- S4: `opacity, transform: [{ rotate }, { scale }]`.
+`opacity, rotate, scale`, on `ViewStyle` (so `TextStyle` and `ScreenStyle`
+too — flat keys, not an RN `transform: [...]` array).
+
+- `opacity?: number`: 0..1, clamped (CSS behavior — out-of-range finite
+  values clamp, they do not skip the key). Scales to plain LVGL `opa`
+  (`Math.round(v * 255)`), a **per-draw-op** blend, not CSS group opacity.
+  `opa_layered` was considered and rejected: it forces a full-area layer
+  buffer (hundreds of KB fullscreen, no chunking, matrix path off by
+  default). Consequence: overlapping children of a semi-transparent parent
+  may double-blend where they overlap, unlike CSS group opacity. Non-finite
+  or non-number values skip the key.
+- `rotate?: number | \`${number}deg\``: degrees clockwise, center pivot. A
+  number is degrees as-is; a string must match `` `${number}deg` `` exactly
+  (the leading float is parsed, anything else — missing suffix, trailing
+  garbage — skips the key). Scales to LVGL deci-degrees
+  (`Math.round(deg * 10)`); negative values are valid. Non-finite skips.
+- `scale?: number`: 1 = 100%, center pivot. Finite number >= 0, scaled to
+  LVGL's `Math.round(v * 256)` (256 = `LV_SCALE_NONE` = 100%);
+  negative/non-finite skips.
+
+**Pivot.** LVGL's default transform pivot is top-left; CSS's
+`transform-origin` default is center. `rotate`/`scale`'s native setter
+therefore always forces the pivot to center (`lv_pct(50)` on both axes) as a
+side effect. Because `rotate` and `scale` share the same pivot props and the
+C host is stateless, `resetStyle` for either one leaves the pivot props in
+place — it cannot know whether the other transform is still active. A
+leftover pivot with no active transform is inert by design (no transform, no
+visible effect), so this is safe to leave rather than track.
+
+**Hardware validation (open item).** `rotate`/`scale` force a full-area LVGL
+transform layer, same cost profile as layered opacity. Benchmark on hardware
+before relying on animated transforms in a real app — this slice does not
+include that measurement.
 
 ## Normalization (`packages/device/src/style.ts`)
 
@@ -148,6 +181,16 @@ in both `packages/device/src/style.ts` and `lvgl_host.h`:
     and `LV_STYLE_LAYOUT` on the way in, so its reset removes both.
   - `gap`: sets both `pad_row` and `pad_column` on the way in, so its reset
     removes both `LV_STYLE_PAD_ROW` and `LV_STYLE_PAD_COLUMN`.
+- `opacity` (code 20): 0..255 LVGL `opa`, defensively re-clamped on the C
+  side too; `lv_obj_set_style_opa`, reset removes `LV_STYLE_OPA`.
+- `rotate` (code 21): deci-degrees, `lv_obj_set_style_transform_rotation`;
+  reset removes only `LV_STYLE_TRANSFORM_ROTATION`, deliberately leaving the
+  pivot props set (see Pivot above). Not gated behind `#if LV_USE_FLEX` —
+  LVGL transforms are core, not a flex feature.
+- `scale` (code 22): `lv_obj_set_style_transform_scale_x`/`_y`, both set to
+  the same value (256 = 100%); reset removes both
+  `LV_STYLE_TRANSFORM_SCALE_X` and `LV_STYLE_TRANSFORM_SCALE_Y`, same pivot
+  rationale as `rotate`.
 
 Button routing: `color`/`textAlign` (codes 8-9) target the button's inner
 label; every other code targets the widget's own object. Resetting

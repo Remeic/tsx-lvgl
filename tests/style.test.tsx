@@ -226,6 +226,64 @@ test("position emits nothing for either accepted value", () => {
 });
 
 // ---------------------------------------------------------------------------
+// opacity / rotate / scale (S4)
+// ---------------------------------------------------------------------------
+
+test("opacity codes are 20/21/22 in order", () => {
+  assert.equal(P.opacity, 20);
+  assert.equal(P.rotate, 21);
+  assert.equal(P.scale, 22);
+});
+
+test("opacity scales 0/1/0.5 to 0/255/128 (0.5 * 255 = 127.5, rounds up)", () => {
+  assert.equal(normalizeStyle({ opacity: 0 }).get(P.opacity), 0);
+  assert.equal(normalizeStyle({ opacity: 1 }).get(P.opacity), 255);
+  assert.equal(normalizeStyle({ opacity: 0.5 }).get(P.opacity), 128);
+});
+
+test("opacity clamps out-of-range finite values instead of skipping (CSS behavior)", () => {
+  assert.equal(normalizeStyle({ opacity: 1.5 }).get(P.opacity), 255);
+  assert.equal(normalizeStyle({ opacity: -0.2 }).get(P.opacity), 0);
+});
+
+test("non-finite or non-number opacity is skipped", () => {
+  assert.equal(normalizeStyle({ opacity: Number.NaN }).has(P.opacity), false);
+  assert.equal(normalizeStyle({ opacity: "0.5" as unknown as number }).has(P.opacity), false);
+});
+
+test("rotate accepts a number in degrees, scaled to deci-degrees, negatives preserved", () => {
+  assert.equal(normalizeStyle({ rotate: 45 }).get(P.rotate), 450);
+  assert.equal(normalizeStyle({ rotate: -90 }).get(P.rotate), -900);
+});
+
+test('rotate accepts a "${number}deg" string, scaled to deci-degrees', () => {
+  assert.equal(normalizeStyle({ rotate: "45deg" }).get(P.rotate), 450);
+  assert.equal(normalizeStyle({ rotate: "-12.34deg" }).get(P.rotate), -123);
+});
+
+test("a rotate string missing or misplacing the deg suffix is skipped", () => {
+  assert.equal(normalizeStyle({ rotate: "45" as unknown as `${number}deg` }).has(P.rotate), false);
+  assert.equal(normalizeStyle({ rotate: "deg" as unknown as `${number}deg` }).has(P.rotate), false);
+  assert.equal(normalizeStyle({ rotate: "45degx" as unknown as `${number}deg` }).has(P.rotate), false);
+});
+
+test("non-finite rotate is skipped", () => {
+  assert.equal(normalizeStyle({ rotate: Number.NaN }).has(P.rotate), false);
+});
+
+test("scale is finite number >= 0, scaled by 256 (LV_SCALE_NONE = 100%)", () => {
+  assert.equal(normalizeStyle({ scale: 1 }).get(P.scale), 256);
+  assert.equal(normalizeStyle({ scale: 1.2 }).get(P.scale), 307);
+  assert.equal(normalizeStyle({ scale: 0 }).get(P.scale), 0);
+  assert.equal(normalizeStyle({ scale: 2.5 }).get(P.scale), 640);
+});
+
+test("negative or non-finite scale is skipped", () => {
+  assert.equal(normalizeStyle({ scale: -1 }).has(P.scale), false);
+  assert.equal(normalizeStyle({ scale: Number.NaN }).has(P.scale), false);
+});
+
+// ---------------------------------------------------------------------------
 // applyStyleDiff
 // ---------------------------------------------------------------------------
 

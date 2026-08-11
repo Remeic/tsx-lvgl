@@ -2362,6 +2362,9 @@ exports.NATIVE_STYLE_PROP = Object.freeze({
     alignItems: 17,
     gap: 18,
     flexGrow: 19,
+    opacity: 20,
+    rotate: 21,
+    scale: 22,
 });
 const NAMED_COLORS = Object.freeze({
     red: 0xff0000,
@@ -2516,6 +2519,50 @@ function flexGrowProp(prop) {
         out.set(prop, Math.min(255, rounded));
     };
 }
+function normalizeOpacity(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    const clamped = Math.min(1, Math.max(0, value));
+    return Math.round(clamped * 255);
+}
+const ROTATE_DEG_RE = /^(-?\d+(?:\.\d+)?)deg$/;
+function normalizeRotate(value) {
+    let degrees;
+    if (typeof value === "number") {
+        degrees = value;
+    }
+    else if (typeof value === "string") {
+        const match = ROTATE_DEG_RE.exec(value);
+        const captured = match?.[1];
+        if (captured === undefined)
+            return undefined;
+        degrees = Number.parseFloat(captured);
+    }
+    else {
+        return undefined;
+    }
+    return Number.isFinite(degrees) ? Math.round(degrees * 10) : undefined;
+}
+function normalizeScale(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+        return undefined;
+    return Math.round(value * 256);
+}
+function opacityProp(value, out) {
+    const opa = normalizeOpacity(value);
+    if (opa !== undefined)
+        out.set(exports.NATIVE_STYLE_PROP.opacity, opa);
+}
+function rotateProp(value, out) {
+    const deciDeg = normalizeRotate(value);
+    if (deciDeg !== undefined)
+        out.set(exports.NATIVE_STYLE_PROP.rotate, deciDeg);
+}
+function scaleProp(value, out) {
+    const scaled = normalizeScale(value);
+    if (scaled !== undefined)
+        out.set(exports.NATIVE_STYLE_PROP.scale, scaled);
+}
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
     padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
@@ -2543,6 +2590,9 @@ const STYLE_NORMALIZERS = Object.freeze({
     gap: intProp(P.gap),
     flexGrow: flexGrowProp(P.flexGrow),
     flex: flexGrowProp(P.flexGrow),
+    opacity: opacityProp,
+    rotate: rotateProp,
+    scale: scaleProp,
 });
 const STYLE_KEY_ORDER = [
     "padding",
@@ -2570,6 +2620,9 @@ const STYLE_KEY_ORDER = [
     "gap",
     "flex",
     "flexGrow",
+    "opacity",
+    "rotate",
+    "scale",
 ];
 function mergeStyle(style) {
     if (Array.isArray(style)) {

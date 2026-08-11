@@ -377,6 +377,27 @@ void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
             break;
         }
 #endif
+        case LVGL_HOST_STYLE_OPACITY: {
+            int32_t clamped = value < 0 ? 0 : (value > 255 ? 255 : value);
+            lv_obj_set_style_opa(target, (lv_opa_t)clamped, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_ROTATE:
+            lv_obj_set_style_transform_rotation(target, value, 0);
+            /* CSS transform-origin defaults to center; LVGL's default pivot
+             * is top-left. Force center so rotate/scale match CSS. */
+            lv_obj_set_style_transform_pivot_x(target, lv_pct(50), 0);
+            lv_obj_set_style_transform_pivot_y(target, lv_pct(50), 0);
+            break;
+        case LVGL_HOST_STYLE_SCALE: {
+            int32_t clamped = value < 0 ? 0 : value;
+            lv_obj_set_style_transform_scale_x(target, clamped, 0);
+            lv_obj_set_style_transform_scale_y(target, clamped, 0);
+            /* Same center-pivot rationale as LVGL_HOST_STYLE_ROTATE above. */
+            lv_obj_set_style_transform_pivot_x(target, lv_pct(50), 0);
+            lv_obj_set_style_transform_pivot_y(target, lv_pct(50), 0);
+            break;
+        }
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */
             break;
@@ -458,6 +479,23 @@ void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
             lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_GROW, 0);
             break;
 #endif
+        case LVGL_HOST_STYLE_OPACITY:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_OPA, 0);
+            break;
+        case LVGL_HOST_STYLE_ROTATE:
+            /* Only the rotation prop is removed. Rotate and scale share the
+             * pivot props set in lvgl_host_set_style above; this function is
+             * stateless and cannot know whether the other transform is still
+             * active, so a leftover pivot with no active transform is left
+             * in place — it is inert (no transform, no visible effect). */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_ROTATION, 0);
+            break;
+        case LVGL_HOST_STYLE_SCALE:
+            /* Pivot props are deliberately left set; see the rationale
+             * comment on LVGL_HOST_STYLE_ROTATE above. */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_SCALE_X, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_SCALE_Y, 0);
+            break;
         default:
             /* Unknown codes are rejected at the binding layer; ignore defensively. */
             break;

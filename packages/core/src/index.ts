@@ -51,6 +51,12 @@ export interface ViewStyle {
   readonly flexGrow?: number;
   /** RN shorthand, alias of flexGrow. */
   readonly flex?: number;
+  /** 0..1, clamped; plain LVGL opa (per-draw-op), not CSS group opacity. */
+  readonly opacity?: number;
+  /** Degrees clockwise, center pivot. */
+  readonly rotate?: number | `${number}deg`;
+  /** 1 = 100%, center pivot. */
+  readonly scale?: number;
 }
 
 export interface TextStyle extends ViewStyle {

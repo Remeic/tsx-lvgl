@@ -28,6 +28,15 @@ import type { NativeLvgl } from "./native.js";
  * - `flexGrow` (19): finite number, rounded, clamped 0..255 (LVGL
  *   `flex_grow` is `uint8_t` — 256 would wrap to 0); negative skips. `flex`
  *   (core alias) normalizes into this same code, no separate code.
+ * - `opacity` (20): finite number, clamped 0..1 (CSS-style clamp, not skip),
+ *   then `Math.round(v * 255)` (LVGL `opa` 0..255); non-finite/non-number
+ *   skips.
+ * - `rotate` (21): degrees clockwise, `Math.round(deg * 10)` (LVGL
+ *   deci-degrees); a number is taken as-is, a string must match
+ *   `` `${number}deg` `` (the leading float is parsed, anything else is
+ *   rejected); negatives are valid; non-finite skips.
+ * - `scale` (22): finite number >= 0, `Math.round(v * 256)` (256 =
+ *   `LV_SCALE_NONE` = 100%); negative/non-finite skips.
  */
 export const NATIVE_STYLE_PROP = Object.freeze({
   backgroundColor: 0,
@@ -50,6 +59,9 @@ export const NATIVE_STYLE_PROP = Object.freeze({
   alignItems: 17,
   gap: 18,
   flexGrow: 19,
+  opacity: 20,
+  rotate: 21,
+  scale: 22,
 } as const);
 
 export type NormalizedStyle = ReadonlyMap<number, number>;
@@ -208,6 +220,52 @@ function flexGrowProp(prop: number): StyleNormalizer {
   };
 }
 
+/** opacity: finite number, clamped 0..1 (CSS clamp, not skip) then scaled to LVGL opa 0..255. */
+function normalizeOpacity(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const clamped = Math.min(1, Math.max(0, value));
+  return Math.round(clamped * 255);
+}
+
+const ROTATE_DEG_RE = /^(-?\d+(?:\.\d+)?)deg$/;
+
+/** rotate: number is degrees as-is; string must be exactly `${number}deg`; both scale to LVGL deci-degrees. */
+function normalizeRotate(value: unknown): number | undefined {
+  let degrees: number;
+  if (typeof value === "number") {
+    degrees = value;
+  } else if (typeof value === "string") {
+    const match = ROTATE_DEG_RE.exec(value);
+    const captured = match?.[1];
+    if (captured === undefined) return undefined;
+    degrees = Number.parseFloat(captured);
+  } else {
+    return undefined;
+  }
+  return Number.isFinite(degrees) ? Math.round(degrees * 10) : undefined;
+}
+
+/** scale: finite number >= 0, scaled to LVGL's 256 == LV_SCALE_NONE == 100%; negative/non-finite skip. */
+function normalizeScale(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  return Math.round(value * 256);
+}
+
+function opacityProp(value: unknown, out: Map<number, number>): void {
+  const opa = normalizeOpacity(value);
+  if (opa !== undefined) out.set(NATIVE_STYLE_PROP.opacity, opa);
+}
+
+function rotateProp(value: unknown, out: Map<number, number>): void {
+  const deciDeg = normalizeRotate(value);
+  if (deciDeg !== undefined) out.set(NATIVE_STYLE_PROP.rotate, deciDeg);
+}
+
+function scaleProp(value: unknown, out: Map<number, number>): void {
+  const scaled = normalizeScale(value);
+  if (scaled !== undefined) out.set(NATIVE_STYLE_PROP.scale, scaled);
+}
+
 const P = NATIVE_STYLE_PROP;
 
 /**
@@ -242,6 +300,9 @@ const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizer>> = Ob
   gap: intProp(P.gap),
   flexGrow: flexGrowProp(P.flexGrow),
   flex: flexGrowProp(P.flexGrow),
+  opacity: opacityProp,
+  rotate: rotateProp,
+  scale: scaleProp,
 });
 
 /**
@@ -275,6 +336,9 @@ const STYLE_KEY_ORDER: readonly (keyof TextStyle)[] = [
   "gap",
   "flex",
   "flexGrow",
+  "opacity",
+  "rotate",
+  "scale",
 ];
 
 /** Later array entries win at the key level; falsy entries are skipped. */

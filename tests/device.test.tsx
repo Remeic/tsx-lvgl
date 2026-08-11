@@ -328,6 +328,20 @@ test("createInstance and updateInstance apply S3 flexDirection/gap through the h
   assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
 });
 
+test("createInstance and updateInstance apply S4 opacity/rotate through the host contract, and removing rotate resets it", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { opacity: 0.5, rotate: 45 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.opacity), 128);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.rotate), 450);
+
+  host.updateInstance(instance, "View", { style: { opacity: 0.5, rotate: 45 } }, { style: { opacity: 0.5 } });
+  assert.deepEqual(
+    lvgl.resetStyleCalls.filter((call) => call.id === instanceId(instance)),
+    [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.rotate }],
+  );
+});
+
 // ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------

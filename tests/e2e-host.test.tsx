@@ -357,6 +357,46 @@ test("a flex row with gap, re-rendered to column, emits a single setStyle(flexDi
   assert.deepEqual(emitted, [{ id: viewId, prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
 });
 
+const animatedSource = `
+  import { Button, Screen, View, useState } from "@tsx-lvgl/sdk";
+  export default function Animated() {
+    const [step, setStep] = useState(0);
+    const style = step === 0 ? { rotate: 0, opacity: 1 } : { rotate: 45, opacity: 1 };
+    return (
+      <Screen>
+        <View style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("re-rendering with only rotate changed emits exactly one setStyle(rotate, ...)", () => {
+  const output = compileTsxBundle({
+    fileName: "Animated.tsx",
+    source: animatedSource,
+    bundleId: "animated",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [viewId] = fake.lvgl.liveIdsOfKind("view");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(viewId, "expected a live view widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.rotate), 0);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: viewId, prop: NATIVE_STYLE_PROP.rotate, value: 450 }]);
+});
+
 test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {
   const generated = compileEmbeddedShakeFace(1);
   assert.equal(readFileSync(join(embeddedShakeFaceDirectory, "shakeface.g1.js"), "utf8"), generated.code);
