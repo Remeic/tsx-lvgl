@@ -2433,18 +2433,11 @@ function normalizeDisplay(value) {
         return 0;
     return undefined;
 }
-function colorProp(prop) {
+function setProp(prop, normalize) {
     return (value, out) => {
-        const color = normalizeColor(value);
-        if (color !== undefined)
-            out.set(prop, color);
-    };
-}
-function intProp(prop) {
-    return (value, out) => {
-        const int = normalizeNonNegativeInt(value);
-        if (int !== undefined)
-            out.set(prop, int);
+        const normalized = normalize(value);
+        if (normalized !== undefined)
+            out.set(prop, normalized);
     };
 }
 function paddingSides(...props) {
@@ -2455,30 +2448,6 @@ function paddingSides(...props) {
         for (const prop of props)
             out.set(prop, int);
     };
-}
-function textAlignProp(value, out) {
-    const code = normalizeTextAlign(value);
-    if (code !== undefined)
-        out.set(exports.NATIVE_STYLE_PROP.textAlign, code);
-}
-function dimProp(prop) {
-    return (value, out) => {
-        const dim = normalizeDimension(value);
-        if (dim !== undefined)
-            out.set(prop, dim);
-    };
-}
-function translateProp(prop) {
-    return (value, out) => {
-        const translate = normalizeTranslate(value);
-        if (translate !== undefined)
-            out.set(prop, translate);
-    };
-}
-function displayProp(value, out) {
-    const code = normalizeDisplay(value);
-    if (code !== undefined)
-        out.set(exports.NATIVE_STYLE_PROP.display, code);
 }
 function positionProp() { }
 const FLEX_DIRECTION_VALUES = Object.freeze({
@@ -2500,24 +2469,14 @@ const ALIGN_ITEMS_VALUES = Object.freeze({
     "flex-end": 1,
     center: 2,
 });
-function enumProp(prop, values) {
-    return (value, out) => {
-        if (typeof value !== "string")
-            return;
-        const code = values[value];
-        if (code !== undefined)
-            out.set(prop, code);
-    };
+function enumOf(values) {
+    return (value) => (typeof value === "string" ? values[value] : undefined);
 }
-function flexGrowProp(prop) {
-    return (value, out) => {
-        if (typeof value !== "number" || !Number.isFinite(value))
-            return;
-        const rounded = Math.round(value);
-        if (rounded < 0)
-            return;
-        out.set(prop, Math.min(255, rounded));
-    };
+function normalizeFlexGrow(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    const rounded = Math.round(value);
+    return rounded < 0 ? undefined : Math.min(255, rounded);
 }
 function normalizeOpacity(value) {
     if (typeof value !== "number" || !Number.isFinite(value))
@@ -2548,82 +2507,38 @@ function normalizeScale(value) {
         return undefined;
     return Math.round(value * 256);
 }
-function opacityProp(value, out) {
-    const opa = normalizeOpacity(value);
-    if (opa !== undefined)
-        out.set(exports.NATIVE_STYLE_PROP.opacity, opa);
-}
-function rotateProp(value, out) {
-    const deciDeg = normalizeRotate(value);
-    if (deciDeg !== undefined)
-        out.set(exports.NATIVE_STYLE_PROP.rotate, deciDeg);
-}
-function scaleProp(value, out) {
-    const scaled = normalizeScale(value);
-    if (scaled !== undefined)
-        out.set(exports.NATIVE_STYLE_PROP.scale, scaled);
-}
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
     padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
     paddingHorizontal: paddingSides(P.paddingRight, P.paddingLeft),
     paddingVertical: paddingSides(P.paddingTop, P.paddingBottom),
-    paddingTop: intProp(P.paddingTop),
-    paddingRight: intProp(P.paddingRight),
-    paddingBottom: intProp(P.paddingBottom),
-    paddingLeft: intProp(P.paddingLeft),
-    backgroundColor: colorProp(P.backgroundColor),
-    borderColor: colorProp(P.borderColor),
-    borderWidth: intProp(P.borderWidth),
-    borderRadius: intProp(P.borderRadius),
-    color: colorProp(P.color),
-    textAlign: textAlignProp,
-    width: dimProp(P.width),
-    height: dimProp(P.height),
+    paddingTop: setProp(P.paddingTop, normalizeNonNegativeInt),
+    paddingRight: setProp(P.paddingRight, normalizeNonNegativeInt),
+    paddingBottom: setProp(P.paddingBottom, normalizeNonNegativeInt),
+    paddingLeft: setProp(P.paddingLeft, normalizeNonNegativeInt),
+    backgroundColor: setProp(P.backgroundColor, normalizeColor),
+    borderColor: setProp(P.borderColor, normalizeColor),
+    borderWidth: setProp(P.borderWidth, normalizeNonNegativeInt),
+    borderRadius: setProp(P.borderRadius, normalizeNonNegativeInt),
+    color: setProp(P.color, normalizeColor),
+    textAlign: setProp(P.textAlign, normalizeTextAlign),
+    width: setProp(P.width, normalizeDimension),
+    height: setProp(P.height, normalizeDimension),
     position: positionProp,
-    left: translateProp(P.left),
-    top: translateProp(P.top),
-    display: displayProp,
-    flexDirection: enumProp(P.flexDirection, FLEX_DIRECTION_VALUES),
-    justifyContent: enumProp(P.justifyContent, JUSTIFY_CONTENT_VALUES),
-    alignItems: enumProp(P.alignItems, ALIGN_ITEMS_VALUES),
-    gap: intProp(P.gap),
-    flexGrow: flexGrowProp(P.flexGrow),
-    flex: flexGrowProp(P.flexGrow),
-    opacity: opacityProp,
-    rotate: rotateProp,
-    scale: scaleProp,
+    left: setProp(P.left, normalizeTranslate),
+    top: setProp(P.top, normalizeTranslate),
+    display: setProp(P.display, normalizeDisplay),
+    flexDirection: setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES)),
+    justifyContent: setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES)),
+    alignItems: setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES)),
+    gap: setProp(P.gap, normalizeNonNegativeInt),
+    flex: setProp(P.flexGrow, normalizeFlexGrow),
+    flexGrow: setProp(P.flexGrow, normalizeFlexGrow),
+    opacity: setProp(P.opacity, normalizeOpacity),
+    rotate: setProp(P.rotate, normalizeRotate),
+    scale: setProp(P.scale, normalizeScale),
 });
-const STYLE_KEY_ORDER = [
-    "padding",
-    "paddingHorizontal",
-    "paddingVertical",
-    "paddingTop",
-    "paddingRight",
-    "paddingBottom",
-    "paddingLeft",
-    "backgroundColor",
-    "borderColor",
-    "borderWidth",
-    "borderRadius",
-    "color",
-    "textAlign",
-    "width",
-    "height",
-    "position",
-    "left",
-    "top",
-    "display",
-    "flexDirection",
-    "justifyContent",
-    "alignItems",
-    "gap",
-    "flex",
-    "flexGrow",
-    "opacity",
-    "rotate",
-    "scale",
-];
+const STYLE_KEY_ORDER = Object.keys(STYLE_NORMALIZERS);
 function mergeStyle(style) {
     if (Array.isArray(style)) {
         const merged = {};

@@ -130,17 +130,11 @@ function normalizeDisplay(value: unknown): number | undefined {
 
 type StyleNormalizer = (value: unknown, out: Map<number, number>) => void;
 
-function colorProp(prop: number): StyleNormalizer {
+/** Every single-code key shares this shape: validate, then `Map.set`. */
+function setProp(prop: number, normalize: (value: unknown) => number | undefined): StyleNormalizer {
   return (value, out) => {
-    const color = normalizeColor(value);
-    if (color !== undefined) out.set(prop, color);
-  };
-}
-
-function intProp(prop: number): StyleNormalizer {
-  return (value, out) => {
-    const int = normalizeNonNegativeInt(value);
-    if (int !== undefined) out.set(prop, int);
+    const normalized = normalize(value);
+    if (normalized !== undefined) out.set(prop, normalized);
   };
 }
 
@@ -151,30 +145,6 @@ function paddingSides(...props: readonly number[]): StyleNormalizer {
     if (int === undefined) return;
     for (const prop of props) out.set(prop, int);
   };
-}
-
-function textAlignProp(value: unknown, out: Map<number, number>): void {
-  const code = normalizeTextAlign(value);
-  if (code !== undefined) out.set(NATIVE_STYLE_PROP.textAlign, code);
-}
-
-function dimProp(prop: number): StyleNormalizer {
-  return (value, out) => {
-    const dim = normalizeDimension(value);
-    if (dim !== undefined) out.set(prop, dim);
-  };
-}
-
-function translateProp(prop: number): StyleNormalizer {
-  return (value, out) => {
-    const translate = normalizeTranslate(value);
-    if (translate !== undefined) out.set(prop, translate);
-  };
-}
-
-function displayProp(value: unknown, out: Map<number, number>): void {
-  const code = normalizeDisplay(value);
-  if (code !== undefined) out.set(NATIVE_STYLE_PROP.display, code);
 }
 
 /** v1: absolute and relative are equivalent; no native effect. */
@@ -202,22 +172,15 @@ const ALIGN_ITEMS_VALUES: Readonly<Record<string, number>> = Object.freeze({
   center: 2,
 });
 
-function enumProp(prop: number, values: Readonly<Record<string, number>>): StyleNormalizer {
-  return (value, out) => {
-    if (typeof value !== "string") return;
-    const code = values[value];
-    if (code !== undefined) out.set(prop, code);
-  };
+function enumOf(values: Readonly<Record<string, number>>): (value: unknown) => number | undefined {
+  return (value) => (typeof value === "string" ? values[value] : undefined);
 }
 
 /** flexGrow/flex: finite number, rounded, clamped 0..255 (LVGL flex_grow is uint8); negative skips. */
-function flexGrowProp(prop: number): StyleNormalizer {
-  return (value, out) => {
-    if (typeof value !== "number" || !Number.isFinite(value)) return;
-    const rounded = Math.round(value);
-    if (rounded < 0) return;
-    out.set(prop, Math.min(255, rounded));
-  };
+function normalizeFlexGrow(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value);
+  return rounded < 0 ? undefined : Math.min(255, rounded);
 }
 
 /** opacity: finite number, clamped 0..1 (CSS clamp, not skip) then scaled to LVGL opa 0..255. */
@@ -251,21 +214,6 @@ function normalizeScale(value: unknown): number | undefined {
   return Math.round(value * 256);
 }
 
-function opacityProp(value: unknown, out: Map<number, number>): void {
-  const opa = normalizeOpacity(value);
-  if (opa !== undefined) out.set(NATIVE_STYLE_PROP.opacity, opa);
-}
-
-function rotateProp(value: unknown, out: Map<number, number>): void {
-  const deciDeg = normalizeRotate(value);
-  if (deciDeg !== undefined) out.set(NATIVE_STYLE_PROP.rotate, deciDeg);
-}
-
-function scaleProp(value: unknown, out: Map<number, number>): void {
-  const scaled = normalizeScale(value);
-  if (scaled !== undefined) out.set(NATIVE_STYLE_PROP.scale, scaled);
-}
-
 const P = NATIVE_STYLE_PROP;
 
 /**
@@ -273,73 +221,44 @@ const P = NATIVE_STYLE_PROP;
  * so a key added to core's `TextStyle` without a matching normalizer here
  * fails the device build (exhaustiveness, mirrors `widgetKindByType` in
  * lvgl-host.ts).
+ *
+ * Declaration order IS the processing order (`STYLE_KEY_ORDER` derives from
+ * it): padding shorthands before per-side keys and `flex` before `flexGrow`,
+ * so the more specific key always overwrites via `Map.set` (RN precedence).
  */
 const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizer>> = Object.freeze({
   padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
   paddingHorizontal: paddingSides(P.paddingRight, P.paddingLeft),
   paddingVertical: paddingSides(P.paddingTop, P.paddingBottom),
-  paddingTop: intProp(P.paddingTop),
-  paddingRight: intProp(P.paddingRight),
-  paddingBottom: intProp(P.paddingBottom),
-  paddingLeft: intProp(P.paddingLeft),
-  backgroundColor: colorProp(P.backgroundColor),
-  borderColor: colorProp(P.borderColor),
-  borderWidth: intProp(P.borderWidth),
-  borderRadius: intProp(P.borderRadius),
-  color: colorProp(P.color),
-  textAlign: textAlignProp,
-  width: dimProp(P.width),
-  height: dimProp(P.height),
+  paddingTop: setProp(P.paddingTop, normalizeNonNegativeInt),
+  paddingRight: setProp(P.paddingRight, normalizeNonNegativeInt),
+  paddingBottom: setProp(P.paddingBottom, normalizeNonNegativeInt),
+  paddingLeft: setProp(P.paddingLeft, normalizeNonNegativeInt),
+  backgroundColor: setProp(P.backgroundColor, normalizeColor),
+  borderColor: setProp(P.borderColor, normalizeColor),
+  borderWidth: setProp(P.borderWidth, normalizeNonNegativeInt),
+  borderRadius: setProp(P.borderRadius, normalizeNonNegativeInt),
+  color: setProp(P.color, normalizeColor),
+  textAlign: setProp(P.textAlign, normalizeTextAlign),
+  width: setProp(P.width, normalizeDimension),
+  height: setProp(P.height, normalizeDimension),
   position: positionProp,
-  left: translateProp(P.left),
-  top: translateProp(P.top),
-  display: displayProp,
-  flexDirection: enumProp(P.flexDirection, FLEX_DIRECTION_VALUES),
-  justifyContent: enumProp(P.justifyContent, JUSTIFY_CONTENT_VALUES),
-  alignItems: enumProp(P.alignItems, ALIGN_ITEMS_VALUES),
-  gap: intProp(P.gap),
-  flexGrow: flexGrowProp(P.flexGrow),
-  flex: flexGrowProp(P.flexGrow),
-  opacity: opacityProp,
-  rotate: rotateProp,
-  scale: scaleProp,
+  left: setProp(P.left, normalizeTranslate),
+  top: setProp(P.top, normalizeTranslate),
+  display: setProp(P.display, normalizeDisplay),
+  flexDirection: setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES)),
+  justifyContent: setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES)),
+  alignItems: setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES)),
+  gap: setProp(P.gap, normalizeNonNegativeInt),
+  flex: setProp(P.flexGrow, normalizeFlexGrow),
+  flexGrow: setProp(P.flexGrow, normalizeFlexGrow),
+  opacity: setProp(P.opacity, normalizeOpacity),
+  rotate: setProp(P.rotate, normalizeRotate),
+  scale: setProp(P.scale, normalizeScale),
 });
 
-/**
- * Fixed processing order for deterministic native-call order. Padding
- * shorthands come first so a more specific key (e.g. `paddingTop`) always
- * overwrites the shorthand's fan-out via `Map.set`, per RN precedence.
- */
-const STYLE_KEY_ORDER: readonly (keyof TextStyle)[] = [
-  "padding",
-  "paddingHorizontal",
-  "paddingVertical",
-  "paddingTop",
-  "paddingRight",
-  "paddingBottom",
-  "paddingLeft",
-  "backgroundColor",
-  "borderColor",
-  "borderWidth",
-  "borderRadius",
-  "color",
-  "textAlign",
-  "width",
-  "height",
-  "position",
-  "left",
-  "top",
-  "display",
-  "flexDirection",
-  "justifyContent",
-  "alignItems",
-  "gap",
-  "flex",
-  "flexGrow",
-  "opacity",
-  "rotate",
-  "scale",
-];
+/** Deterministic native-call order = declaration order of the table above. */
+const STYLE_KEY_ORDER = Object.keys(STYLE_NORMALIZERS) as readonly (keyof TextStyle)[];
 
 /** Later array entries win at the key level; falsy entries are skipped. */
 function mergeStyle(style: unknown): Record<string, unknown> {
