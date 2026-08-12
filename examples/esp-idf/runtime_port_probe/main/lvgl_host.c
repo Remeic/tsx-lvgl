@@ -264,10 +264,10 @@ void lvgl_host_dispose(lvgl_host_t *host, int id)
     invalidate_descendants(host, id);
 }
 
-/** COLOR/TEXT_ALIGN target the inner label when present (Button), else the object itself. */
+/** COLOR/TEXT_ALIGN/FONT_SIZE target the inner label when present (Button), else the object itself. */
 static lv_obj_t *style_target(lvgl_host_entry_t *entry, int prop)
 {
-    if (prop == LVGL_HOST_STYLE_COLOR || prop == LVGL_HOST_STYLE_TEXT_ALIGN) {
+    if (prop == LVGL_HOST_STYLE_COLOR || prop == LVGL_HOST_STYLE_TEXT_ALIGN || prop == LVGL_HOST_STYLE_FONT_SIZE) {
         return entry->label != NULL ? entry->label : entry->object;
     }
     return entry->object;
@@ -280,6 +280,35 @@ static int32_t decode_dimension(int32_t value)
     if (value == -2000) return LV_SIZE_CONTENT;
     if (value <= -1 && value >= -1001) return lv_pct(-(value) - 1);
     return LV_SIZE_CONTENT; /* unreachable via TS normalizer; safe fallback */
+}
+
+/** Largest enabled Montserrat font <= px; smallest enabled as floor. */
+static const lv_font_t *pick_font(int32_t px)
+{
+    static const struct { int32_t size; const lv_font_t *font; } fonts[] = {
+#if LV_FONT_MONTSERRAT_14
+        { 14, &lv_font_montserrat_14 },
+#endif
+#if LV_FONT_MONTSERRAT_20
+        { 20, &lv_font_montserrat_20 },
+#endif
+#if LV_FONT_MONTSERRAT_28
+        { 28, &lv_font_montserrat_28 },
+#endif
+#if LV_FONT_MONTSERRAT_40
+        { 40, &lv_font_montserrat_40 },
+#endif
+#if LV_FONT_MONTSERRAT_48
+        { 48, &lv_font_montserrat_48 },
+#endif
+    };
+    const size_t count = sizeof(fonts) / sizeof(fonts[0]);
+    if (count == 0) return LV_FONT_DEFAULT;
+    const lv_font_t *best = fonts[0].font;
+    for (size_t i = 0; i < count; i++) {
+        if (fonts[i].size <= px) best = fonts[i].font;
+    }
+    return best;
 }
 
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
@@ -325,6 +354,9 @@ void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
             lv_obj_set_style_text_align(target, align, 0);
             break;
         }
+        case LVGL_HOST_STYLE_FONT_SIZE:
+            lv_obj_set_style_text_font(target, pick_font(value), 0);
+            break;
         case LVGL_HOST_STYLE_WIDTH:
             lv_obj_set_style_width(target, decode_dimension(value), 0);
             break;
@@ -442,6 +474,9 @@ void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
             break;
         case LVGL_HOST_STYLE_TEXT_ALIGN:
             lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_ALIGN, 0);
+            break;
+        case LVGL_HOST_STYLE_FONT_SIZE:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_FONT, 0);
             break;
         case LVGL_HOST_STYLE_WIDTH:
             lv_obj_remove_local_style_prop(target, LV_STYLE_WIDTH, 0);

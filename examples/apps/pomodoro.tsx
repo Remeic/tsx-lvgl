@@ -46,7 +46,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  timeText: { color: "#ffffff", textAlign: "center", scale: 2 },
+  timeText: { color: "#ffffff", textAlign: "center", fontSize: 48 },
 });
 
 export default function Pomodoro(): VNode {

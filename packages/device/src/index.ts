@@ -11,7 +11,13 @@ export type {
 } from "./native.js";
 
 export { createLvglHost, createClickRegistry, type ClickRegistry } from "./lvgl-host.js";
-export { NATIVE_STYLE_PROP, normalizeStyle, applyStyleDiff, type NormalizedStyle } from "./style.js";
+export {
+  NATIVE_STYLE_PROP,
+  normalizeStyle,
+  applyStyleDiff,
+  type NormalizedStyle,
+  type StyleTarget,
+} from "./style.js";
 export { createDeviceScheduler } from "./scheduler.js";
 export { createNativeMotionSensor } from "./sensors.js";
 export { BoardRuntime, createDefaultBoardDescriptors } from "./board-runtime.js";

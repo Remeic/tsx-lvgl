@@ -252,10 +252,11 @@ test("position emits nothing for either accepted value", () => {
 // opacity / rotate / scale (S4)
 // ---------------------------------------------------------------------------
 
-test("opacity codes are 20/21/22 in order", () => {
+test("opacity, rotate, scale and fontSize codes are 20/21/22/23 in order", () => {
   assert.equal(P.opacity, 20);
   assert.equal(P.rotate, 21);
   assert.equal(P.scale, 22);
+  assert.equal(P.fontSize, 23);
 });
 
 test("opacity scales 0/1/0.5 to 0/255/128 (0.5 * 255 = 127.5, rounds up)", () => {
@@ -304,6 +305,26 @@ test("scale is finite number >= 0, scaled by 256 (LV_SCALE_NONE = 100%)", () => 
 test("negative or non-finite scale is skipped", () => {
   assert.equal(normalizeStyle({ scale: -1 }).has(P.scale), false);
   assert.equal(normalizeStyle({ scale: Number.NaN }).has(P.scale), false);
+});
+
+test("fontSize accepts finite positive px, rounded", () => {
+  assert.equal(normalizeStyle({ fontSize: 24 }).get(P.fontSize), 24);
+  assert.equal(normalizeStyle({ fontSize: 24.4 }).get(P.fontSize), 24);
+});
+
+test("fontSize is omitted for view targets but retained for text targets", () => {
+  const viewStyle = normalizeStyle({ backgroundColor: "red", fontSize: 24 }, "view");
+  assert.equal(viewStyle.get(P.backgroundColor), 0xff0000);
+  assert.equal(viewStyle.has(P.fontSize), false);
+  assert.equal(normalizeStyle({ fontSize: 24 }, "text").get(P.fontSize), 24);
+});
+
+test("zero, negative, non-finite, non-number and int32-overflow fontSize values are skipped", () => {
+  const invalid: readonly unknown[] = [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "24"];
+  for (const value of invalid) {
+    assert.equal(normalizeStyle({ fontSize: value as number }).has(P.fontSize), false, String(value));
+  }
+  assert.equal(normalizeStyle({ fontSize: 0x80000000 }).has(P.fontSize), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -355,6 +376,16 @@ test("a px-to-percent width transition diffs as exactly one setStyle, never a re
   applyStyleDiff(lvgl, id, previous, next);
   assert.deepEqual(lvgl.setStyleCalls, [{ id, prop: P.width, value: -51 }]);
   assert.deepEqual(lvgl.resetStyleCalls, []);
+});
+
+test("adding and removing fontSize emits one setStyle and one resetStyle at code 23", () => {
+  const lvgl = new FakeNativeLvgl();
+  const id = lvgl.create("text");
+  applyStyleDiff(lvgl, id, normalizeStyle({}), normalizeStyle({ fontSize: 24.4 }));
+  assert.deepEqual(lvgl.setStyleCalls, [{ id, prop: P.fontSize, value: 24 }]);
+
+  applyStyleDiff(lvgl, id, normalizeStyle({ fontSize: 24 }), normalizeStyle({}));
+  assert.deepEqual(lvgl.resetStyleCalls, [{ id, prop: P.fontSize }]);
 });
 
 // ---------------------------------------------------------------------------

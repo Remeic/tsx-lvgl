@@ -75,6 +75,8 @@ void lvgl_host_load_screen(lvgl_host_t *host, int id);
  * - OPACITY: 0..255 LVGL opa, defensively re-clamped on the C side too.
  * - ROTATE: deci-degrees (LVGL transform_rotation unit), clockwise.
  * - SCALE: 256 == LV_SCALE_NONE == 100%.
+ * - FONT_SIZE: finite positive px, rounded; the C host chooses the largest
+ *   enabled Montserrat font <= the requested size, with the smallest as floor.
  */
 typedef enum {
     LVGL_HOST_STYLE_BACKGROUND_COLOR = 0,
@@ -100,6 +102,7 @@ typedef enum {
     LVGL_HOST_STYLE_OPACITY = 20,
     LVGL_HOST_STYLE_ROTATE = 21,
     LVGL_HOST_STYLE_SCALE = 22,
+    LVGL_HOST_STYLE_FONT_SIZE = 23,
     LVGL_HOST_STYLE_PROP_COUNT
 } lvgl_host_style_prop_t;
 void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value);

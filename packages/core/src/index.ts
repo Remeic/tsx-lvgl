@@ -62,6 +62,8 @@ export interface ViewStyle {
 export interface TextStyle extends ViewStyle {
   readonly color?: StyleColor;
   readonly textAlign?: "left" | "center" | "right";
+  /** Text size in px; device maps to nearest compiled-in LVGL font. */
+  readonly fontSize?: number;
 }
 
 /** A screen has no parent to size/position/hide itself against; S2 size/position/display keys don't apply. */

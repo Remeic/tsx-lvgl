@@ -2234,6 +2234,9 @@ function textOf(props) {
 function labelOf(props) {
     return String(props.label);
 }
+function styleTargetForElement(type) {
+    return type === "Text" || type === "Button" ? "text" : "view";
+}
 function asDevice(instance) {
     return instance;
 }
@@ -2252,7 +2255,7 @@ function createLvglHost(native, clicks) {
                     native.setClickable(id, true);
                 }
             }
-            const style = (0, style_js_1.normalizeStyle)(props.style);
+            const style = (0, style_js_1.normalizeStyle)(props.style, styleTargetForElement(type));
             (0, style_js_1.applyStyleDiff)(native, id, EMPTY_STYLE, style);
             const instance = { type, id, style };
             return instance;
@@ -2265,7 +2268,7 @@ function createLvglHost(native, clicks) {
         updateInstance(instance, type, previousProps, nextProps) {
             const device = asDevice(instance);
             const id = device.id;
-            const nextStyle = (0, style_js_1.normalizeStyle)(nextProps.style);
+            const nextStyle = (0, style_js_1.normalizeStyle)(nextProps.style, styleTargetForElement(device.type));
             (0, style_js_1.applyStyleDiff)(native, id, device.style, nextStyle);
             device.style = nextStyle;
             if (type === "Text") {
@@ -2410,6 +2413,7 @@ exports.NATIVE_STYLE_PROP = Object.freeze({
     opacity: 20,
     rotate: 21,
     scale: 22,
+    fontSize: 23,
 });
 const NAMED_COLORS = Object.freeze({
     red: 0xff0000,
@@ -2486,6 +2490,11 @@ function normalizeDisplay(value) {
         return 0;
     return undefined;
 }
+const ALL_STYLE_TARGETS = Object.freeze(["view", "text"]);
+const TEXT_STYLE_TARGETS = Object.freeze(["text"]);
+function styleNormalizer(normalize, targets = ALL_STYLE_TARGETS) {
+    return Object.freeze({ normalize, targets });
+}
 function setProp(prop, normalize) {
     return (value, out) => {
         const normalized = normalize(value);
@@ -2560,36 +2569,42 @@ function normalizeScale(value) {
         return undefined;
     return normalizeInt32(value * 256);
 }
+function normalizeFontSize(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+        return undefined;
+    return normalizeInt32(value);
+}
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
-    padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
-    paddingHorizontal: paddingSides(P.paddingRight, P.paddingLeft),
-    paddingVertical: paddingSides(P.paddingTop, P.paddingBottom),
-    paddingTop: setProp(P.paddingTop, normalizeNonNegativeInt),
-    paddingRight: setProp(P.paddingRight, normalizeNonNegativeInt),
-    paddingBottom: setProp(P.paddingBottom, normalizeNonNegativeInt),
-    paddingLeft: setProp(P.paddingLeft, normalizeNonNegativeInt),
-    backgroundColor: setProp(P.backgroundColor, normalizeColor),
-    borderColor: setProp(P.borderColor, normalizeColor),
-    borderWidth: setProp(P.borderWidth, normalizeNonNegativeInt),
-    borderRadius: setProp(P.borderRadius, normalizeNonNegativeInt),
-    color: setProp(P.color, normalizeColor),
-    textAlign: setProp(P.textAlign, normalizeTextAlign),
-    width: setProp(P.width, normalizeDimension),
-    height: setProp(P.height, normalizeDimension),
-    position: positionProp,
-    left: setProp(P.left, normalizeTranslate),
-    top: setProp(P.top, normalizeTranslate),
-    display: setProp(P.display, normalizeDisplay),
-    flexDirection: setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES)),
-    justifyContent: setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES)),
-    alignItems: setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES)),
-    gap: setProp(P.gap, normalizeNonNegativeInt),
-    flex: setProp(P.flexGrow, normalizeFlexGrow),
-    flexGrow: setProp(P.flexGrow, normalizeFlexGrow),
-    opacity: setProp(P.opacity, normalizeOpacity),
-    rotate: setProp(P.rotate, normalizeRotate),
-    scale: setProp(P.scale, normalizeScale),
+    padding: styleNormalizer(paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft)),
+    paddingHorizontal: styleNormalizer(paddingSides(P.paddingRight, P.paddingLeft)),
+    paddingVertical: styleNormalizer(paddingSides(P.paddingTop, P.paddingBottom)),
+    paddingTop: styleNormalizer(setProp(P.paddingTop, normalizeNonNegativeInt)),
+    paddingRight: styleNormalizer(setProp(P.paddingRight, normalizeNonNegativeInt)),
+    paddingBottom: styleNormalizer(setProp(P.paddingBottom, normalizeNonNegativeInt)),
+    paddingLeft: styleNormalizer(setProp(P.paddingLeft, normalizeNonNegativeInt)),
+    backgroundColor: styleNormalizer(setProp(P.backgroundColor, normalizeColor)),
+    borderColor: styleNormalizer(setProp(P.borderColor, normalizeColor)),
+    borderWidth: styleNormalizer(setProp(P.borderWidth, normalizeNonNegativeInt)),
+    borderRadius: styleNormalizer(setProp(P.borderRadius, normalizeNonNegativeInt)),
+    color: styleNormalizer(setProp(P.color, normalizeColor)),
+    textAlign: styleNormalizer(setProp(P.textAlign, normalizeTextAlign)),
+    width: styleNormalizer(setProp(P.width, normalizeDimension)),
+    height: styleNormalizer(setProp(P.height, normalizeDimension)),
+    position: styleNormalizer(positionProp),
+    left: styleNormalizer(setProp(P.left, normalizeTranslate)),
+    top: styleNormalizer(setProp(P.top, normalizeTranslate)),
+    display: styleNormalizer(setProp(P.display, normalizeDisplay)),
+    flexDirection: styleNormalizer(setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES))),
+    justifyContent: styleNormalizer(setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES))),
+    alignItems: styleNormalizer(setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES))),
+    gap: styleNormalizer(setProp(P.gap, normalizeNonNegativeInt)),
+    flex: styleNormalizer(setProp(P.flexGrow, normalizeFlexGrow)),
+    flexGrow: styleNormalizer(setProp(P.flexGrow, normalizeFlexGrow)),
+    opacity: styleNormalizer(setProp(P.opacity, normalizeOpacity)),
+    rotate: styleNormalizer(setProp(P.rotate, normalizeRotate)),
+    scale: styleNormalizer(setProp(P.scale, normalizeScale)),
+    fontSize: styleNormalizer(setProp(P.fontSize, normalizeFontSize), TEXT_STYLE_TARGETS),
 });
 const STYLE_KEY_ORDER = Object.keys(STYLE_NORMALIZERS);
 function mergeStyle(style) {
@@ -2604,11 +2619,14 @@ function mergeStyle(style) {
     }
     return (style ?? {});
 }
-function normalizeStyle(style) {
+function normalizeStyle(style, target = "text") {
     const merged = mergeStyle(style);
     const out = new Map();
-    for (const key of STYLE_KEY_ORDER)
-        STYLE_NORMALIZERS[key](merged[key], out);
+    for (const key of STYLE_KEY_ORDER) {
+        const entry = STYLE_NORMALIZERS[key];
+        if (entry.targets.includes(target))
+            entry.normalize(merged[key], out);
+    }
     if (!out.has(P.flexDirection) && (out.has(P.justifyContent) || out.has(P.alignItems) || out.has(P.gap))) {
         out.set(P.flexDirection, 1);
     }

@@ -1,7 +1,7 @@
 import type { ElementType } from "@tsx-lvgl/core";
 import type { RuntimeHost, RuntimeHostInstance } from "@tsx-lvgl/runtime";
 import type { NativeLvgl, NativeWidgetKind } from "./native.js";
-import { applyStyleDiff, normalizeStyle, type NormalizedStyle } from "./style.js";
+import { applyStyleDiff, normalizeStyle, type NormalizedStyle, type StyleTarget } from "./style.js";
 
 /**
  * Owns the id -> click handler map. A plain `Map` wrapper rather than a
@@ -52,6 +52,10 @@ function labelOf(props: Readonly<Record<string, unknown>>): string {
   return String(props.label);
 }
 
+function styleTargetForElement(type: ElementType): StyleTarget {
+  return type === "Text" || type === "Button" ? "text" : "view";
+}
+
 function asDevice(instance: RuntimeHostInstance): DeviceInstance {
   return instance as DeviceInstance;
 }
@@ -75,7 +79,7 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
           native.setClickable(id, true);
         }
       }
-      const style = normalizeStyle(props.style);
+      const style = normalizeStyle(props.style, styleTargetForElement(type));
       applyStyleDiff(native, id, EMPTY_STYLE, style);
       const instance: DeviceInstance = { type, id, style };
       return instance;
@@ -95,7 +99,7 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       const device = asDevice(instance);
       const id = device.id;
 
-      const nextStyle = normalizeStyle(nextProps.style);
+      const nextStyle = normalizeStyle(nextProps.style, styleTargetForElement(device.type));
       applyStyleDiff(native, id, device.style, nextStyle);
       device.style = nextStyle;
 

@@ -272,6 +272,50 @@ test("a styled component render, changing one style key emits exactly one setSty
   );
 });
 
+const fontSizeSource = `
+  import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
+  export default function FontSized() {
+    const [step, setStep] = useState(0);
+    const style = step === 0 ? { fontSize: 24.4 } : {};
+    return (
+      <Screen>
+        <Text text="font-sized" style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a compiled styled render maps fontSize and removing it emits one resetStyle", () => {
+  const output = compileTsxBundle({
+    fileName: "FontSized.tsx",
+    source: fontSizeSource,
+    bundleId: "font-sized",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [textId] = fake.lvgl.liveIdsOfKind("text");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(textId, "expected a live text widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(textId, NATIVE_STYLE_PROP.fontSize), 24);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  const resetBefore = fake.lvgl.resetStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  assert.equal(fake.lvgl.setStyleCalls.length, setBefore);
+  assert.deepEqual(
+    fake.lvgl.resetStyleCalls.slice(resetBefore),
+    [{ id: textId, prop: NATIVE_STYLE_PROP.fontSize }],
+  );
+});
+
 const sizedSource = `
   import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
   export default function Sized() {

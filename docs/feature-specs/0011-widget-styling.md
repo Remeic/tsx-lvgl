@@ -1,13 +1,15 @@
 # Feature 0011 — Widget styling
 
 Status: S1 (box styles), S2 (size/position/display), S3 (flex layout), S4
-(opacity/rotate/scale) implemented.
+(opacity/rotate/scale/fontSize) implemented.
 
 ## Objective
 
 A React-Native-shaped `style` prop on every widget, normalized on-device into
 per-key native calls. No LVGL style objects or C generation cross the JS/TS
-boundary; only pre-normalized ints do.
+boundary; only pre-normalized ints do. The device host supplies a `view` or
+`text` style target so text-only keys cannot leak onto containers through
+LVGL's inherited text properties.
 
 ## API shape
 
@@ -100,6 +102,10 @@ too — flat keys, not an RN `transform: [...]` array).
 - `scale?: number`: 1 = 100%, center pivot. Finite number >= 0, scaled to
   LVGL's `Math.round(v * 256)` (256 = `LV_SCALE_NONE` = 100%);
   negative/non-finite skips.
+- `fontSize?: number`: text-only, finite px > 0, rounded, encoded as raw px
+  under code 23. The C host picks the largest enabled Montserrat font <= the
+  requested size, with 14 as the smallest compiled-in font (enabled set:
+  14, 20, 28, 40, 48).
 
 **Pivot.** LVGL's default transform pivot is top-left; CSS's
 `transform-origin` default is center. `rotate`/`scale`'s native setter
@@ -119,6 +125,12 @@ include that measurement.
 
 - Array styles flatten RN-style: falsy entries skip, later objects win at the
   key level, merged *before* normalization.
+- The runtime host normalizes `Screen`/`View` with the `view` target and
+  `Text`/`Button` with the `text` target. Normalizer entries declare their
+  applicable targets; `fontSize` is text-only and is skipped before the native
+  diff for `view`, so LVGL inheritance cannot change descendant text by
+  accident. Direct normalizer callers default to the existing full TextStyle
+  surface and should pass the target when they know the widget family.
 - Colors: `#rrggbb` (6 hex digits, case-insensitive) or a fixed named set
   (red/green/blue/black/white/gray/yellow/cyan/magenta). `"transparent"`
   skips the key — with the S0 neutral baseline, absent means transparent.
@@ -193,9 +205,14 @@ in both `packages/device/src/style.ts` and `lvgl_host.h`:
   the same value (256 = 100%); reset removes both
   `LV_STYLE_TRANSFORM_SCALE_X` and `LV_STYLE_TRANSFORM_SCALE_Y`, same pivot
   rationale as `rotate`.
+- `fontSize` (code 23): raw rounded px; the C host maps it to the largest
+  enabled Montserrat font <= px (14/20/28/40/48, with 14 as the floor) and
+  applies it through `LV_STYLE_TEXT_FONT`.
 
-Button routing: `color`/`textAlign` (codes 8-9) target the button's inner
-label; every other code targets the widget's own object. Resetting
+Button routing: `color`/`textAlign`/`fontSize` (codes 8-9/23) target the
+button's inner label; every other applicable code targets the widget's own
+object. `fontSize` is not applicable to `Screen`/`View`, so those widgets emit
+no code-23 call and cannot rely on LVGL text inheritance. Resetting
 `backgroundColor` is composite on the C side — it removes both
 `LV_STYLE_BG_COLOR` and `LV_STYLE_BG_OPA`, since `setStyle` for
 `backgroundColor` always sets both together (opacity forces the color

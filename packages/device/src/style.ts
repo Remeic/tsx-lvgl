@@ -8,6 +8,9 @@
 import type { TextStyle } from "@tsx-lvgl/core";
 import type { NativeLvgl } from "./native.js";
 
+/** The widget family determines which text-only style keys may cross the host seam. */
+export type StyleTarget = "view" | "text";
+
 /**
  * Mirrors `lvgl_host_style_prop_t` in lvgl_host.h. Append-only; never renumber.
  *
@@ -36,6 +39,8 @@ import type { NativeLvgl } from "./native.js";
  *   `` `${number}deg` `` (the leading float is parsed, anything else is
  *   rejected); negatives are valid; non-finite skips.
  *   `LV_SCALE_NONE` = 100%); negative/non-finite/int32-overflow skips.
+ * - `fontSize` (23): finite px > 0, rounded; C host maps to the largest
+ *   enabled Montserrat font <= px.
  */
 export const NATIVE_STYLE_PROP = Object.freeze({
   backgroundColor: 0,
@@ -61,6 +66,7 @@ export const NATIVE_STYLE_PROP = Object.freeze({
   opacity: 20,
   rotate: 21,
   scale: 22,
+  fontSize: 23,
 } as const);
 
 export type NormalizedStyle = ReadonlyMap<number, number>;
@@ -137,6 +143,21 @@ function normalizeDisplay(value: unknown): number | undefined {
 }
 
 type StyleNormalizer = (value: unknown, out: Map<number, number>) => void;
+
+interface StyleNormalizerEntry {
+  readonly normalize: StyleNormalizer;
+  readonly targets: readonly StyleTarget[];
+}
+
+const ALL_STYLE_TARGETS = Object.freeze(["view", "text"] as const);
+const TEXT_STYLE_TARGETS = Object.freeze(["text"] as const);
+
+function styleNormalizer(
+  normalize: StyleNormalizer,
+  targets: readonly StyleTarget[] = ALL_STYLE_TARGETS,
+): StyleNormalizerEntry {
+  return Object.freeze({ normalize, targets });
+}
 
 /** Every single-code key shares this shape: validate, then `Map.set`. */
 function setProp(prop: number, normalize: (value: unknown) => number | undefined): StyleNormalizer {
@@ -222,6 +243,12 @@ function normalizeScale(value: unknown): number | undefined {
   return normalizeInt32(value * 256);
 }
 
+/** fontSize: finite px > 0, rounded; device picks nearest compiled-in font. */
+function normalizeFontSize(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return normalizeInt32(value);
+}
+
 const P = NATIVE_STYLE_PROP;
 
 /**
@@ -234,35 +261,36 @@ const P = NATIVE_STYLE_PROP;
  * it): padding shorthands before per-side keys and `flex` before `flexGrow`,
  * so the more specific key always overwrites via `Map.set` (RN precedence).
  */
-const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizer>> = Object.freeze({
-  padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
-  paddingHorizontal: paddingSides(P.paddingRight, P.paddingLeft),
-  paddingVertical: paddingSides(P.paddingTop, P.paddingBottom),
-  paddingTop: setProp(P.paddingTop, normalizeNonNegativeInt),
-  paddingRight: setProp(P.paddingRight, normalizeNonNegativeInt),
-  paddingBottom: setProp(P.paddingBottom, normalizeNonNegativeInt),
-  paddingLeft: setProp(P.paddingLeft, normalizeNonNegativeInt),
-  backgroundColor: setProp(P.backgroundColor, normalizeColor),
-  borderColor: setProp(P.borderColor, normalizeColor),
-  borderWidth: setProp(P.borderWidth, normalizeNonNegativeInt),
-  borderRadius: setProp(P.borderRadius, normalizeNonNegativeInt),
-  color: setProp(P.color, normalizeColor),
-  textAlign: setProp(P.textAlign, normalizeTextAlign),
-  width: setProp(P.width, normalizeDimension),
-  height: setProp(P.height, normalizeDimension),
-  position: positionProp,
-  left: setProp(P.left, normalizeTranslate),
-  top: setProp(P.top, normalizeTranslate),
-  display: setProp(P.display, normalizeDisplay),
-  flexDirection: setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES)),
-  justifyContent: setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES)),
-  alignItems: setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES)),
-  gap: setProp(P.gap, normalizeNonNegativeInt),
-  flex: setProp(P.flexGrow, normalizeFlexGrow),
-  flexGrow: setProp(P.flexGrow, normalizeFlexGrow),
-  opacity: setProp(P.opacity, normalizeOpacity),
-  rotate: setProp(P.rotate, normalizeRotate),
-  scale: setProp(P.scale, normalizeScale),
+const STYLE_NORMALIZERS: Readonly<Record<keyof TextStyle, StyleNormalizerEntry>> = Object.freeze({
+  padding: styleNormalizer(paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft)),
+  paddingHorizontal: styleNormalizer(paddingSides(P.paddingRight, P.paddingLeft)),
+  paddingVertical: styleNormalizer(paddingSides(P.paddingTop, P.paddingBottom)),
+  paddingTop: styleNormalizer(setProp(P.paddingTop, normalizeNonNegativeInt)),
+  paddingRight: styleNormalizer(setProp(P.paddingRight, normalizeNonNegativeInt)),
+  paddingBottom: styleNormalizer(setProp(P.paddingBottom, normalizeNonNegativeInt)),
+  paddingLeft: styleNormalizer(setProp(P.paddingLeft, normalizeNonNegativeInt)),
+  backgroundColor: styleNormalizer(setProp(P.backgroundColor, normalizeColor)),
+  borderColor: styleNormalizer(setProp(P.borderColor, normalizeColor)),
+  borderWidth: styleNormalizer(setProp(P.borderWidth, normalizeNonNegativeInt)),
+  borderRadius: styleNormalizer(setProp(P.borderRadius, normalizeNonNegativeInt)),
+  color: styleNormalizer(setProp(P.color, normalizeColor)),
+  textAlign: styleNormalizer(setProp(P.textAlign, normalizeTextAlign)),
+  width: styleNormalizer(setProp(P.width, normalizeDimension)),
+  height: styleNormalizer(setProp(P.height, normalizeDimension)),
+  position: styleNormalizer(positionProp),
+  left: styleNormalizer(setProp(P.left, normalizeTranslate)),
+  top: styleNormalizer(setProp(P.top, normalizeTranslate)),
+  display: styleNormalizer(setProp(P.display, normalizeDisplay)),
+  flexDirection: styleNormalizer(setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES))),
+  justifyContent: styleNormalizer(setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES))),
+  alignItems: styleNormalizer(setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES))),
+  gap: styleNormalizer(setProp(P.gap, normalizeNonNegativeInt)),
+  flex: styleNormalizer(setProp(P.flexGrow, normalizeFlexGrow)),
+  flexGrow: styleNormalizer(setProp(P.flexGrow, normalizeFlexGrow)),
+  opacity: styleNormalizer(setProp(P.opacity, normalizeOpacity)),
+  rotate: styleNormalizer(setProp(P.rotate, normalizeRotate)),
+  scale: styleNormalizer(setProp(P.scale, normalizeScale)),
+  fontSize: styleNormalizer(setProp(P.fontSize, normalizeFontSize), TEXT_STYLE_TARGETS),
 });
 
 /** Deterministic native-call order = declaration order of the table above. */
@@ -281,10 +309,18 @@ function mergeStyle(style: unknown): Record<string, unknown> {
   return (style ?? {}) as Record<string, unknown>;
 }
 
-export function normalizeStyle(style: unknown): NormalizedStyle {
+/**
+ * Normalizes a style for its widget family. The default preserves the existing
+ * TextStyle-oriented direct-call contract; the runtime host always supplies
+ * the concrete target so text-only keys cannot leak onto containers.
+ */
+export function normalizeStyle(style: unknown, target: StyleTarget = "text"): NormalizedStyle {
   const merged = mergeStyle(style);
   const out = new Map<number, number>();
-  for (const key of STYLE_KEY_ORDER) STYLE_NORMALIZERS[key](merged[key], out);
+  for (const key of STYLE_KEY_ORDER) {
+    const entry = STYLE_NORMALIZERS[key];
+    if (entry.targets.includes(target)) entry.normalize(merged[key], out);
+  }
   // Implied flex: justifyContent/alignItems/gap only matter on a flex
   // container, so setting any of them without an explicit flexDirection
   // implies "column" (RN default) instead of silently no-opping.

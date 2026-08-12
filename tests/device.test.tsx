@@ -342,6 +342,39 @@ test("createInstance and updateInstance apply S4 opacity/rotate through the host
   );
 });
 
+test("createInstance and updateInstance apply fontSize through the host contract, and removing it resets it", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("Button", { label: "x", style: { fontSize: 24.4 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), 24);
+
+  host.updateInstance(
+    instance,
+    "Button",
+    { label: "x", style: { fontSize: 24.4 } },
+    { label: "x", style: {} },
+  );
+  assert.deepEqual(
+    lvgl.resetStyleCalls.filter((call) => call.id === instanceId(instance)),
+    [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.fontSize }],
+  );
+});
+
+test("createInstance and updateInstance ignore text-only fontSize on View and Screen", () => {
+  for (const type of ["View", "Screen"] as const) {
+    const lvgl = new FakeNativeLvgl();
+    const host = createLvglHost(lvgl, createClickRegistry());
+    const instance = host.createInstance(type, { style: { fontSize: 48 } });
+
+    assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), undefined, type);
+    assert.deepEqual(lvgl.setStyleCalls, [], type);
+
+    host.updateInstance(instance, type, { style: { fontSize: 48 } }, { style: {} });
+    assert.deepEqual(lvgl.setStyleCalls, [], type);
+    assert.deepEqual(lvgl.resetStyleCalls, [], type);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------
