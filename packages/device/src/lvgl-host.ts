@@ -1,6 +1,7 @@
 import type { ElementType } from "@tsx-lvgl/core";
 import type { RuntimeHost, RuntimeHostInstance } from "@tsx-lvgl/runtime";
 import type { NativeLvgl, NativeWidgetKind } from "./native.js";
+import { applyStyleDiff, normalizeStyle, type NormalizedStyle } from "./style.js";
 
 /**
  * Owns the id -> click handler map. A plain `Map` wrapper rather than a
@@ -31,7 +32,10 @@ export function createClickRegistry(): ClickRegistry {
 interface DeviceInstance extends RuntimeHostInstance {
   readonly type: ElementType;
   readonly id: number;
+  style: NormalizedStyle;
 }
+
+const EMPTY_STYLE: NormalizedStyle = new Map();
 
 const widgetKindByType: Readonly<Record<ElementType, NativeWidgetKind>> = {
   Screen: "screen",
@@ -71,7 +75,9 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
           native.setClickable(id, true);
         }
       }
-      const instance: DeviceInstance = { type, id };
+      const style = normalizeStyle(props.style);
+      applyStyleDiff(native, id, EMPTY_STYLE, style);
+      const instance: DeviceInstance = { type, id, style };
       return instance;
     },
 
@@ -86,7 +92,13 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       previousProps: Readonly<Record<string, unknown>>,
       nextProps: Readonly<Record<string, unknown>>,
     ): void {
-      const id = asDevice(instance).id;
+      const device = asDevice(instance);
+      const id = device.id;
+
+      const nextStyle = normalizeStyle(nextProps.style);
+      applyStyleDiff(native, id, device.style, nextStyle);
+      device.style = nextStyle;
+
       if (type === "Text") {
         const next = textOf(nextProps);
         if (next !== textOf(previousProps)) native.setText(id, next);

@@ -264,6 +264,244 @@ void lvgl_host_dispose(lvgl_host_t *host, int id)
     invalidate_descendants(host, id);
 }
 
+/** COLOR/TEXT_ALIGN target the inner label when present (Button), else the object itself. */
+static lv_obj_t *style_target(lvgl_host_entry_t *entry, int prop)
+{
+    if (prop == LVGL_HOST_STYLE_COLOR || prop == LVGL_HOST_STYLE_TEXT_ALIGN) {
+        return entry->label != NULL ? entry->label : entry->object;
+    }
+    return entry->object;
+}
+
+/** Decodes the TS normalizer's width/height ABI (see lvgl_host.h) into an LVGL size value. */
+static int32_t decode_dimension(int32_t value)
+{
+    if (value >= 0) return value;
+    if (value == -2000) return LV_SIZE_CONTENT;
+    if (value <= -1 && value >= -1001) return lv_pct(-(value) - 1);
+    return LV_SIZE_CONTENT; /* unreachable via TS normalizer; safe fallback */
+}
+
+void lvgl_host_set_style(lvgl_host_t *host, int id, int prop, int32_t value)
+{
+    lvgl_host_entry_t *entry = entry_at(host, id);
+    if (entry == NULL) return;
+    lv_obj_t *target = style_target(entry, prop);
+    if (target == NULL) return;
+
+    switch (prop) {
+        case LVGL_HOST_STYLE_BACKGROUND_COLOR:
+            lv_obj_set_style_bg_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            lv_obj_set_style_bg_opa(target, LV_OPA_COVER, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_COLOR:
+            lv_obj_set_style_border_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_WIDTH:
+            lv_obj_set_style_border_width(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_RADIUS:
+            lv_obj_set_style_radius(target, value > LV_RADIUS_CIRCLE ? LV_RADIUS_CIRCLE : value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_TOP:
+            lv_obj_set_style_pad_top(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_RIGHT:
+            lv_obj_set_style_pad_right(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_BOTTOM:
+            lv_obj_set_style_pad_bottom(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_LEFT:
+            lv_obj_set_style_pad_left(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_COLOR:
+            lv_obj_set_style_text_color(target, lv_color_hex((uint32_t)value & 0xFFFFFFu), 0);
+            break;
+        case LVGL_HOST_STYLE_TEXT_ALIGN: {
+            lv_text_align_t align = LV_TEXT_ALIGN_LEFT;
+            if (value == 1) align = LV_TEXT_ALIGN_CENTER;
+            else if (value == 2) align = LV_TEXT_ALIGN_RIGHT;
+            lv_obj_set_style_text_align(target, align, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_WIDTH:
+            lv_obj_set_style_width(target, decode_dimension(value), 0);
+            break;
+        case LVGL_HOST_STYLE_HEIGHT:
+            lv_obj_set_style_height(target, decode_dimension(value), 0);
+            break;
+        case LVGL_HOST_STYLE_LEFT:
+            lv_obj_set_style_translate_x(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_TOP:
+            lv_obj_set_style_translate_y(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_DISPLAY:
+            if (value == 1) lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+            break;
+#if LV_USE_FLEX
+        case LVGL_HOST_STYLE_FLEX_DIRECTION: {
+            lv_flex_flow_t flow = LV_FLEX_FLOW_ROW;
+            if (value == 1) flow = LV_FLEX_FLOW_COLUMN;
+            else if (value == 2) flow = LV_FLEX_FLOW_ROW_REVERSE;
+            else if (value == 3) flow = LV_FLEX_FLOW_COLUMN_REVERSE;
+            lv_obj_set_flex_flow(target, flow); /* also sets LV_STYLE_LAYOUT */
+            break;
+        }
+        case LVGL_HOST_STYLE_JUSTIFY_CONTENT: {
+            lv_flex_align_t align = LV_FLEX_ALIGN_START;
+            if (value == 1) align = LV_FLEX_ALIGN_END;
+            else if (value == 2) align = LV_FLEX_ALIGN_CENTER;
+            else if (value == 3) align = LV_FLEX_ALIGN_SPACE_BETWEEN;
+            else if (value == 4) align = LV_FLEX_ALIGN_SPACE_AROUND;
+            else if (value == 5) align = LV_FLEX_ALIGN_SPACE_EVENLY;
+            lv_obj_set_style_flex_main_place(target, align, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_ALIGN_ITEMS: {
+            lv_flex_align_t align = LV_FLEX_ALIGN_START;
+            if (value == 1) align = LV_FLEX_ALIGN_END;
+            else if (value == 2) align = LV_FLEX_ALIGN_CENTER;
+            lv_obj_set_style_flex_cross_place(target, align, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_GAP:
+            lv_obj_set_style_pad_row(target, value, 0);
+            lv_obj_set_style_pad_column(target, value, 0);
+            break;
+        case LVGL_HOST_STYLE_FLEX_GROW: {
+            int32_t clamped = value < 0 ? 0 : (value > 255 ? 255 : value);
+            lv_obj_set_style_flex_grow(target, (uint8_t)clamped, 0);
+            break;
+        }
+#endif
+        case LVGL_HOST_STYLE_OPACITY: {
+            int32_t clamped = value < 0 ? 0 : (value > 255 ? 255 : value);
+            lv_obj_set_style_opa(target, (lv_opa_t)clamped, 0);
+            break;
+        }
+        case LVGL_HOST_STYLE_ROTATE:
+            lv_obj_set_style_transform_rotation(target, value, 0);
+            /* CSS transform-origin defaults to center; LVGL's default pivot
+             * is top-left. Force center so rotate/scale match CSS. */
+            lv_obj_set_style_transform_pivot_x(target, lv_pct(50), 0);
+            lv_obj_set_style_transform_pivot_y(target, lv_pct(50), 0);
+            break;
+        case LVGL_HOST_STYLE_SCALE: {
+            int32_t clamped = value < 0 ? 0 : value;
+            lv_obj_set_style_transform_scale_x(target, clamped, 0);
+            lv_obj_set_style_transform_scale_y(target, clamped, 0);
+            /* Same center-pivot rationale as LVGL_HOST_STYLE_ROTATE above. */
+            lv_obj_set_style_transform_pivot_x(target, lv_pct(50), 0);
+            lv_obj_set_style_transform_pivot_y(target, lv_pct(50), 0);
+            break;
+        }
+        default:
+            /* Unknown codes are rejected at the binding layer; ignore defensively. */
+            break;
+    }
+}
+
+void lvgl_host_reset_style(lvgl_host_t *host, int id, int prop)
+{
+    lvgl_host_entry_t *entry = entry_at(host, id);
+    if (entry == NULL) return;
+    lv_obj_t *target = style_target(entry, prop);
+    if (target == NULL) return;
+
+    switch (prop) {
+        case LVGL_HOST_STYLE_BACKGROUND_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BG_COLOR, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BG_OPA, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BORDER_COLOR, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_WIDTH:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_BORDER_WIDTH, 0);
+            break;
+        case LVGL_HOST_STYLE_BORDER_RADIUS:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_RADIUS, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_TOP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_TOP, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_RIGHT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_RIGHT, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_BOTTOM:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_BOTTOM, 0);
+            break;
+        case LVGL_HOST_STYLE_PADDING_LEFT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_LEFT, 0);
+            break;
+        case LVGL_HOST_STYLE_COLOR:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_COLOR, 0);
+            break;
+        case LVGL_HOST_STYLE_TEXT_ALIGN:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TEXT_ALIGN, 0);
+            break;
+        case LVGL_HOST_STYLE_WIDTH:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_WIDTH, 0);
+            break;
+        case LVGL_HOST_STYLE_HEIGHT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_HEIGHT, 0);
+            break;
+        case LVGL_HOST_STYLE_LEFT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSLATE_X, 0);
+            break;
+        case LVGL_HOST_STYLE_TOP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSLATE_Y, 0);
+            break;
+        case LVGL_HOST_STYLE_DISPLAY:
+            /* Flag, not a style prop: reset means "shown". */
+            lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+            break;
+#if LV_USE_FLEX
+        case LVGL_HOST_STYLE_FLEX_DIRECTION:
+            /* lv_obj_set_flex_flow set both on the way in; composite reset. */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_FLOW, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_LAYOUT, 0);
+            break;
+        case LVGL_HOST_STYLE_JUSTIFY_CONTENT:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_MAIN_PLACE, 0);
+            break;
+        case LVGL_HOST_STYLE_ALIGN_ITEMS:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_CROSS_PLACE, 0);
+            break;
+        case LVGL_HOST_STYLE_GAP:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_ROW, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_PAD_COLUMN, 0);
+            break;
+        case LVGL_HOST_STYLE_FLEX_GROW:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_FLEX_GROW, 0);
+            break;
+#endif
+        case LVGL_HOST_STYLE_OPACITY:
+            lv_obj_remove_local_style_prop(target, LV_STYLE_OPA, 0);
+            break;
+        case LVGL_HOST_STYLE_ROTATE:
+            /* Only the rotation prop is removed. Rotate and scale share the
+             * pivot props set in lvgl_host_set_style above; this function is
+             * stateless and cannot know whether the other transform is still
+             * active, so a leftover pivot with no active transform is left
+             * in place — it is inert (no transform, no visible effect). */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_ROTATION, 0);
+            break;
+        case LVGL_HOST_STYLE_SCALE:
+            /* Pivot props are deliberately left set; see the rationale
+             * comment on LVGL_HOST_STYLE_ROTATE above. */
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_SCALE_X, 0);
+            lv_obj_remove_local_style_prop(target, LV_STYLE_TRANSFORM_SCALE_Y, 0);
+            break;
+        default:
+            /* Unknown codes are rejected at the binding layer; ignore defensively. */
+            break;
+    }
+}
+
 void lvgl_host_load_screen(lvgl_host_t *host, int id)
 {
     if (id == 0) {

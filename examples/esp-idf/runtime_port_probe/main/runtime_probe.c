@@ -470,6 +470,33 @@ static JSValue js_native_lvgl_load_screen(JSContext *context, JSValueConst this_
     return JS_UNDEFINED;
 }
 
+static JSValue js_native_lvgl_set_style(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 3) return JS_ThrowTypeError(context, "lvgl.setStyle(id, prop, value) requires 3 arguments");
+    int32_t id = 0, prop = 0, value = 0;
+    if (JS_ToInt32(context, &id, argv[0]) || JS_ToInt32(context, &prop, argv[1]) ||
+        JS_ToInt32(context, &value, argv[2])) {
+        return JS_EXCEPTION;
+    }
+    if (prop < 0 || prop >= LVGL_HOST_STYLE_PROP_COUNT) return JS_ThrowTypeError(context, "lvgl.setStyle: unknown style prop");
+    lvgl_host_set_style(probe->lvgl_host, id, prop, value);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_native_lvgl_reset_style(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 2) return JS_ThrowTypeError(context, "lvgl.resetStyle(id, prop) requires 2 arguments");
+    int32_t id = 0, prop = 0;
+    if (JS_ToInt32(context, &id, argv[0]) || JS_ToInt32(context, &prop, argv[1])) return JS_EXCEPTION;
+    if (prop < 0 || prop >= LVGL_HOST_STYLE_PROP_COUNT) return JS_ThrowTypeError(context, "lvgl.resetStyle: unknown style prop");
+    lvgl_host_reset_style(probe->lvgl_host, id, prop);
+    return JS_UNDEFINED;
+}
+
 static JSValue js_native_timers_set_interval(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
     (void)this_value;
@@ -964,6 +991,9 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     JS_SetPropertyStr(context, lvgl, "dispose", JS_NewCFunction(context, js_native_lvgl_dispose, "dispose", 1));
     JS_SetPropertyStr(context, lvgl, "loadScreen",
                       JS_NewCFunction(context, js_native_lvgl_load_screen, "loadScreen", 1));
+    JS_SetPropertyStr(context, lvgl, "setStyle", JS_NewCFunction(context, js_native_lvgl_set_style, "setStyle", 3));
+    JS_SetPropertyStr(context, lvgl, "resetStyle",
+                      JS_NewCFunction(context, js_native_lvgl_reset_style, "resetStyle", 2));
     JS_SetPropertyStr(context, native, "lvgl", lvgl);
 
     JSValue timers = JS_NewObject(context);

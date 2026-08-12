@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { ElementType } from "@tsx-lvgl/core";
 import {
+  NATIVE_STYLE_PROP,
   createClickRegistry,
   createDeviceScheduler,
   createKernel,
@@ -219,6 +220,129 @@ test("replaceRoot loads the next screen, or a blank screen (0) when next is null
 });
 
 // ---------------------------------------------------------------------------
+// style
+// ---------------------------------------------------------------------------
+
+test("createInstance applies a style for every widget type, including Screen and View", () => {
+  const cases: ReadonlyArray<readonly [ElementType, Record<string, unknown>]> = [
+    ["Screen", { style: { backgroundColor: "red" } }],
+    ["View", { style: { backgroundColor: "red" } }],
+    ["Text", { text: "x", style: { backgroundColor: "red" } }],
+    ["Button", { label: "x", style: { backgroundColor: "red" } }],
+  ];
+  for (const [type, props] of cases) {
+    const lvgl = new FakeNativeLvgl();
+    const host = createLvglHost(lvgl, createClickRegistry());
+    const instance = host.createInstance(type, props);
+    assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.backgroundColor), 0xff0000, type);
+  }
+});
+
+test("createInstance with no style makes no style calls", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  host.createInstance("View", {});
+  assert.deepEqual(lvgl.setStyleCalls, []);
+  assert.deepEqual(lvgl.resetStyleCalls, []);
+});
+
+test("updateInstance emits setStyle only for the style key that actually changed", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { backgroundColor: "red", borderWidth: 1 } });
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { backgroundColor: "red", borderWidth: 1 } },
+    { style: { backgroundColor: "red", borderWidth: 2 } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.borderWidth, value: 2 }]);
+});
+
+test("updateInstance emits resetStyle when a style key is removed on the next render", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { borderWidth: 1 } });
+  host.updateInstance(instance, "View", { style: { borderWidth: 1 } }, { style: {} });
+  assert.deepEqual(lvgl.resetStyleCalls, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.borderWidth }]);
+});
+
+test("updateInstance with a re-normalized identical style makes zero native calls", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { backgroundColor: "red", padding: 4 } });
+  const setBefore = lvgl.setStyleCalls.length;
+  const resetBefore = lvgl.resetStyleCalls.length;
+  // A fresh object literal with the same content: the reconciler's shallow
+  // sameProps identity check re-triggers updateInstance every render, but the
+  // per-key diff must still emit nothing.
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { backgroundColor: "red", padding: 4 } },
+    { style: { backgroundColor: "red", padding: 4 } },
+  );
+  assert.equal(lvgl.setStyleCalls.length, setBefore);
+  assert.equal(lvgl.resetStyleCalls.length, resetBefore);
+});
+
+test("createInstance and updateInstance apply S2 width/left/display through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { width: 120, left: -4, display: "none" } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.width), 120);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.left), -4);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.display), 1);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { width: 120, left: -4, display: "none" } },
+    { style: { width: "50%", left: -4, display: "flex" } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.width, value: -51 },
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.display, value: 0 },
+  ]);
+});
+
+test("createInstance and updateInstance apply S3 flexDirection/gap through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { flexDirection: "row", gap: 4 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.flexDirection), 0);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.gap), 4);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { flexDirection: "row", gap: 4 } },
+    { style: { flexDirection: "column", gap: 4 } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
+});
+
+test("createInstance and updateInstance apply S4 opacity/rotate through the host contract, and removing rotate resets it", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { opacity: 0.5, rotate: 45 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.opacity), 128);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.rotate), 450);
+
+  host.updateInstance(instance, "View", { style: { opacity: 0.5, rotate: 45 } }, { style: { opacity: 0.5 } });
+  assert.deepEqual(
+    lvgl.resetStyleCalls.filter((call) => call.id === instanceId(instance)),
+    [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.rotate }],
+  );
+});
+
+// ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------
 
@@ -384,7 +508,7 @@ const sdkAliasSource = `
   const jsx = require("@tsx-lvgl/sdk/jsx-runtime");
   exports.default = function App() {
     const sample = sdk.useMotion();
-    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,Text,View,isShake,useEffect,useInterval,useMotion,useState,useWifi"
+    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,StyleSheet,Text,View,isShake,useEffect,useInterval,useMotion,useState,useWifi"
       ? "sdk"
       : "sdk-leak";
     return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample.state.status === "starting" ? surface : sample.state.status }) });
