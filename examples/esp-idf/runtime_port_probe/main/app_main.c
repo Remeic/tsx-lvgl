@@ -17,7 +17,10 @@ static RTC_DATA_ATTR uint32_t probe_boot_count;
  * reliably reserve a second native owner stack after the runtime and
  * providers are live; keeping one owner also preserves the single LVGL lock
  * boundary. */
-#define RUNTIME_PROBE_BOOT_STACK_WORDS (12288U)
+/* Nested LVGL reparenting plus the style ABI can recurse through layout while
+ * the owner task mounts a candidate tree. Keep enough headroom for that
+ * native call chain; the project permits task stacks in external PSRAM. */
+#define RUNTIME_PROBE_BOOT_STACK_WORDS (16384U)
 
 static void runtime_probe_boot_task(void *arg)
 {
