@@ -30,7 +30,7 @@ product features.
 ### `@tsx-lvgl/sdk`
 
 Owns the only application-facing interface: the supported TSX tags, hooks and
-high-level motion hook, plus the `tsx-lvgl` CLI. The CLI owns project metadata,
+high-level motion/shake hooks, plus the `tsx-lvgl` CLI. The CLI owns project metadata,
 artifact verification, TypeScript checks, deterministic bundle production and
 the headless kernel check. It deliberately does not expose the internal
 workspace graph. The SDK npm-pack artifact vendors the compiled internal

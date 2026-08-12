@@ -243,3 +243,42 @@ test("isShake angular velocity delta is a >= boundary: exactly at the threshold 
   assert.equal(isShake(atThreshold), true, ">= threshold must shake");
   assert.equal(isShake(justUnderThreshold), false, "just under threshold must not shake");
 });
+
+test("isShake supports per-app thresholds and can disable rotation detection", () => {
+  const rotationWithoutImpact = {
+    accelerationMps2: [0, 0, 9.80665] as const,
+    angularVelocityDps: [260, 0, 0] as const,
+  };
+  const modestBump = {
+    accelerationMps2: [18, 0, 0] as const,
+    angularVelocityDps: [0, 0, 0] as const,
+  };
+  const deliberateShake = {
+    accelerationMps2: [30, 0, 0] as const,
+    angularVelocityDps: [0, 0, 0] as const,
+  };
+  const pomodoroThresholds = {
+    accelerationDeltaMps2: 12,
+    angularVelocityDps: null,
+  } as const;
+
+  assert.equal(isShake(rotationWithoutImpact, pomodoroThresholds), false);
+  assert.equal(isShake(modestBump, pomodoroThresholds), false);
+  assert.equal(isShake(deliberateShake, pomodoroThresholds), true);
+});
+
+test("isShake rejects invalid per-app thresholds", () => {
+  const stationary = {
+    accelerationMps2: [0, 0, 9.80665] as const,
+    angularVelocityDps: [0, 0, 0] as const,
+  };
+
+  assert.throws(
+    () => isShake(stationary, { accelerationDeltaMps2: -1 }),
+    /accelerationDeltaMps2 must be null or a non-negative finite number/,
+  );
+  assert.throws(
+    () => isShake(stationary, { angularVelocityDps: Number.NaN }),
+    /angularVelocityDps must be null or a non-negative finite number/,
+  );
+});

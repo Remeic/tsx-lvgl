@@ -25,6 +25,7 @@ import {
   useEffect,
   useInterval,
   useMotion,
+  useShake,
   useState,
   useWifi,
 } from "@tsx-lvgl/runtime";
@@ -74,6 +75,7 @@ function resolveModule(specifier: string): Record<string, unknown> {
         useEffect,
         useInterval,
         useMotion,
+        useShake,
         useState,
         useWifi,
         isShake,

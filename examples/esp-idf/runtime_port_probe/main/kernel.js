@@ -55,6 +55,7 @@ exports.APPLICATION_FACADE_KEYS = [
     "useEffect",
     "useInterval",
     "useMotion",
+    "useShake",
     "useWifi",
     "useState",
 ];
@@ -544,11 +545,23 @@ function isMotionSample(value) {
     const candidate = value;
     return isVector(candidate.accelerationMps2) && isVector(candidate.angularVelocityDps);
 }
-function isShake(sample) {
+function isShake(sample, thresholds = {}) {
     const accelerationMagnitude = magnitude(sample.accelerationMps2);
     const rotationMagnitude = magnitude(sample.angularVelocityDps);
-    return Math.abs(accelerationMagnitude - EARTH_GRAVITY_MPS2) >= SHAKE_ACCELERATION_DELTA_MPS2
-        || rotationMagnitude >= SHAKE_ANGULAR_VELOCITY_DPS;
+    const accelerationThreshold = resolveThreshold("accelerationDeltaMps2", thresholds.accelerationDeltaMps2, SHAKE_ACCELERATION_DELTA_MPS2);
+    const rotationThreshold = resolveThreshold("angularVelocityDps", thresholds.angularVelocityDps, SHAKE_ANGULAR_VELOCITY_DPS);
+    return (accelerationThreshold !== null
+        && Math.abs(accelerationMagnitude - EARTH_GRAVITY_MPS2) >= accelerationThreshold)
+        || (rotationThreshold !== null && rotationMagnitude >= rotationThreshold);
+}
+function resolveThreshold(name, value, fallback) {
+    if (value === null)
+        return null;
+    const resolved = value ?? fallback;
+    if (!Number.isFinite(resolved) || resolved < 0) {
+        throw new Error(`${name} must be null or a non-negative finite number`);
+    }
+    return resolved;
 }
 function isVector(value) {
     return Array.isArray(value)
@@ -846,6 +859,7 @@ exports.useEffect = useEffect;
 exports.useInterval = useInterval;
 exports.useSensor = useSensor;
 exports.useMotion = useMotion;
+exports.useShake = useShake;
 exports.useWifi = useWifi;
 exports.releaseHooks = releaseHooks;
 const sensors_1 = require("@tsx-lvgl/sensors");
@@ -957,6 +971,35 @@ function useMotion(options = {}) {
     }, [options.enabled, options.instanceId, options.periodMs]);
     return binding;
 }
+const DEFAULT_SHAKE_COOLDOWN_MS = 700;
+function useShake(options = {}) {
+    requireFiber("useShake");
+    const cooldownMs = options.cooldownMs ?? DEFAULT_SHAKE_COOLDOWN_MS;
+    if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+        throw new Error("useShake cooldownMs must be a non-negative finite number");
+    }
+    const motion = useMotion(options);
+    const [shake, setShake] = useState({ count: 0 });
+    useEffect(() => {
+        const state = motion.state;
+        if (state.status !== "ready" && state.status !== "stale")
+            return;
+        if (!(0, sensors_1.isShake)(state.value, options))
+            return;
+        setShake((previous) => {
+            if (previous.detectedAtMs !== undefined
+                && state.observedAtMs - previous.detectedAtMs < cooldownMs)
+                return previous;
+            return { count: previous.count + 1, detectedAtMs: state.observedAtMs };
+        });
+    }, [
+        motion.state,
+        options.accelerationDeltaMps2,
+        options.angularVelocityDps,
+        cooldownMs,
+    ]);
+    return shake;
+}
 function useWifi() {
     const fiber = requireFiber("useWifi");
     const session = currentSession;
@@ -1053,13 +1096,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 __tsxDefine("@tsx-lvgl/runtime/index.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.decodeAsciiSource = exports.createProgramEngine = exports.validateRuntimeBundle = exports.RUNTIME_BUNDLE_MAX_BYTES = exports.PROTOCOL_VERSION = exports.useState = exports.useSensor = exports.useWifi = exports.useMotion = exports.useInterval = exports.useEffect = exports.Runtime = void 0;
+exports.decodeAsciiSource = exports.createProgramEngine = exports.validateRuntimeBundle = exports.RUNTIME_BUNDLE_MAX_BYTES = exports.PROTOCOL_VERSION = exports.useState = exports.useSensor = exports.useWifi = exports.useShake = exports.useMotion = exports.useInterval = exports.useEffect = exports.Runtime = void 0;
 var runtime_js_1 = require("@tsx-lvgl/runtime/runtime.js");
 Object.defineProperty(exports, "Runtime", { enumerable: true, get: function () { return runtime_js_1.Runtime; } });
 var hooks_js_1 = require("@tsx-lvgl/runtime/hooks.js");
 Object.defineProperty(exports, "useEffect", { enumerable: true, get: function () { return hooks_js_1.useEffect; } });
 Object.defineProperty(exports, "useInterval", { enumerable: true, get: function () { return hooks_js_1.useInterval; } });
 Object.defineProperty(exports, "useMotion", { enumerable: true, get: function () { return hooks_js_1.useMotion; } });
+Object.defineProperty(exports, "useShake", { enumerable: true, get: function () { return hooks_js_1.useShake; } });
 Object.defineProperty(exports, "useWifi", { enumerable: true, get: function () { return hooks_js_1.useWifi; } });
 Object.defineProperty(exports, "useSensor", { enumerable: true, get: function () { return hooks_js_1.useSensor; } });
 Object.defineProperty(exports, "useState", { enumerable: true, get: function () { return hooks_js_1.useState; } });
@@ -2042,6 +2086,7 @@ function resolveModule(specifier) {
                 useEffect: runtime_2.useEffect,
                 useInterval: runtime_2.useInterval,
                 useMotion: runtime_2.useMotion,
+                useShake: runtime_2.useShake,
                 useState: runtime_2.useState,
                 useWifi: runtime_2.useWifi,
                 isShake: sensors_2.isShake,
@@ -2378,6 +2423,9 @@ const NAMED_COLORS = Object.freeze({
     magenta: 0xff00ff,
 });
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const PERCENT_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?%$/;
+const INT32_MIN = -0x80000000;
+const INT32_MAX = 0x7fffffff;
 function normalizeColor(value) {
     if (typeof value !== "string" || value === "transparent")
         return undefined;
@@ -2388,11 +2436,16 @@ function normalizeColor(value) {
         return undefined;
     return parseInt(value.slice(1), 16);
 }
-function normalizeNonNegativeInt(value) {
-    if (typeof value !== "number" || !Number.isFinite(value))
+function normalizeInt32(value) {
+    if (!Number.isFinite(value))
         return undefined;
     const rounded = Math.round(value);
-    return rounded < 0 ? undefined : rounded;
+    return rounded < INT32_MIN || rounded > INT32_MAX ? undefined : rounded;
+}
+function normalizeNonNegativeInt(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+        return undefined;
+    return normalizeInt32(value);
 }
 function normalizeTextAlign(value) {
     if (value === "left")
@@ -2407,15 +2460,15 @@ function normalizeDimension(value) {
     if (typeof value === "number") {
         if (!Number.isFinite(value) || value < 0)
             return undefined;
-        return Math.round(value);
+        return normalizeInt32(value);
     }
     if (typeof value !== "string")
         return undefined;
     if (value === "auto")
         return -2000;
-    if (!value.endsWith("%"))
+    if (!PERCENT_RE.test(value))
         return undefined;
-    const percent = Number.parseFloat(value.slice(0, -1));
+    const percent = Number(value.slice(0, -1));
     if (!Number.isFinite(percent))
         return undefined;
     const clamped = Math.min(1000, Math.max(0, Math.round(percent)));
@@ -2424,7 +2477,7 @@ function normalizeDimension(value) {
 function normalizeTranslate(value) {
     if (typeof value !== "number" || !Number.isFinite(value))
         return undefined;
-    return Math.round(value);
+    return normalizeInt32(value);
 }
 function normalizeDisplay(value) {
     if (value === "none")
@@ -2473,10 +2526,10 @@ function enumOf(values) {
     return (value) => (typeof value === "string" ? values[value] : undefined);
 }
 function normalizeFlexGrow(value) {
-    if (typeof value !== "number" || !Number.isFinite(value))
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
         return undefined;
     const rounded = Math.round(value);
-    return rounded < 0 ? undefined : Math.min(255, rounded);
+    return Math.min(255, rounded);
 }
 function normalizeOpacity(value) {
     if (typeof value !== "number" || !Number.isFinite(value))
@@ -2500,12 +2553,12 @@ function normalizeRotate(value) {
     else {
         return undefined;
     }
-    return Number.isFinite(degrees) ? Math.round(degrees * 10) : undefined;
+    return Number.isFinite(degrees) ? normalizeInt32(degrees * 10) : undefined;
 }
 function normalizeScale(value) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
         return undefined;
-    return Math.round(value * 256);
+    return normalizeInt32(value * 256);
 }
 const P = exports.NATIVE_STYLE_PROP;
 const STYLE_NORMALIZERS = Object.freeze({
