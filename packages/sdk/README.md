@@ -18,8 +18,11 @@ Discovery and base command construction use the pinned, zero-dependency
 diagnostics, offline and lifecycle-script flags, lock conflict handling, and a
 fresh Bun cache for same-version local artifacts.
 
-`tsx-lvgl dev --device --port <serial-port> [--json]` is an optional
-development-only bundle push. It never flashes or resets firmware. The port is
-machine-local and the generation negotiated from the board is invocation-only;
+`tsx-lvgl dev --device --port <serial-port> [--json]` watches the configured
+TSX entry and pushes each accepted build over the development-only transport.
+Builds and pushes are serialized, rapid saves are coalesced, and a compile or
+transport failure leaves the last accepted application running while the
+watcher waits for the next save. It never flashes or resets firmware. The port
+is machine-local and the generation negotiated from the board is invocation-only;
 neither is stored in application configuration. `doctor --device --port ...`
 performs only the same syntax preflight and does not open the port.

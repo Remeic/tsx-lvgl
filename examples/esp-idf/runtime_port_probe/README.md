@@ -92,6 +92,14 @@ reported as `unavailable` and must not tear down the display or app.
 
 ## Pushing a hot-reloaded bundle (dev only)
 
+For continuous development, keep this command running. The initial bundle is
+pushed immediately; later saves are coalesced and pushed serially:
+
+```bash
+npm run dev:board -- --entry examples/apps/pomodoro.tsx \
+  --port /dev/cu.usbmodemXXX --bundle-id pomodoro
+```
+
 Build a new generation and push it over the probe's USB Serial/JTAG port
 while it's running:
 

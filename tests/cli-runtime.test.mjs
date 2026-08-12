@@ -26,6 +26,7 @@ function operations(overrides = {}) {
     checkProject: () => ({ files: ["src/App.tsx"] }),
     buildProject: () => ({ codePath: "build/app.js", manifestPath: "build/app.json", bundle: { manifest: { byteLength: 3, sha256: "digest" } } }),
     devProject: async () => ({ bundleId: "app", generation: 1, texts: ["hello"] }),
+    watchDeviceProject: async (_root, options) => options.onAccepted({ bundleId: "app", generation: 1, epoch: 1, retryCount: 0 }),
     doctorProject: () => ({ ok: true, resultCode: "DOCTOR_OK", checks: [] }),
     ...overrides,
   };
@@ -51,9 +52,9 @@ test("CLI parser normalizes supported options and rejects malformed input", () =
 test("CLI routes device dev and doctor through existing command names with deterministic JSON", async () => {
   const calls = [];
   const ops = operations({
-    devProject: async (_root, options) => {
-      calls.push(["dev", options]);
-      return { bundleId: "app", generation: 7, texts: [], logs: [], device: { bundleId: "app", generation: 7, epoch: 3, retryCount: 1 } };
+    watchDeviceProject: async (_root, options) => {
+      calls.push(["dev", { device: true, port: options.port }]);
+      options.onAccepted({ bundleId: "app", generation: 7, epoch: 3, retryCount: 1 });
     },
     doctorProject: (_root, options) => {
       calls.push(["doctor", options]);
@@ -80,7 +81,7 @@ test("CLI routes device dev and doctor through existing command names with deter
   assert.match(output.errors[0], /requires doctor --device/);
   output = recorder();
   const failingOps = operations({
-    devProject: async () => { throw new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial disconnected"); },
+    watchDeviceProject: async () => { throw new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial disconnected"); },
   });
   assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", failingOps, output.writer), 1);
   assert.deepEqual(JSON.parse(output.errors[0]), { ok: false, code: "DEVICE_PUSH_FAILED", message: "serial disconnected" });

@@ -5,6 +5,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  watch as watchFileSystem,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -14,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
 import { runHeadless, type HeadlessResult } from "./headless.js";
 import { doctorDevicePort, runDeviceDev, type DeviceDevResult } from "./device-dev.js";
+import { runDeviceWatch } from "./device-watch.js";
 import {
   DEFAULT_BOARD_ID,
   LOCK_FORMAT_VERSION,
@@ -66,6 +68,13 @@ export interface CheckResult {
 export interface DevResult extends HeadlessResult {
   readonly bundleId: string;
   readonly device?: DeviceDevResult;
+}
+
+export interface ProjectDeviceWatchOptions {
+  readonly port: string;
+  readonly signal: AbortSignal;
+  readonly onAccepted: (result: DeviceDevResult) => void;
+  readonly onRejected: (error: Error) => void;
 }
 
 export interface InstalledSdkPackRuntime {
@@ -225,6 +234,31 @@ export async function devProject(
     if (error instanceof CliError) throw error;
     throw new CliError(DIAGNOSTIC_CODES.DEV_FAILED, error instanceof Error ? error.message : String(error));
   }
+}
+
+/** Watches the configured single TSX entry and hot-reloads accepted builds. */
+export async function watchDeviceProject(root: string, options: ProjectDeviceWatchOptions): Promise<void> {
+  recoverConsumerProjectState(root);
+  const project = verifyProject(root);
+  await runDeviceWatch({
+    initialGeneration: project.config.generation,
+    signal: options.signal,
+    watch: (onChange, onError) => {
+      const entryName = basename(project.entryPath);
+      const watcher = watchFileSystem(dirname(project.entryPath), (_event, fileName) => {
+        if (fileName === null || String(fileName) === entryName) onChange();
+      });
+      watcher.on("error", onError);
+      return watcher;
+    },
+    build: (generation) => {
+      typecheckProject(project.root);
+      return compileProject(project, generation);
+    },
+    push: (bundle) => runDeviceDev(bundle, options.port),
+    onAccepted: options.onAccepted,
+    onRejected: options.onRejected,
+  });
 }
 
 export function doctorProject(
@@ -447,13 +481,13 @@ function formatDiagnostics(diagnostics: readonly ts.Diagnostic[], root: string):
   }).trim();
 }
 
-function compileProject(project: Project): BundleOutput {
+function compileProject(project: Project, generation = project.config.generation): BundleOutput {
   return compileTsxBundle({
     fileName: project.entryPath,
     source: readFileSync(project.entryPath, "utf8"),
     bundleId: project.config.bundleId,
     boardId: project.config.boardId,
-    generation: project.config.generation,
+    generation,
     jsxImportSource: SDK_PACKAGE_NAME,
   });
 }
