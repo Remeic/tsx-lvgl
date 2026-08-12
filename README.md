@@ -247,6 +247,12 @@ Physical-board work is gated by the recovery, identity and app-only workflow in
 The current M1 runtime slice includes:
 
 - `Screen`, `View`, `Text` and `Button` with typed props;
+- a typed `style` prop on every widget: box (`backgroundColor`, `border*`,
+  `padding*`), size/position (`width`, `height`, `left`, `top`, `display`),
+  flex layout (`flexDirection`, `justifyContent`, `alignItems`, `gap`,
+  `flexGrow`/`flex`) and effects (`opacity`, `rotate`, `scale`);
+  `StyleSheet.create` and RN-shaped style arrays are supported — see
+  `examples/apps/style-gallery.tsx`;
 - immutable VNodes and keyed reconciliation;
 - `useState`, effects, deterministic intervals and event replacement;
 - versioned typed sensor schemas, validation and stale-epoch fencing;
@@ -263,8 +269,24 @@ The current M1 runtime slice includes:
 
 TSX-LVGL is not React, is not affiliated with React or Meta, and does not claim
 to run arbitrary React applications. The supported UI model is deliberately
-smaller than browser React: DOM, CSS, Suspense, browser APIs and an unrestricted
+smaller than browser React: DOM, Suspense, browser APIs and an unrestricted
 native-widget escape hatch are outside the current contract.
+
+The `style` prop is a typed, CSS-shaped subset, not CSS, with deliberate
+deviations:
+
+- no fonts yet;
+- `opacity` is per-draw-op, not CSS group opacity;
+- no `alignItems:"stretch"`/`alignSelf` (LVGL flex has neither) — use a child
+  `height`/`width: "100%"` for cross-axis fill;
+- positioning is absolute by default; flex is opt-in, implied by setting
+  `justifyContent`/`alignItems`/`gap`;
+- `left`/`top` map to LVGL translate, not a position offset;
+- buttons keep LVGL theme pressed/focused visuals — state styling (`:hover`,
+  `:active`) is not authorable yet;
+- style objects must be treated as immutable, same caveat as React;
+- `rotate`/`scale` force a full-area transform layer — hardware perf
+  validation on animated transforms is still open.
 
 The repository is an npm workspace, but application-side npm availability is
 not yet the same as on-device npm support. The current M1 bundler does not

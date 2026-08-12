@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { BOARD_ID, PROTOCOL_VERSION, compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
-import { createKernel } from "@tsx-lvgl/device";
+import { NATIVE_STYLE_PROP, createKernel } from "@tsx-lvgl/device";
 import {
   RUNTIME_BUNDLE_MAX_BYTES,
   validateRuntimeBundle,
@@ -216,6 +216,185 @@ test("compiling ShakeFace twice is byte-for-byte and manifest-for-manifest deter
   const second = compileShakeFace(1);
   assert.deepEqual([...first.bytes], [...second.bytes]);
   assert.deepEqual(first.manifest, second.manifest);
+});
+
+const styledSource = `
+  import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
+  export default function Styled() {
+    const [step, setStep] = useState(0);
+    const style = step === 0
+      ? { backgroundColor: "red", borderWidth: 1 }
+      : step === 1
+        ? { backgroundColor: "red", borderWidth: 2 }
+        : { backgroundColor: "red" };
+    return (
+      <Screen>
+        <Text text="styled" style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a styled component render, changing one style key emits exactly one setStyle, and removing a key emits exactly one resetStyle", () => {
+  const output = compileTsxBundle({
+    fileName: "Styled.tsx",
+    source: styledSource,
+    bundleId: "styled",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [textId] = fake.lvgl.liveIdsOfKind("text");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(textId, "expected a live text widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(textId, NATIVE_STYLE_PROP.borderWidth), 1);
+
+  const setBeforeFirstClick = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emittedOnFirstClick = fake.lvgl.setStyleCalls.slice(setBeforeFirstClick);
+  assert.deepEqual(emittedOnFirstClick, [{ id: textId, prop: NATIVE_STYLE_PROP.borderWidth, value: 2 }]);
+
+  const setBeforeSecondClick = fake.lvgl.setStyleCalls.length;
+  const resetBeforeSecondClick = fake.lvgl.resetStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  assert.equal(fake.lvgl.setStyleCalls.length, setBeforeSecondClick, "backgroundColor is unchanged, so no setStyle");
+  assert.deepEqual(
+    fake.lvgl.resetStyleCalls.slice(resetBeforeSecondClick),
+    [{ id: textId, prop: NATIVE_STYLE_PROP.borderWidth }],
+  );
+});
+
+const sizedSource = `
+  import { Button, Screen, Text, useState } from "@tsx-lvgl/sdk";
+  export default function Sized() {
+    const [step, setStep] = useState(0);
+    const style = step === 0 ? { width: "50%" } : { width: 120 };
+    return (
+      <Screen>
+        <Text text="sized" style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a width style re-rendered from percent to px emits a single setStyle per change, encoded per the S2 ABI", () => {
+  const output = compileTsxBundle({
+    fileName: "Sized.tsx",
+    source: sizedSource,
+    bundleId: "sized",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [textId] = fake.lvgl.liveIdsOfKind("text");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(textId, "expected a live text widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(textId, NATIVE_STYLE_PROP.width), -51);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: textId, prop: NATIVE_STYLE_PROP.width, value: 120 }]);
+});
+
+const flexSource = `
+  import { Button, Screen, Text, View, useState } from "@tsx-lvgl/sdk";
+  export default function Flex() {
+    const [step, setStep] = useState(0);
+    const style = step === 0
+      ? { flexDirection: "row", gap: 4 }
+      : { flexDirection: "column", gap: 4 };
+    return (
+      <Screen>
+        <View style={style}>
+          <Text text="flex" />
+        </View>
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("a flex row with gap, re-rendered to column, emits a single setStyle(flexDirection, 1)", () => {
+  const output = compileTsxBundle({
+    fileName: "Flex.tsx",
+    source: flexSource,
+    bundleId: "flex",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [viewId] = fake.lvgl.liveIdsOfKind("view");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(viewId, "expected a live view widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.flexDirection), 0);
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.gap), 4);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: viewId, prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
+});
+
+const animatedSource = `
+  import { Button, Screen, View, useState } from "@tsx-lvgl/sdk";
+  export default function Animated() {
+    const [step, setStep] = useState(0);
+    const style = step === 0 ? { rotate: 0, opacity: 1 } : { rotate: 45, opacity: 1 };
+    return (
+      <Screen>
+        <View style={style} />
+        <Button label="next" onClick={() => setStep((current) => current + 1)} />
+      </Screen>
+    );
+  }
+`;
+
+test("re-rendering with only rotate changed emits exactly one setStyle(rotate, ...)", () => {
+  const output = compileTsxBundle({
+    fileName: "Animated.tsx",
+    source: animatedSource,
+    bundleId: "animated",
+    boardId: BOARD_ID,
+    generation: 1,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+  const fake = makeFakeNative(BOARD_ID);
+  const kernel = createKernel(fake.native);
+  kernel.start(toBundle(output));
+
+  const [viewId] = fake.lvgl.liveIdsOfKind("view");
+  const [clickableId] = fake.lvgl.liveIdsOfKind("button");
+  assert.ok(viewId, "expected a live view widget");
+  assert.ok(clickableId, "expected a live button widget");
+  assert.equal(fake.lvgl.styleOf(viewId, NATIVE_STYLE_PROP.rotate), 0);
+
+  const setBefore = fake.lvgl.setStyleCalls.length;
+  fake.dispatchClick(clickableId);
+  kernel.pump();
+  const emitted = fake.lvgl.setStyleCalls.slice(setBefore);
+  assert.deepEqual(emitted, [{ id: viewId, prop: NATIVE_STYLE_PROP.rotate, value: 450 }]);
 });
 
 test("embedded ShakeFace generation one exactly matches the canonical board-capability fixture", () => {

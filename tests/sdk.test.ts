@@ -14,6 +14,7 @@ test("SDK facade exposes only the supported application surface", () => {
     "Button",
     "Fragment",
     "Screen",
+    "StyleSheet",
     "Text",
     "View",
     "isShake",
@@ -23,6 +24,14 @@ test("SDK facade exposes only the supported application surface", () => {
     "useWifi",
     "useState",
   ]);
+});
+
+test("StyleSheet.create freezes the sheet and every entry", () => {
+  const sheet = sdk.StyleSheet.create({ box: { backgroundColor: "red" }, text: { color: "blue" } });
+  assert.equal(Object.isFrozen(sheet), true);
+  assert.equal(Object.isFrozen(sheet.box), true);
+  assert.equal(Object.isFrozen(sheet.text), true);
+  assert.deepEqual(sheet.box, { backgroundColor: "red" });
 });
 
 test("useMotion reads the motion schema through the board capability runtime", () => {

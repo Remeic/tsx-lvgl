@@ -37,6 +37,12 @@ export class FakeNativeLvgl implements NativeLvgl {
   readonly insertCalls: Array<{ readonly parent: number; readonly child: number; readonly index: number }> = [];
   readonly removeCalls: Array<{ readonly parent: number; readonly child: number }> = [];
   readonly disposeCalls: number[] = [];
+  readonly setStyleCalls: Array<{ readonly id: number; readonly prop: number; readonly value: number }> = [];
+  readonly resetStyleCalls: Array<{ readonly id: number; readonly prop: number }> = [];
+  private readonly styleLog: Array<
+    | { readonly kind: "set"; readonly id: number; readonly prop: number; readonly value: number }
+    | { readonly kind: "reset"; readonly id: number; readonly prop: number }
+  > = [];
   loadedScreen = 0;
 
   create(kind: NativeWidgetKind): number {
@@ -82,6 +88,26 @@ export class FakeNativeLvgl implements NativeLvgl {
 
   loadScreen(id: number): void {
     this.loadedScreen = id;
+  }
+
+  setStyle(id: number, prop: number, value: number): void {
+    this.setStyleCalls.push({ id, prop, value });
+    this.styleLog.push({ kind: "set", id, prop, value });
+  }
+
+  resetStyle(id: number, prop: number): void {
+    this.resetStyleCalls.push({ id, prop });
+    this.styleLog.push({ kind: "reset", id, prop });
+  }
+
+  /** Replays `setStyle`/`resetStyle` calls in order: set overwrites, reset deletes. */
+  styleOf(id: number, prop: number): number | undefined {
+    let value: number | undefined;
+    for (const call of this.styleLog) {
+      if (call.id !== id || call.prop !== prop) continue;
+      value = call.kind === "set" ? call.value : undefined;
+    }
+    return value;
   }
 
   kindOf(id: number): NativeWidgetKind {

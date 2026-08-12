@@ -26,7 +26,7 @@ function __tsxRequire(name) {
 __tsxDefine("@tsx-lvgl/core/index.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.APPLICATION_FACADE_KEYS = exports.Button = exports.Text = exports.View = exports.Screen = exports.elementTypes = exports.Fragment = void 0;
+exports.APPLICATION_FACADE_KEYS = exports.StyleSheet = exports.Button = exports.Text = exports.View = exports.Screen = exports.elementTypes = exports.Fragment = void 0;
 exports.createApplicationFacade = createApplicationFacade;
 exports.createVNode = createVNode;
 exports.normalizeChildren = normalizeChildren;
@@ -37,10 +37,18 @@ exports.Screen = "Screen";
 exports.View = "View";
 exports.Text = "Text";
 exports.Button = "Button";
+exports.StyleSheet = Object.freeze({
+    create(styles) {
+        for (const key of Object.keys(styles))
+            Object.freeze(styles[key]);
+        return Object.freeze(styles);
+    },
+});
 exports.APPLICATION_FACADE_KEYS = [
     "Button",
     "Fragment",
     "Screen",
+    "StyleSheet",
     "Text",
     "View",
     "isShake",
@@ -1962,10 +1970,14 @@ function isNewerWifiEvent(event, sequence, observedAtMs) {
 __tsxDefine("@tsx-lvgl/device/index.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.encodeAsciiSource = exports.createKernel = exports.encodeBoardPayload = exports.decodeBoardPayload = exports.MemoryBoardAdapter = exports.DEFAULT_BOARD_SCHEMA_REGISTRY = exports.createBoardSchemaRegistry = exports.NativeBoardWifiService = exports.createDefaultBoardDescriptors = exports.BoardRuntime = exports.createNativeMotionSensor = exports.createDeviceScheduler = exports.createClickRegistry = exports.createLvglHost = void 0;
+exports.encodeAsciiSource = exports.createKernel = exports.encodeBoardPayload = exports.decodeBoardPayload = exports.MemoryBoardAdapter = exports.DEFAULT_BOARD_SCHEMA_REGISTRY = exports.createBoardSchemaRegistry = exports.NativeBoardWifiService = exports.createDefaultBoardDescriptors = exports.BoardRuntime = exports.createNativeMotionSensor = exports.createDeviceScheduler = exports.applyStyleDiff = exports.normalizeStyle = exports.NATIVE_STYLE_PROP = exports.createClickRegistry = exports.createLvglHost = void 0;
 var lvgl_host_js_1 = require("@tsx-lvgl/device/lvgl-host.js");
 Object.defineProperty(exports, "createLvglHost", { enumerable: true, get: function () { return lvgl_host_js_1.createLvglHost; } });
 Object.defineProperty(exports, "createClickRegistry", { enumerable: true, get: function () { return lvgl_host_js_1.createClickRegistry; } });
+var style_js_1 = require("@tsx-lvgl/device/style.js");
+Object.defineProperty(exports, "NATIVE_STYLE_PROP", { enumerable: true, get: function () { return style_js_1.NATIVE_STYLE_PROP; } });
+Object.defineProperty(exports, "normalizeStyle", { enumerable: true, get: function () { return style_js_1.normalizeStyle; } });
+Object.defineProperty(exports, "applyStyleDiff", { enumerable: true, get: function () { return style_js_1.applyStyleDiff; } });
 var scheduler_js_1 = require("@tsx-lvgl/device/scheduler.js");
 Object.defineProperty(exports, "createDeviceScheduler", { enumerable: true, get: function () { return scheduler_js_1.createDeviceScheduler; } });
 var sensors_js_1 = require("@tsx-lvgl/device/sensors.js");
@@ -2024,6 +2036,7 @@ function resolveModule(specifier) {
                 Button: core_1.Button,
                 Fragment: core_1.Fragment,
                 Screen: core_1.Screen,
+                StyleSheet: core_1.StyleSheet,
                 Text: core_1.Text,
                 View: core_1.View,
                 useEffect: runtime_2.useEffect,
@@ -2148,6 +2161,7 @@ __tsxDefine("@tsx-lvgl/device/lvgl-host.js", function (require, module, exports)
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createClickRegistry = createClickRegistry;
 exports.createLvglHost = createLvglHost;
+const style_js_1 = require("@tsx-lvgl/device/style.js");
 function createClickRegistry() {
     const handlers = new Map();
     return {
@@ -2162,6 +2176,7 @@ function createClickRegistry() {
         },
     };
 }
+const EMPTY_STYLE = new Map();
 const widgetKindByType = {
     Screen: "screen",
     View: "view",
@@ -2192,7 +2207,9 @@ function createLvglHost(native, clicks) {
                     native.setClickable(id, true);
                 }
             }
-            const instance = { type, id };
+            const style = (0, style_js_1.normalizeStyle)(props.style);
+            (0, style_js_1.applyStyleDiff)(native, id, EMPTY_STYLE, style);
+            const instance = { type, id, style };
             return instance;
         },
         insertChild(parent, child, index) {
@@ -2201,7 +2218,11 @@ function createLvglHost(native, clicks) {
             native.insert(asDevice(parent).id, asDevice(child).id, index);
         },
         updateInstance(instance, type, previousProps, nextProps) {
-            const id = asDevice(instance).id;
+            const device = asDevice(instance);
+            const id = device.id;
+            const nextStyle = (0, style_js_1.normalizeStyle)(nextProps.style);
+            (0, style_js_1.applyStyleDiff)(native, id, device.style, nextStyle);
+            device.style = nextStyle;
             if (type === "Text") {
                 const next = textOf(nextProps);
                 if (next !== textOf(previousProps))
@@ -2311,6 +2332,244 @@ function createNativeMotionSensor(native, timers, periodMs = DEFAULT_PERIOD_MS) 
             return () => timers.clearInterval(handle);
         },
     };
+}
+
+});
+__tsxDefine("@tsx-lvgl/device/style.js", function (require, module, exports) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.NATIVE_STYLE_PROP = void 0;
+exports.normalizeStyle = normalizeStyle;
+exports.applyStyleDiff = applyStyleDiff;
+exports.NATIVE_STYLE_PROP = Object.freeze({
+    backgroundColor: 0,
+    borderColor: 1,
+    borderWidth: 2,
+    borderRadius: 3,
+    paddingTop: 4,
+    paddingRight: 5,
+    paddingBottom: 6,
+    paddingLeft: 7,
+    color: 8,
+    textAlign: 9,
+    width: 10,
+    height: 11,
+    left: 12,
+    top: 13,
+    display: 14,
+    flexDirection: 15,
+    justifyContent: 16,
+    alignItems: 17,
+    gap: 18,
+    flexGrow: 19,
+    opacity: 20,
+    rotate: 21,
+    scale: 22,
+});
+const NAMED_COLORS = Object.freeze({
+    red: 0xff0000,
+    green: 0x008000,
+    blue: 0x0000ff,
+    black: 0x000000,
+    white: 0xffffff,
+    gray: 0x808080,
+    yellow: 0xffff00,
+    cyan: 0x00ffff,
+    magenta: 0xff00ff,
+});
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+function normalizeColor(value) {
+    if (typeof value !== "string" || value === "transparent")
+        return undefined;
+    const named = NAMED_COLORS[value];
+    if (named !== undefined)
+        return named;
+    if (!HEX_COLOR_RE.test(value))
+        return undefined;
+    return parseInt(value.slice(1), 16);
+}
+function normalizeNonNegativeInt(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    const rounded = Math.round(value);
+    return rounded < 0 ? undefined : rounded;
+}
+function normalizeTextAlign(value) {
+    if (value === "left")
+        return 0;
+    if (value === "center")
+        return 1;
+    if (value === "right")
+        return 2;
+    return undefined;
+}
+function normalizeDimension(value) {
+    if (typeof value === "number") {
+        if (!Number.isFinite(value) || value < 0)
+            return undefined;
+        return Math.round(value);
+    }
+    if (typeof value !== "string")
+        return undefined;
+    if (value === "auto")
+        return -2000;
+    if (!value.endsWith("%"))
+        return undefined;
+    const percent = Number.parseFloat(value.slice(0, -1));
+    if (!Number.isFinite(percent))
+        return undefined;
+    const clamped = Math.min(1000, Math.max(0, Math.round(percent)));
+    return -(clamped + 1);
+}
+function normalizeTranslate(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    return Math.round(value);
+}
+function normalizeDisplay(value) {
+    if (value === "none")
+        return 1;
+    if (value === "flex")
+        return 0;
+    return undefined;
+}
+function setProp(prop, normalize) {
+    return (value, out) => {
+        const normalized = normalize(value);
+        if (normalized !== undefined)
+            out.set(prop, normalized);
+    };
+}
+function paddingSides(...props) {
+    return (value, out) => {
+        const int = normalizeNonNegativeInt(value);
+        if (int === undefined)
+            return;
+        for (const prop of props)
+            out.set(prop, int);
+    };
+}
+function positionProp() { }
+const FLEX_DIRECTION_VALUES = Object.freeze({
+    row: 0,
+    column: 1,
+    "row-reverse": 2,
+    "column-reverse": 3,
+});
+const JUSTIFY_CONTENT_VALUES = Object.freeze({
+    "flex-start": 0,
+    "flex-end": 1,
+    center: 2,
+    "space-between": 3,
+    "space-around": 4,
+    "space-evenly": 5,
+});
+const ALIGN_ITEMS_VALUES = Object.freeze({
+    "flex-start": 0,
+    "flex-end": 1,
+    center: 2,
+});
+function enumOf(values) {
+    return (value) => (typeof value === "string" ? values[value] : undefined);
+}
+function normalizeFlexGrow(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    const rounded = Math.round(value);
+    return rounded < 0 ? undefined : Math.min(255, rounded);
+}
+function normalizeOpacity(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return undefined;
+    const clamped = Math.min(1, Math.max(0, value));
+    return Math.round(clamped * 255);
+}
+const ROTATE_DEG_RE = /^(-?\d+(?:\.\d+)?)deg$/;
+function normalizeRotate(value) {
+    let degrees;
+    if (typeof value === "number") {
+        degrees = value;
+    }
+    else if (typeof value === "string") {
+        const match = ROTATE_DEG_RE.exec(value);
+        const captured = match?.[1];
+        if (captured === undefined)
+            return undefined;
+        degrees = Number.parseFloat(captured);
+    }
+    else {
+        return undefined;
+    }
+    return Number.isFinite(degrees) ? Math.round(degrees * 10) : undefined;
+}
+function normalizeScale(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+        return undefined;
+    return Math.round(value * 256);
+}
+const P = exports.NATIVE_STYLE_PROP;
+const STYLE_NORMALIZERS = Object.freeze({
+    padding: paddingSides(P.paddingTop, P.paddingRight, P.paddingBottom, P.paddingLeft),
+    paddingHorizontal: paddingSides(P.paddingRight, P.paddingLeft),
+    paddingVertical: paddingSides(P.paddingTop, P.paddingBottom),
+    paddingTop: setProp(P.paddingTop, normalizeNonNegativeInt),
+    paddingRight: setProp(P.paddingRight, normalizeNonNegativeInt),
+    paddingBottom: setProp(P.paddingBottom, normalizeNonNegativeInt),
+    paddingLeft: setProp(P.paddingLeft, normalizeNonNegativeInt),
+    backgroundColor: setProp(P.backgroundColor, normalizeColor),
+    borderColor: setProp(P.borderColor, normalizeColor),
+    borderWidth: setProp(P.borderWidth, normalizeNonNegativeInt),
+    borderRadius: setProp(P.borderRadius, normalizeNonNegativeInt),
+    color: setProp(P.color, normalizeColor),
+    textAlign: setProp(P.textAlign, normalizeTextAlign),
+    width: setProp(P.width, normalizeDimension),
+    height: setProp(P.height, normalizeDimension),
+    position: positionProp,
+    left: setProp(P.left, normalizeTranslate),
+    top: setProp(P.top, normalizeTranslate),
+    display: setProp(P.display, normalizeDisplay),
+    flexDirection: setProp(P.flexDirection, enumOf(FLEX_DIRECTION_VALUES)),
+    justifyContent: setProp(P.justifyContent, enumOf(JUSTIFY_CONTENT_VALUES)),
+    alignItems: setProp(P.alignItems, enumOf(ALIGN_ITEMS_VALUES)),
+    gap: setProp(P.gap, normalizeNonNegativeInt),
+    flex: setProp(P.flexGrow, normalizeFlexGrow),
+    flexGrow: setProp(P.flexGrow, normalizeFlexGrow),
+    opacity: setProp(P.opacity, normalizeOpacity),
+    rotate: setProp(P.rotate, normalizeRotate),
+    scale: setProp(P.scale, normalizeScale),
+});
+const STYLE_KEY_ORDER = Object.keys(STYLE_NORMALIZERS);
+function mergeStyle(style) {
+    if (Array.isArray(style)) {
+        const merged = {};
+        for (const entry of style) {
+            if (!entry)
+                continue;
+            Object.assign(merged, entry);
+        }
+        return merged;
+    }
+    return (style ?? {});
+}
+function normalizeStyle(style) {
+    const merged = mergeStyle(style);
+    const out = new Map();
+    for (const key of STYLE_KEY_ORDER)
+        STYLE_NORMALIZERS[key](merged[key], out);
+    if (!out.has(P.flexDirection) && (out.has(P.justifyContent) || out.has(P.alignItems) || out.has(P.gap))) {
+        out.set(P.flexDirection, 1);
+    }
+    return out;
+}
+function applyStyleDiff(native, id, previous, next) {
+    for (const [prop, value] of next) {
+        if (previous.get(prop) !== value)
+            native.setStyle(id, prop, value);
+    }
+    for (const prop of previous.keys()) {
+        if (!next.has(prop))
+            native.resetStyle(id, prop);
+    }
 }
 
 });

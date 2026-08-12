@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
+
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
 const transportHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.h", import.meta.url), "utf8");
@@ -14,6 +16,16 @@ const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import
 const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
+const lvglHostHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.h", import.meta.url), "utf8");
+
+/** SCREAMING_SNAKE_CASE -> camelCase, e.g. "BACKGROUND_COLOR" -> "backgroundColor". */
+function toCamelCase(screamingSnakeCase) {
+  return screamingSnakeCase
+    .toLowerCase()
+    .split("_")
+    .map((part, index) => (index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join("");
+}
 
 function createReservationFence(slotCount = 4) {
   let nextReservation = 0;
@@ -260,4 +272,19 @@ test("Wi-Fi dequeued-before-cancel race consumes a marked reservation before sid
   const consume = component.match(/static bool take_command_slot[\s\S]*?\n}\n\nstatic void mark_cancelled_command/);
   assert.ok(consume, "reservation consumer must remain present");
   assert.ok(consume[0].indexOf("!wifi->command_slots[command->slot_index].cancelled") < consume[0].indexOf("release_command_slot"));
+});
+
+test("runtime probe registers setStyle/resetStyle bindings and rejects unknown style prop codes", () => {
+  assert.match(source, /JS_SetPropertyStr\(context, lvgl, "setStyle", JS_NewCFunction\(context, js_native_lvgl_set_style, "setStyle", 3\)\)/);
+  assert.match(source, /JS_SetPropertyStr\(context, lvgl, "resetStyle",\s*\n\s*JS_NewCFunction\(context, js_native_lvgl_reset_style, "resetStyle", 2\)\)/);
+  assert.match(source, /prop < 0 \|\| prop >= LVGL_HOST_STYLE_PROP_COUNT\) return JS_ThrowTypeError\(context, "lvgl\.setStyle: unknown style prop"\)/);
+  assert.match(source, /prop < 0 \|\| prop >= LVGL_HOST_STYLE_PROP_COUNT\) return JS_ThrowTypeError\(context, "lvgl\.resetStyle: unknown style prop"\)/);
+});
+
+test("C-parity gate: lvgl_host_style_prop_t codes exactly match NATIVE_STYLE_PROP", () => {
+  const matches = [...lvglHostHeader.matchAll(/LVGL_HOST_STYLE_(\w+) = (\d+)/g)];
+  assert.ok(matches.length > 0, "expected at least one style prop code in lvgl_host.h");
+  const fromHeader = {};
+  for (const [, name, value] of matches) fromHeader[toCamelCase(name)] = Number(value);
+  assert.deepEqual(fromHeader, NATIVE_STYLE_PROP);
 });

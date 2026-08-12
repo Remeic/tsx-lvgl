@@ -12,12 +12,70 @@ export const elementTypes = ["Screen", "View", "Text", "Button"] as const;
 
 export type ElementType = (typeof elementTypes)[number];
 
+/** S1 box style keys. Named colors resolve to fixed RGB ints; `transparent` means "absent". */
+export type StyleColor = `#${string}` | "red" | "green" | "blue" | "black" | "white" | "gray" | "yellow" | "cyan" | "magenta" | "transparent";
+
+/** S2 size key: px, a `"N%"` percent string, or `"auto"` (content-sized). */
+export type StyleDim = number | `${number}%` | "auto";
+
+export interface ViewStyle {
+  readonly backgroundColor?: StyleColor;
+  readonly borderColor?: StyleColor;
+  readonly borderWidth?: number;
+  readonly borderRadius?: number;
+  readonly padding?: number;
+  readonly paddingTop?: number;
+  readonly paddingRight?: number;
+  readonly paddingBottom?: number;
+  readonly paddingLeft?: number;
+  readonly paddingHorizontal?: number;
+  readonly paddingVertical?: number;
+  readonly width?: StyleDim;
+  readonly height?: StyleDim;
+  /** v1: absolute and relative are equivalent, no native effect. */
+  readonly position?: "absolute" | "relative";
+  /** px, may be negative; LVGL translate so it composes with future flex parents. */
+  readonly left?: number;
+  /** px, may be negative; LVGL translate so it composes with future flex parents. */
+  readonly top?: number;
+  /** "none" hides without unmounting. */
+  readonly display?: "flex" | "none";
+  /** Setting justifyContent/alignItems/gap alone implies "column" (RN default). */
+  readonly flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
+  readonly justifyContent?: "flex-start" | "flex-end" | "center" | "space-between" | "space-around" | "space-evenly";
+  /** No "stretch": LVGL flex has none; idiom is child height "100%". */
+  readonly alignItems?: "flex-start" | "flex-end" | "center";
+  /** px, row and column gap. */
+  readonly gap?: number;
+  /** 0..255 (LVGL uint8). Explicit flexGrow wins over flex. */
+  readonly flexGrow?: number;
+  /** RN shorthand, alias of flexGrow. */
+  readonly flex?: number;
+  /** 0..1, clamped; plain LVGL opa (per-draw-op), not CSS group opacity. */
+  readonly opacity?: number;
+  /** Degrees clockwise, center pivot. */
+  readonly rotate?: number | `${number}deg`;
+  /** 1 = 100%, center pivot. */
+  readonly scale?: number;
+}
+
+export interface TextStyle extends ViewStyle {
+  readonly color?: StyleColor;
+  readonly textAlign?: "left" | "center" | "right";
+}
+
+/** A screen has no parent to size/position/hide itself against; S2 size/position/display keys don't apply. */
+export type ScreenStyle = Omit<ViewStyle, "position" | "left" | "top" | "width" | "height" | "display">;
+
+/** RN-style style prop: a single style object, or an array where later entries win and falsy entries are skipped. */
+export type StyleProp<T> = T | ReadonlyArray<T | false | null | undefined>;
+
 /** `extends Record<ElementType, object>` fails the build if a tag has no props. */
 export interface WidgetProps extends Record<ElementType, object> {
-  readonly Screen: { readonly children?: VNodeChild };
-  readonly View: { readonly children?: VNodeChild };
-  readonly Text: { readonly text: string | number };
-  readonly Button: { readonly label: string; readonly onClick?: () => void };
+  readonly Screen: { readonly children?: VNodeChild; readonly style?: StyleProp<ScreenStyle> };
+  readonly View: { readonly children?: VNodeChild; readonly style?: StyleProp<ViewStyle> };
+  readonly Text: { readonly text: string | number; readonly style?: StyleProp<TextStyle> };
+  readonly Button: { readonly label: string; readonly onClick?: () => void; readonly style?: StyleProp<TextStyle> };
 }
 
 /**
@@ -30,11 +88,20 @@ export const View = "View";
 export const Text = "Text";
 export const Button = "Button";
 
+/** Freezes each style object and the sheet itself; mirrors React Native's `StyleSheet.create`. */
+export const StyleSheet = Object.freeze({
+  create<T extends Record<string, TextStyle>>(styles: T): Readonly<T> {
+    for (const key of Object.keys(styles)) Object.freeze(styles[key]);
+    return Object.freeze(styles);
+  },
+});
+
 /** One descriptor keeps the SDK facade and device module resolver in lockstep. */
 export const APPLICATION_FACADE_KEYS = [
   "Button",
   "Fragment",
   "Screen",
+  "StyleSheet",
   "Text",
   "View",
   "isShake",
