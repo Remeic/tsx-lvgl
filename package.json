@@ -17,6 +17,7 @@
     "typecheck": "tsc -b --pretty false",
     "pack:sdk": "node scripts/pack-sdk.mjs",
     "board:build": "node scripts/board-build.mjs",
+    "board:install": "node scripts/board-install.mjs",
     "board:reload": "tools/board-reload",
     "test": "npm run coverage",
     "test:prepare": "node scripts/prepare-test-output.mjs && npm run build",

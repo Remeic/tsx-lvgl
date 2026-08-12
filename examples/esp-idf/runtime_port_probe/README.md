@@ -1,10 +1,10 @@
 # TSX-LVGL runtime probe
 
 Dev runtime host for the ESP32-S3 V1 board: the compiled `core + sensors +
-runtime + device` packages ("kernel") plus the minimal Counter verification app baked in as
+runtime + device` packages ("kernel") plus the selected example app baked in as
 bundle generation 1, both embedded at build time. On boot the probe evaluates
-the kernel, mounts Counter, and then accepts hot-reloaded app bundles over a
-dev-only USB Serial/JTAG transport — no reflash required to try a new app
+the kernel, mounts the embedded app, and then accepts hot-reloaded app bundles
+over a dev-only USB Serial/JTAG transport — no reflash required to try a new app
 bundle. It is not a product path or release artifact; this committed source
 and build harness proves the runtime-first architecture on the physical
 target, while board captures remain transient evidence. See
@@ -12,30 +12,28 @@ target, while board captures remain transient evidence. See
 for the normative contracts (native ABI, bundle format, transport wire
 protocol).
 
-`Counter` (`examples/apps/counter.tsx`) is the embedded verification fixture.
-The historical ShakeFace artifacts remain only for the existing host regression
-test; they are not embedded by this firmware.
+`Pomodoro` (`examples/apps/pomodoro.tsx`) is the default embedded app. The
+historical Counter and ShakeFace artifacts remain available for host regression
+tests; they are not embedded by this firmware.
 
-## Regenerate the embedded bundles
+## Regenerate the embedded app
 
-From the repository root, after any change to `examples/apps/counter.tsx` or
+From the repository root, after any change to `examples/apps/pomodoro.tsx` or
 the `core`/`sensors`/`runtime`/`device` packages:
 
 ```bash
-node scripts/bundle-app.mjs --entry examples/apps/counter.tsx \
-  --out examples/esp-idf/runtime_port_probe/main \
-  --bundle-id counter --generation 1
+node scripts/embed-runtime-app.mjs --app pomodoro
 node scripts/build-kernel.mjs
 ```
 
-This writes `main/counter.g1.js`, `main/counter.g1.manifest.json` and
-`main/kernel.js` (all three `EMBED_TXTFILES` in `main/CMakeLists.txt`, so a
-kernel/app change needs a firmware rebuild — only later hot-reloaded bundles
-skip that).
+This writes `main/app.g1.js`, `main/app.g1.manifest.json` and `main/kernel.js`
+(all three `EMBED_TXTFILES` in `main/CMakeLists.txt`, so a kernel/app change
+needs a firmware rebuild — only later hot-reloaded bundles skip that). For the
+complete build/install flow use `npm run board:install -- --app pomodoro`.
 
 The embedded kernel budget is 128 KiB (131,072 bytes), enforced by
-`scripts/build-kernel.mjs`. The current generated kernel is 100,782 bytes,
-leaving 30,290 bytes of headroom; this slice does not import dormant capability
+`scripts/build-kernel.mjs`. The current generated kernel is 113,070 bytes,
+leaving 18,002 bytes of headroom; this slice does not import dormant capability
 surfaces to grow that budget.
 
 ## Build without flashing
@@ -75,7 +73,7 @@ PROBE checkpoint=lvgl_binding status=pass
 PROBE checkpoint=bundle_transport_start status=pass
 PROBE checkpoint=timer_callback status=pass
 PROBE checkpoint=kernel_start status=pass
-PROBE checkpoint=app_mount status=pass
+PROBE checkpoint=app_mount status=pass        # bundle=embedded generation=1
 PROBE checkpoint=imu_init status=pass           # unavailable is fail-soft
 PROBE checkpoint=sensor_read status=pass        # unavailable is fail-soft
 ```
@@ -88,10 +86,9 @@ PROBE checkpoint=bundle_reload status=pass
 PROBE checkpoint=bundle_reject status=pass
 ```
 
-Press the Counter button and verify that its count increments. Move the board
-and verify visually that the motion label changes between `motion=STILL` and
-`motion=SHAKE`. A missing QMI8658 reading is reported as `unavailable` and
-must not tear down the display or app.
+Verify the Pomodoro clock and the red/green phase rendering visually. Shake the
+board and verify that the active phase restarts. A missing QMI8658 reading is
+reported as `unavailable` and must not tear down the display or app.
 
 ## Pushing a hot-reloaded bundle (dev only)
 

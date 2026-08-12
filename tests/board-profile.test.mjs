@@ -13,6 +13,8 @@ test("runtime-probe profile selects the one build project and guarded artifact",
   assert.equal(profile.name, "runtime-probe");
   assert.equal(existsSync(profile.projectDirectory), true);
   assert.match(profile.artifact, /runtime_port_probe\/build\/tsx_lvgl_runtime_port_probe\.bin$/);
+  assert.match(profile.embeddedAppCodePath, /runtime_port_probe\/main\/app\.g1\.js$/);
+  assert.match(profile.embeddedAppManifestPath, /runtime_port_probe\/main\/app\.g1\.manifest\.json$/);
   assert.equal(Object.isFrozen(profile), true);
 });
 

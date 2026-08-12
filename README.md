@@ -43,10 +43,11 @@ export default function Counter(): VNode {
 
 <!-- TODO: board capture GIF of the live-reload loop goes here -->
 
-This loop is not aspirational: the Counter golden loop — build on the host,
-push over USB Serial/JTAG, watch the app swap live, drive it with touch and
-shake — is closed on the physical Waveshare ESP32-S3-Touch-AMOLED-1.8 V1
-(SH8601 display, FT3168 touch, QMI8658 IMU).
+This loop is not aspirational: the runtime-probe golden loop — build on the
+host, push over USB Serial/JTAG, watch the app swap live, drive it with touch
+and shake — is closed on the physical Waveshare ESP32-S3-Touch-AMOLED-1.8 V1
+(SH8601 display, FT3168 touch, QMI8658 IMU). The persistent board example is
+Pomodoro; Counter remains a compact host and hot-reload fixture.
 
 ## Why TSX-LVGL?
 

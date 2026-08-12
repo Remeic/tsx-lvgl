@@ -295,11 +295,11 @@ async function appendLog(logPath, text) {
 async function createOperationLog(options, plan, info, context) {
   const timestamp = new Date().toISOString().replaceAll(/[-:.]/g, "");
   const nonce = randomBytes(3).toString("hex");
-  const logPath = join(context.recoveryDir, `operation-hot-reload-${timestamp}-${nonce}.md`);
+  const logPath = join(context.recoveryDir, `operation-app-install-${timestamp}-${nonce}.md`);
   const gitRevision = (await spawnCapture(["git", "rev-parse", "HEAD"])).output.trim() || "unknown";
   const gitStatus = (await spawnCapture(["git", "status", "--short"])).output.trim() || "clean";
   const handle = await open(logPath, "wx", 0o600);
-  await handle.writeFile(`# TSX-LVGL V1 app-only hot reload\n\n` +
+  await handle.writeFile(`# TSX-LVGL V1 app-only firmware install\n\n` +
     `- Status: START — no hardware command has run yet\n` +
     `- Created: ${new Date().toISOString()}\n` +
     `- Repository: ${repoRoot}\n` +

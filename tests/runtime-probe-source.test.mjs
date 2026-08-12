@@ -13,6 +13,7 @@ const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/c
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
+const embedRuntimeApp = readFileSync(new URL("../scripts/embed-runtime-app.mjs", import.meta.url), "utf8");
 const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
@@ -65,6 +66,13 @@ test("runtime probe trims the ESP-IDF embedded kernel terminator before QuickJS 
   assert.match(source, /if \(kernel_length > 0U && _binary_kernel_js_start\[kernel_length - 1U\] == '\\0'\) kernel_length--;/);
   assert.match(kernelBuilder, /const KERNEL_BUDGET_BYTES = 128 \* 1024;/);
   assert.match(kernelBuilder, /finalBytes > KERNEL_BUDGET_BYTES/);
+});
+
+test("runtime probe uses stable embedded-app filenames so the app can change without C edits", () => {
+  assert.match(mainCmake, /EMBED_TXTFILES "kernel\.js" "app\.g1\.js" "app\.g1\.manifest\.json"/);
+  assert.match(source, /_binary_app_g1_js_start/);
+  assert.match(source, /_binary_app_g1_manifest_json_start/);
+  assert.match(embedRuntimeApp, /always use the stable app\.g1\.\* names/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {

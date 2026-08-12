@@ -19,6 +19,8 @@ import { makeFakeNative } from "./support/fake-native.js";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const counterPath = join(repoRoot, "examples/apps/counter.tsx");
 const counterSource = readFileSync(counterPath, "utf8");
+const pomodoroPath = join(repoRoot, "examples/apps/pomodoro.tsx");
+const pomodoroSource = readFileSync(pomodoroPath, "utf8");
 const calmMotion = { accelerationMps2: [0, 0, 9.80665] as const, angularVelocityDps: [0, 0, 0] as const };
 const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
 
@@ -27,6 +29,17 @@ function compileCounter(source: string, generation: number): BundleOutput {
     fileName: "counter.tsx",
     source,
     bundleId: "counter",
+    boardId: BOARD_ID,
+    generation,
+    jsxImportSource: "@tsx-lvgl/sdk",
+  });
+}
+
+function compilePomodoro(source: string, generation: number): BundleOutput {
+  return compileTsxBundle({
+    fileName: "pomodoro.tsx",
+    source,
+    bundleId: "pomodoro",
     boardId: BOARD_ID,
     generation,
     jsxImportSource: "@tsx-lvgl/sdk",
@@ -173,9 +186,9 @@ test("the device-backed TSXB fixture commits valid input and rejects malformed/e
   assert.deepEqual(fake.lvgl.liveTexts(), previousTexts);
 });
 
-test("the embedded Counter bundle is generated from the canonical SDK entry", () => {
-  const generated = compileCounter(counterSource, 1);
+test("the embedded Pomodoro bundle is generated from the canonical SDK entry", () => {
+  const generated = compilePomodoro(pomodoroSource, 1);
   const embeddedDirectory = join(repoRoot, "examples/esp-idf/runtime_port_probe/main");
-  assert.equal(readFileSync(join(embeddedDirectory, "counter.g1.js"), "utf8"), generated.code);
-  assert.deepEqual(JSON.parse(readFileSync(join(embeddedDirectory, "counter.g1.manifest.json"), "utf8")), generated.manifest);
+  assert.equal(readFileSync(join(embeddedDirectory, "app.g1.js"), "utf8"), generated.code);
+  assert.deepEqual(JSON.parse(readFileSync(join(embeddedDirectory, "app.g1.manifest.json"), "utf8")), generated.manifest);
 });

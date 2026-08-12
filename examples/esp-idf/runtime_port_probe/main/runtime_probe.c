@@ -122,8 +122,8 @@ static JSValue new_wifi_board_event(JSContext *context, int32_t handle, uint32_t
 
 extern const uint8_t _binary_kernel_js_start[] asm("_binary_kernel_js_start");
 extern const uint8_t _binary_kernel_js_end[] asm("_binary_kernel_js_end");
-extern const uint8_t _binary_counter_g1_js_start[] asm("_binary_counter_g1_js_start");
-extern const uint8_t _binary_counter_g1_manifest_json_start[] asm("_binary_counter_g1_manifest_json_start");
+extern const uint8_t _binary_app_g1_js_start[] asm("_binary_app_g1_js_start");
+extern const uint8_t _binary_app_g1_manifest_json_start[] asm("_binary_app_g1_manifest_json_start");
 
 static void log_checkpoint(const char *checkpoint, const char *status, const char *detail)
 {
@@ -1024,7 +1024,7 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     return ESP_OK;
 }
 
-/* --- Boot: evaluate kernel.js, then mount the baked-in Counter bundle (generation 1) --- */
+/* --- Boot: evaluate kernel.js, then mount the stable embedded app bundle (generation 1) --- */
 
 esp_err_t runtime_probe_boot(runtime_probe_t *probe)
 {
@@ -1063,8 +1063,8 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     log_checkpoint("kernel_start", "pass", "boot_glue=present");
 
-    JSValue manifest_value = JS_NewString(context, (const char *)_binary_counter_g1_manifest_json_start);
-    JSValue source_value = JS_NewString(context, (const char *)_binary_counter_g1_js_start);
+    JSValue manifest_value = JS_NewString(context, (const char *)_binary_app_g1_manifest_json_start);
+    JSValue source_value = JS_NewString(context, (const char *)_binary_app_g1_js_start);
     JSValue argv[2] = {manifest_value, source_value};
     JSValue boot_result = JS_Call(context, boot_fn, JS_UNDEFINED, 2, argv);
     JS_FreeValue(context, manifest_value);
@@ -1078,7 +1078,7 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     JS_FreeValue(context, boot_result);
     process_pending_jobs(probe);
-    log_checkpoint("app_mount", "pass", "bundle=counter generation=1");
+    log_checkpoint("app_mount", "pass", "bundle=embedded generation=1");
 
     JSValue lastgen_result = JS_Call(context, probe->lastgen_fn, JS_UNDEFINED, 0, NULL);
     int32_t last_generation = 1;
