@@ -19,9 +19,9 @@ struct lvgl_host {
     lvgl_host_click_cb_t click_cb;
     void *click_user_data;
     /**
-     * Unloaded screen used as a real LVGL parent while a candidate tree is
-     * being assembled. LVGL treats objects created with a NULL parent as
-     * screens and refuses to reparent them later.
+     * Hidden off-screen staging parent: widgets are created here so they are
+     * never LVGL screens, then reparented by `insert`; never loaded, never
+     * occupies a handle.
      */
     lv_obj_t *staging_screen;
     /** Reusable blank screen for Runtime.unmount; never occupies a host handle. */
@@ -68,14 +68,18 @@ void lvgl_host_destroy(lvgl_host_t *host)
     if (host == NULL) return;
     if (s_active_host == host) s_active_host = NULL;
 
-    /* lv_obj_delete is recursive. Snapshot only tracked roots and invalidate
-     * the table before deleting anything, otherwise a later child entry would
-     * be a dangling pointer after its tracked parent had already deleted it. */
+    /* lv_obj_delete is recursive. Snapshot only tracked roots (true screens,
+     * i.e. objects with no LVGL parent) and invalidate the table before
+     * deleting anything, otherwise a later child entry would be a dangling
+     * pointer after its tracked parent had already deleted it. Widgets still
+     * sitting in staging also have parent_id == 0 but are LVGL children of
+     * staging_screen, not roots — collecting them here and then deleting
+     * staging_screen below would double free them. */
     lv_obj_t *roots[LVGL_HOST_MAX_HANDLES];
     uint32_t root_count = 0;
     for (uint32_t index = 0; index < LVGL_HOST_MAX_HANDLES; index++) {
         lvgl_host_entry_t *entry = &host->entries[index];
-        if (entry->used && entry->object != NULL && entry->parent_id == 0 && root_count < LVGL_HOST_MAX_HANDLES) {
+        if (entry->used && entry->object != NULL && lv_obj_get_parent(entry->object) == NULL && root_count < LVGL_HOST_MAX_HANDLES) {
             roots[root_count++] = entry->object;
         }
         entry->used = false;
@@ -119,9 +123,18 @@ static void invalidate_descendants(lvgl_host_t *host, int parent_id)
     }
 }
 
+/**
+ * Lazily creates the hidden staging screen and returns it. May return NULL
+ * on allocation failure; `lv_obj_create(NULL)` would otherwise create a
+ * screen, so callers must fail out for non-screen kinds before creating the
+ * widget when this returns NULL.
+ */
 static lv_obj_t *staging_parent(lvgl_host_t *host)
 {
-    if (host->staging_screen == NULL) host->staging_screen = lv_obj_create(NULL);
+    if (host->staging_screen == NULL) {
+        host->staging_screen = lv_obj_create(NULL);
+        if (host->staging_screen != NULL) lv_obj_add_flag(host->staging_screen, LV_OBJ_FLAG_HIDDEN);
+    }
     return host->staging_screen;
 }
 
@@ -130,7 +143,6 @@ static void configure_container(lv_obj_t *object)
     lv_obj_set_flex_flow(object, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(object, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 }
-
 int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
 {
     if (host == NULL) return 0;
@@ -138,33 +150,41 @@ int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
     if (slot < 0) return 0;
 
     /*
-     * The reconciler creates an object before the parent is known. Keep the
-     * root Screen as the only true LVGL screen; stage every other widget
-     * under a real, unloaded screen so the following `insert` can safely
-     * reparent it. A Button's inner label is a private LVGL child, never
-     * exposed as its own handle.
+     * A Screen is created parentless, which in LVGL 9 makes it a real
+     * screen; it's never reparented. Every other widget is created under
+     * the hidden `staging_screen` so it starts life as an ordinary object,
+     * then `insert` reparents it under its real parent, matching the
+     * reconciler's order of operations (createInstance happens before the
+     * parent is known; insertChild follows). A Button's inner label is a
+     * private LVGL child, never exposed as its own handle.
      */
     lv_obj_t *object = NULL;
     lv_obj_t *label = NULL;
-    lv_obj_t *staging = NULL;
     switch (kind) {
         case LVGL_HOST_WIDGET_SCREEN:
             object = lv_obj_create(NULL);
             break;
-        case LVGL_HOST_WIDGET_VIEW:
-            staging = staging_parent(host);
-            if (staging != NULL) object = lv_obj_create(staging);
-            break;
-        case LVGL_HOST_WIDGET_TEXT:
-            staging = staging_parent(host);
-            if (staging != NULL) {
-                object = lv_label_create(staging);
-                label = object;
+        case LVGL_HOST_WIDGET_VIEW: {
+            lv_obj_t *staging = staging_parent(host);
+            if (staging == NULL) return 0;
+            object = lv_obj_create(staging);
+            if (object != NULL) {
+                lv_obj_remove_style_all(object);
+                lv_obj_remove_flag(object, LV_OBJ_FLAG_SCROLLABLE);
             }
             break;
-        case LVGL_HOST_WIDGET_BUTTON:
-            staging = staging_parent(host);
-            if (staging != NULL) object = lv_button_create(staging);
+        }
+        case LVGL_HOST_WIDGET_TEXT: {
+            lv_obj_t *staging = staging_parent(host);
+            if (staging == NULL) return 0;
+            object = lv_label_create(staging);
+            label = object;
+            break;
+        }
+        case LVGL_HOST_WIDGET_BUTTON: {
+            lv_obj_t *staging = staging_parent(host);
+            if (staging == NULL) return 0;
+            object = lv_button_create(staging);
             if (object != NULL) label = lv_label_create(object);
             if (object == NULL || label == NULL) {
                 if (object != NULL) lv_obj_delete(object);
@@ -172,6 +192,7 @@ int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
             }
             lv_obj_center(label);
             break;
+        }
         default:
             return 0;
     }
