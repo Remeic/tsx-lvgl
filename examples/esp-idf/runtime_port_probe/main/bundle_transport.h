@@ -12,3 +12,5 @@
  * engine directly, and never writes to flash.
  */
 esp_err_t bundle_transport_start(runtime_probe_t *probe);
+/** Stops and joins the transport task before its probe or staging state is destroyed. */
+void bundle_transport_stop(void);

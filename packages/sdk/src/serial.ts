@@ -1,6 +1,7 @@
-import { createReadStream, createWriteStream } from "node:fs";
+import { closeSync, constants as fsConstants, createReadStream, createWriteStream, openSync, readSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
+import { Readable } from "node:stream";
 
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
 
@@ -23,11 +24,13 @@ export interface SerialRuntime {
 interface ClosableSerialResources {
   readonly lines: { close(): void };
   readonly input: { destroy(): void };
-  readonly output: { readonly destroyed: boolean; end(callback: (error?: Error | null) => void): void };
+  readonly output: { readonly destroyed: boolean; destroy(): void };
 }
 
 const POSIX_SERIAL_PORT = /^\/dev\/(?:cu|tty)\.[A-Za-z0-9._-]+$/;
 const WINDOWS_SERIAL_PORT = /^COM[1-9][0-9]*$/i;
+const SERIAL_READ_BUFFER_BYTES = 1024;
+const SERIAL_READ_POLL_MS = 20;
 
 /** Validates only a machine-local endpoint; it neither opens nor persists it. */
 export function validateSerialPort(port: string | undefined): string {
@@ -47,7 +50,7 @@ export function validateSerialPort(port: string | undefined): string {
 export const NODE_SERIAL_RUNTIME: SerialRuntime = {
   open(port: string): SerialLineChannel {
     configurePort(port);
-    const input = createReadStream(port);
+    const input = POSIX_SERIAL_PORT.test(port) ? openPosixSerialInput(port) : createReadStream(port);
     const output = createWriteStream(port);
     const lines = createInterface({ input, crlfDelay: Infinity });
     const lineListeners = new Set<(line: string) => void>();
@@ -87,33 +90,82 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
   },
 };
 
+/**
+ * macOS can block a path-based tty open before Node receives a stream handle.
+ * Open nonblocking and poll the descriptor so a closed device session cannot
+ * leave the CLI stuck in an uninterruptible read.
+ */
+function openPosixSerialInput(port: string): Readable {
+  const descriptor = openSync(port, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+  let polling = false;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+
+  return new Readable({
+    read() {
+      if (polling || closed) return;
+      polling = true;
+
+      const poll = () => {
+        if (closed || this.destroyed) {
+          polling = false;
+          return;
+        }
+
+        const buffer = Buffer.allocUnsafe(SERIAL_READ_BUFFER_BYTES);
+        let bytesRead = 0;
+        try {
+          bytesRead = readSync(descriptor, buffer, 0, buffer.byteLength, null);
+        } catch (error) {
+          const code = error instanceof Error && "code" in error ? error.code : undefined;
+          if (code !== "EAGAIN" && code !== "EWOULDBLOCK") {
+            polling = false;
+            this.destroy(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+        }
+
+        if (bytesRead > 0 && !this.push(buffer.subarray(0, bytesRead))) {
+          polling = false;
+          return;
+        }
+        pollTimer = setTimeout(poll, SERIAL_READ_POLL_MS);
+      };
+
+      poll();
+    },
+    destroy(error, callback) {
+      closed = true;
+      if (pollTimer !== undefined) clearTimeout(pollTimer);
+      let closeError: unknown;
+      try {
+        closeSync(descriptor);
+      } catch (closeFailure) {
+        closeError = closeFailure;
+      }
+      callback(error ?? (closeError instanceof Error ? closeError : undefined));
+    },
+  });
+}
+
 /** Closes the three Node resources as one observable async operation. */
 export function closeSerialResources({ lines, input, output }: ClosableSerialResources): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    let synchronousError: unknown;
-    try {
-      lines.close();
-    } catch (error) {
-      synchronousError = error;
-    }
-    try {
-      input.destroy();
-    } catch (error) {
-      synchronousError ??= error;
-    }
-    try {
-      if (output.destroyed) {
-        synchronousError === undefined ? resolve() : reject(synchronousError);
-      } else {
-        output.end((error) => {
-          const closeError = synchronousError ?? error;
-          closeError === undefined || closeError === null ? resolve() : reject(closeError);
-        });
-      }
-    } catch (error) {
-      reject(synchronousError ?? error);
-    }
-  });
+  try {
+    lines.close();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  try {
+    input.destroy();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  try {
+    if (!output.destroyed) output.destroy();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return Promise.resolve();
 }
 
 function configurePort(port: string): void {

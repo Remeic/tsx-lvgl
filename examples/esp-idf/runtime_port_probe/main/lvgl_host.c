@@ -18,6 +18,12 @@ struct lvgl_host {
     lvgl_host_entry_t entries[LVGL_HOST_MAX_HANDLES];
     lvgl_host_click_cb_t click_cb;
     void *click_user_data;
+    /**
+     * Unloaded screen used as a real LVGL parent while a candidate tree is
+     * being assembled. LVGL treats objects created with a NULL parent as
+     * screens and refuses to reparent them later.
+     */
+    lv_obj_t *staging_screen;
     /** Reusable blank screen for Runtime.unmount; never occupies a host handle. */
     lv_obj_t *blank_screen;
 };
@@ -83,6 +89,10 @@ void lvgl_host_destroy(lvgl_host_t *host)
         lv_obj_delete(host->blank_screen);
         host->blank_screen = NULL;
     }
+    if (host->staging_screen != NULL) {
+        lv_obj_delete(host->staging_screen);
+        host->staging_screen = NULL;
+    }
     free(host);
 }
 
@@ -109,6 +119,18 @@ static void invalidate_descendants(lvgl_host_t *host, int parent_id)
     }
 }
 
+static lv_obj_t *staging_parent(lvgl_host_t *host)
+{
+    if (host->staging_screen == NULL) host->staging_screen = lv_obj_create(NULL);
+    return host->staging_screen;
+}
+
+static void configure_container(lv_obj_t *object)
+{
+    lv_obj_set_flex_flow(object, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(object, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+}
+
 int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
 {
     if (host == NULL) return 0;
@@ -116,25 +138,33 @@ int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
     if (slot < 0) return 0;
 
     /*
-     * Every widget is created parentless (screen-like) and reparented by
-     * the next `insert` call, matching the reconciler's order of operations
-     * (createInstance happens before the parent is known; insertChild
-     * follows). A Button's inner label is a private LVGL child, never
+     * The reconciler creates an object before the parent is known. Keep the
+     * root Screen as the only true LVGL screen; stage every other widget
+     * under a real, unloaded screen so the following `insert` can safely
+     * reparent it. A Button's inner label is a private LVGL child, never
      * exposed as its own handle.
      */
     lv_obj_t *object = NULL;
     lv_obj_t *label = NULL;
+    lv_obj_t *staging = NULL;
     switch (kind) {
         case LVGL_HOST_WIDGET_SCREEN:
-        case LVGL_HOST_WIDGET_VIEW:
             object = lv_obj_create(NULL);
             break;
+        case LVGL_HOST_WIDGET_VIEW:
+            staging = staging_parent(host);
+            if (staging != NULL) object = lv_obj_create(staging);
+            break;
         case LVGL_HOST_WIDGET_TEXT:
-            object = lv_label_create(NULL);
-            label = object;
+            staging = staging_parent(host);
+            if (staging != NULL) {
+                object = lv_label_create(staging);
+                label = object;
+            }
             break;
         case LVGL_HOST_WIDGET_BUTTON:
-            object = lv_button_create(NULL);
+            staging = staging_parent(host);
+            if (staging != NULL) object = lv_button_create(staging);
             if (object != NULL) label = lv_label_create(object);
             if (object == NULL || label == NULL) {
                 if (object != NULL) lv_obj_delete(object);
@@ -146,6 +176,7 @@ int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
             return 0;
     }
     if (object == NULL) return 0;
+    if (kind == LVGL_HOST_WIDGET_SCREEN || kind == LVGL_HOST_WIDGET_VIEW) configure_container(object);
 
     lvgl_host_entry_t *entry = &host->entries[slot];
     entry->used = true;
@@ -216,12 +247,19 @@ void lvgl_host_load_screen(lvgl_host_t *host, int id)
 {
     if (id == 0) {
         if (host->blank_screen == NULL) host->blank_screen = lv_obj_create(NULL);
-        if (host->blank_screen != NULL) lv_screen_load(host->blank_screen);
+        if (host->blank_screen != NULL) {
+            lv_screen_load(host->blank_screen);
+            lv_refr_now(lv_display_get_default());
+        }
         return;
     }
     lvgl_host_entry_t *entry = entry_at(host, id);
     if (entry == NULL || entry->object == NULL) return;
     lv_screen_load(entry->object);
+    /* The LVGL timer task normally services this deferred screen load. The
+     * runtime swaps roots inside a single owner-task transaction, so force the
+     * first frame while the caller still owns the LVGL lock. */
+    lv_refr_now(lv_display_get_default());
     if (host->blank_screen != NULL) {
         lv_obj_delete(host->blank_screen);
         host->blank_screen = NULL;

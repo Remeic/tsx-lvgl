@@ -4,6 +4,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
@@ -23,6 +24,7 @@ static const char *TAG = "tsx_bundle_transport";
 #define READ_POLL_MS 50U
 #define INACTIVITY_TIMEOUT_MS 2000U
 #define RELOAD_TIMEOUT_MS 5000U
+#define BUNDLE_TRANSPORT_STACK_WORDS (8192U)
 /* (DATA_CHUNK_BASE64_LIMIT / 4) * 3, mirrors packages/bundler/src/transport.ts. */
 #define DATA_CHUNK_MAX_BYTES 288U
 
@@ -58,6 +60,9 @@ typedef struct {
 } transport_state_t;
 
 static transport_state_t s_state;
+static TaskHandle_t s_task;
+static SemaphoreHandle_t s_stopped;
+static volatile bool s_stopping;
 
 static void write_response(const char *line)
 {
@@ -87,10 +92,13 @@ static bool find_number_field(const char *json, const char *key, uint32_t *out)
 static bool find_string_field(const char *json, const char *key, char *out, size_t out_capacity)
 {
     char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
     const char *at = strstr(json, pattern);
     if (at == NULL) return false;
     at += strlen(pattern);
+    while (*at == ' ' || *at == '\t' || *at == '\r' || *at == '\n') at++;
+    if (*at != '"') return false;
+    at++;
     const char *end = strchr(at, '"');
     if (end == NULL) return false;
     const size_t length = (size_t)(end - at);
@@ -323,7 +331,8 @@ static void handle_line(transport_state_t *state, const char *line)
 
     /* Malformed TSXB-prefixed line: noise while idle, a protocol error mid-transfer. */
     if (state->session.active) {
-        ESP_LOGW(TAG, "PROBE transport frame_error tag=%.*s", (int)tag_length, rest);
+        /* The remainder can contain bundle bytes; keep payload out of UART logs. */
+        ESP_LOGW(TAG, "PROBE transport frame_error tag_length=%u", (unsigned)tag_length);
         reset_session(&state->session);
         write_response("TSXB ERR frame");
     }
@@ -334,7 +343,7 @@ static void bundle_transport_task(void *arg)
     transport_state_t *state = arg;
     uint8_t chunk[READ_CHUNK_BYTES];
 
-    while (true) {
+    while (!s_stopping) {
         const int read = usb_serial_jtag_read_bytes(chunk, sizeof(chunk), pdMS_TO_TICKS(READ_POLL_MS));
         for (int index = 0; index < read; index++) {
             const char character = (char)chunk[index];
@@ -362,21 +371,57 @@ static void bundle_transport_task(void *arg)
             }
         }
     }
+
+    if (s_stopped != NULL) xSemaphoreGive(s_stopped);
+    vTaskDelete(NULL);
 }
 
 esp_err_t bundle_transport_start(runtime_probe_t *probe)
 {
+    if (s_task != NULL) return ESP_ERR_INVALID_STATE;
     memset(&s_state, 0, sizeof(s_state));
     s_state.probe = probe;
+    s_stopping = false;
+    s_stopped = xSemaphoreCreateBinary();
+    if (s_stopped == NULL) return ESP_ERR_NO_MEM;
+
+    /* The ESP mbedtls SHA port creates its hardware-lock mutex lazily on
+     * first use, and that internal-RAM allocation aborts the chip on OOM
+     * (newlib lock_init_generic). Hash once now, while boot-time internal
+     * heap is guaranteed, so handle_end never triggers the lazy init. */
+    unsigned char warmup_digest[32];
+    mbedtls_sha256((const unsigned char *)"", 0U, warmup_digest, 0);
 
     usb_serial_jtag_driver_config_t usj_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usj_config.rx_buffer_size = 1024;
     const esp_err_t install_result = usb_serial_jtag_driver_install(&usj_config);
-    if (install_result != ESP_OK) return install_result;
+    if (install_result != ESP_OK) {
+        vSemaphoreDelete(s_stopped);
+        s_stopped = NULL;
+        return install_result;
+    }
 
-    if (xTaskCreate(bundle_transport_task, "bundle_transport", 8192, &s_state, 3, NULL) != pdPASS) {
+    if (xTaskCreate(bundle_transport_task, "bundle_transport", BUNDLE_TRANSPORT_STACK_WORDS, &s_state, 3, &s_task) != pdPASS) {
         (void)usb_serial_jtag_driver_uninstall();
+        vSemaphoreDelete(s_stopped);
+        s_stopped = NULL;
         return ESP_FAIL;
     }
     return ESP_OK;
+}
+
+void bundle_transport_stop(void)
+{
+    if (s_task == NULL) return;
+    s_stopping = true;
+    if (s_stopped != NULL) {
+        (void)xSemaphoreTake(s_stopped, portMAX_DELAY);
+        vSemaphoreDelete(s_stopped);
+        s_stopped = NULL;
+    }
+    (void)usb_serial_jtag_driver_uninstall();
+    reset_session(&s_state.session);
+    s_state.probe = NULL;
+    s_state.line_length = 0;
+    s_task = NULL;
 }

@@ -4,8 +4,8 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c_master.h"
 #include "bundle_transport.h"
+#include "display_startup.h"
 #include "runtime_probe.h"
 
 #include <stdint.h>
@@ -13,31 +13,11 @@
 static const char *TAG = "tsx_runtime_probe";
 static RTC_DATA_ATTR uint32_t probe_boot_count;
 
-#define FT3168_I2C_ADDRESS (0x38U)
-#define FT3168_PROBE_ATTEMPTS (10U)
-#define FT3168_PROBE_DELAY_MS (50U)
-
-static void wait_for_ft3168(void)
-{
-    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
-    if (bus == NULL) {
-        ESP_LOGW(TAG, "FT3168 readiness probe skipped: I2C bus unavailable");
-        return;
-    }
-
-    for (uint32_t attempt = 1; attempt <= FT3168_PROBE_ATTEMPTS; attempt++) {
-        const esp_err_t result = i2c_master_probe(bus, FT3168_I2C_ADDRESS, 100);
-        if (result == ESP_OK) {
-            ESP_LOGI(TAG, "FT3168 readiness pass attempts=%u", (unsigned)attempt);
-            return;
-        }
-        if (attempt < FT3168_PROBE_ATTEMPTS) {
-            vTaskDelay(pdMS_TO_TICKS(FT3168_PROBE_DELAY_MS));
-        }
-    }
-
-    ESP_LOGW(TAG, "FT3168 readiness probe exhausted attempts=%u", FT3168_PROBE_ATTEMPTS);
-}
+/* QuickJS mount and the owner pump share one bounded task. The board cannot
+ * reliably reserve a second native owner stack after the runtime and
+ * providers are live; keeping one owner also preserves the single LVGL lock
+ * boundary. */
+#define RUNTIME_PROBE_BOOT_STACK_WORDS (12288U)
 
 static void runtime_probe_boot_task(void *arg)
 {
@@ -52,24 +32,22 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
-    /* I2C discovery/configuration precedes all QuickJS/kernel reads and never
-     * runs under the LVGL lock. A failed provider is a failed boot, not a
-     * silently degraded app that cannot be retried safely. */
-    if (runtime_probe_start_sensors(probe) != ESP_OK) {
-        ESP_LOGE(TAG, "PROBE checkpoint=imu_init status=fail");
-        runtime_probe_destroy(probe);
-        vTaskDelete(NULL);
-        return;
-    }
+    /* Reserve the bounded transport worker while the runtime still owns the
+     * most available task memory. Optional providers are started afterwards;
+     * they must not be able to starve the device-backed development path. */
+    const esp_err_t transport_result = bundle_transport_start(probe);
+    ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
+             transport_result == ESP_OK ? "pass" : "fail");
 
-    /* Wi-Fi owns a separate bounded native worker, but publishes only through
-     * the existing board owner queue. It must be ready before app evaluation. */
-    if (runtime_probe_start_connectivity(probe) != ESP_OK) {
-        ESP_LOGE(TAG, "PROBE checkpoint=wifi_init status=fail");
-        runtime_probe_destroy(probe);
-        vTaskDelete(NULL);
-        return;
-    }
+    /* Providers are optional. They report unavailable state to the existing
+     * runtime while the display and app remain alive. */
+    const esp_err_t sensors_result = runtime_probe_start_sensors(probe);
+    if (sensors_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=imu_init status=unavailable");
+
+    /* Wi-Fi owns a separate bounded native worker, but remains optional for
+     * this local display slice and never tears down the mounted UI. */
+    const esp_err_t connectivity_result = runtime_probe_start_connectivity(probe);
+    if (connectivity_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=wifi_init status=unavailable");
 
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
@@ -86,18 +64,10 @@ static void runtime_probe_boot_task(void *arg)
         return;
     }
 
-    if (xTaskCreate(runtime_probe_task, "runtime_probe", 8192, probe, 4, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "PROBE checkpoint=runtime_task status=fail");
-        runtime_probe_destroy(probe);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    const esp_err_t transport_result = bundle_transport_start(probe);
-    ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
-             transport_result == ESP_OK ? "pass" : "fail");
-
-    vTaskDelete(NULL);
+    /* Keep one owner for all QuickJS/LVGL calls. runtime_probe_task deletes
+     * the current task when the probe is stopped, so no second stack is
+     * allocated after QuickJS and the providers are live. */
+    runtime_probe_task(probe);
 }
 
 void app_main(void)
@@ -109,17 +79,14 @@ void app_main(void)
              (unsigned)probe_boot_count);
     ESP_LOGI(TAG, "Target: ESP32-S3 / SH8601 / FT3168 / QMI8658 / LVGL 9.5");
 
-    wait_for_ft3168();
-    lv_display_t *display = bsp_display_start();
-    if (display == NULL) {
+    if (waveshare_v1_display_start() != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail");
         return;
     }
 
-    ESP_ERROR_CHECK(bsp_display_brightness_set(85));
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");
 
-    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", 12288, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", RUNTIME_PROBE_BOOT_STACK_WORDS, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "PROBE checkpoint=boot_task status=fail");
         return;
     }

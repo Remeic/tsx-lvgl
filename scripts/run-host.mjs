@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
-import { createKernel } from "@tsx-lvgl/device";
+import { MemoryBoardAdapter, createDefaultBoardDescriptors, createKernel, encodeBoardPayload } from "@tsx-lvgl/device";
 
 const STEP_PERIOD_MS = 80;
 const STEP_COUNT = 5;
@@ -79,6 +79,7 @@ function createConsoleNative() {
   const nodes = new Map();
   let nextId = 1;
   let loadedScreen = 0;
+  const clickableIds = new Set();
 
   const lvgl = {
     create(kind) {
@@ -97,8 +98,9 @@ function createConsoleNative() {
     setText(id, text) {
       nodes.get(id).text = text;
     },
-    setClickable() {
-      // Not rendered in the ASCII tree; no state needed for this demo.
+    setClickable(id, clickable) {
+      if (clickable) clickableIds.add(id);
+      else clickableIds.delete(id);
     },
     remove(parent, child) {
       const parentNode = nodes.get(parent);
@@ -157,12 +159,15 @@ function createConsoleNative() {
     },
   };
 
+  const board = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
+
   let clickDispatch;
   const native = {
     boardId: BOARD_ID,
     lvgl,
     timers: timerNative,
     sensors,
+    board,
     onClick(dispatch) {
       clickDispatch = dispatch;
     },
@@ -175,8 +180,33 @@ function createConsoleNative() {
     native,
     timers: timerNative,
     sensors,
+    board,
     dispatchClick(id) {
       clickDispatch?.(id);
+    },
+    firstButtonId() {
+      return [...clickableIds].find((id) => nodes.get(id)?.kind === "button");
+    },
+    emitMotion(reading) {
+      const request = board.submitted.at(-1);
+      if (request === undefined) throw new Error("motion observation was not started");
+      const status = reading.status === "ok" ? "ok" : reading.status;
+      board.emit({
+        version: 1,
+        kind: "state",
+        handle: board.submitted.length,
+        reloadEpoch: request.reloadEpoch,
+        sequence: Math.max(1, Math.round(reading.sampledAtMs) + 1),
+        observedAtMs: reading.sampledAtMs,
+        payload: encodeBoardPayload({
+          status,
+          schemaVersion: 1,
+          ...(reading.value === undefined ? {} : { value: reading.value }),
+          ...(status === "ok" || status === "stale"
+            ? {}
+            : { issue: { code: "not-ready", retry: "automatic", diagnosticId: "console-motion" } }),
+        }),
+      });
     },
     treeLines() {
       const lines = [];
@@ -230,6 +260,8 @@ async function main() {
   const options = parseCli(process.argv.slice(2));
   const host = createConsoleNative();
   const kernel = createKernel(host.native);
+  const counterMode = basename(options.entry).toLowerCase() === "counter.tsx";
+  const bundleId = counterMode ? "counter" : "shakeface";
   let ok = true;
   let nextGeneration = 2;
 
@@ -240,24 +272,41 @@ async function main() {
 
   // -- initial mount (generation 1) -----------------------------------------
   host.sensors.script({ status: "ok", sampledAtMs: 0, value: CALM_MOTION });
-  const bundleA = compileFile(options.entry, "shakeface", 1);
+  const bundleA = compileFile(options.entry, bundleId, 1);
   kernel.start(toRuntimeBundle(bundleA));
   printTree("after start", host);
 
   // Let the initial sensor read (a Promise) settle, then drain the re-render.
   await Promise.resolve();
   await Promise.resolve();
+  host.emitMotion({ status: "ok", sampledAtMs: 0, value: CALM_MOTION });
   kernel.pump();
   printTree("after initial sensor settle", host);
 
   const initialTexts = host.treeTexts();
   console.log(`device: initial texts = ${JSON.stringify(initialTexts)}`);
+  if (counterMode) {
+    check("Counter mounted with count zero", initialTexts.includes("count=0"));
+    check("Counter motion settled to STILL", initialTexts.includes("motion=STILL"));
+    const incrementButton = host.firstButtonId();
+    check("Counter exposes a clickable increment action", incrementButton !== undefined);
+    if (incrementButton !== undefined) {
+      host.dispatchClick(incrementButton);
+      kernel.pump();
+      check("touch dispatch increments Counter", host.treeTexts().includes("count=1"));
+    }
+  }
 
   // -- step loop, optionally injecting one shake ----------------------------
-  let sawSadFace = false;
+  let sawMotionChange = false;
   for (let step = 1; step <= STEP_COUNT; step += 1) {
     const shakeNow = options.shake && step === SHAKE_STEP;
     host.sensors.script({
+      status: "ok",
+      sampledAtMs: step * STEP_PERIOD_MS,
+      value: shakeNow ? SHAKE_MOTION : CALM_MOTION,
+    });
+    host.emitMotion({
       status: "ok",
       sampledAtMs: step * STEP_PERIOD_MS,
       value: shakeNow ? SHAKE_MOTION : CALM_MOTION,
@@ -266,24 +315,30 @@ async function main() {
     kernel.pump();
     const texts = host.treeTexts();
     console.log(`device: step ${step}${shakeNow ? " (shake)" : ""} texts = ${JSON.stringify(texts)}`);
-    if (texts.some((text) => text.includes("/----\\"))) sawSadFace = true;
+    if (counterMode) {
+      if (shakeNow && texts.includes("motion=SHAKE")) sawMotionChange = true;
+    } else if (texts.some((text) => text.includes("/----\\"))) {
+      sawMotionChange = true;
+    }
   }
   printTree("after step loop", host);
 
   if (options.shake) {
-    check("shaking flipped the mouth to the sad glyph", sawSadFace);
+    check(counterMode ? "shaking changed the Counter motion state" : "shaking flipped the mouth to the sad glyph", sawMotionChange);
   }
 
   // -- hot reload ------------------------------------------------------------
   if (options.reload) {
     const generation = nextGeneration++;
-    const bundleB = compileFile(options.reload, "shakeface", generation);
+    const bundleB = compileFile(options.reload, bundleId, generation);
     const result = kernel.stageReload(JSON.stringify(bundleB.manifest), bundleB.code);
     console.log(`device: stageReload(${options.reload}) -> ${result}`);
     printTree("after reload", host);
     const texts = host.treeTexts();
     check(`stageReload committed generation ${generation}`, result === `committed ${generation}`);
-    check("reloaded tree shows a variant-B mouth glyph", texts.some((text) => text === "^----^" || text === "v----v"));
+    if (!counterMode) {
+      check("reloaded tree shows a variant-B mouth glyph", texts.some((text) => text === "^----^" || text === "v----v"));
+    }
   }
 
   // -- failure modes: corrupted bytes, then a throwing bundle -----------------
@@ -292,7 +347,7 @@ async function main() {
 
     const corruptTarget = options.reload ?? options.entry;
     const corruptGeneration = nextGeneration++;
-    const corruptBundle = compileFile(corruptTarget, "shakeface", corruptGeneration);
+    const corruptBundle = compileFile(corruptTarget, bundleId, corruptGeneration);
     const truncatedCode = corruptBundle.code.slice(0, Math.floor(corruptBundle.code.length / 2));
     const corruptResult = kernel.stageReload(JSON.stringify(corruptBundle.manifest), truncatedCode);
     console.log(`device: stageReload(corrupted bytes) -> ${corruptResult}`);
@@ -304,7 +359,7 @@ async function main() {
     const throwingBundle = compileTsxBundle({
       fileName: "Boom.tsx",
       source: throwingSource,
-      bundleId: "shakeface",
+      bundleId,
       boardId: BOARD_ID,
       generation: throwGeneration,
     });
