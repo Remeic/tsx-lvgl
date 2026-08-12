@@ -108,6 +108,7 @@ export const APPLICATION_FACADE_KEYS = [
   "useEffect",
   "useInterval",
   "useMotion",
+  "useShake",
   "useWifi",
   "useState",
 ] as const;

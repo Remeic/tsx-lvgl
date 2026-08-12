@@ -98,11 +98,13 @@ export default function Counter(): VNode {
 }
 ```
 
-The facade also exposes `useEffect`, `useInterval`, `useMotion` and the small
-typed UI vocabulary. Sensor code consumes validated samples rather than a raw
-native pointer, so stale callbacks and samples from an old reload epoch cannot
-update the current app. Applications do not import the core, runtime, sensors,
-bundler or device workspaces directly.
+The facade also exposes `useEffect`, `useInterval`, `useMotion`, configurable
+`isShake(sample, thresholds)` and the debounced `useShake(options)` hook. Each
+app can tune acceleration and rotation thresholds (or disable either detector)
+without duplicating motion subscription or cooldown logic. Sensor code consumes
+validated samples rather than a raw native pointer, so stale callbacks and
+samples from an old reload epoch cannot update the current app. Applications do
+not import the core, runtime, sensors, bundler or device workspaces directly.
 
 Every app bundle must export a default component or VNode. A committed M1
 reload starts a new application state and reload epoch; state migration is not
