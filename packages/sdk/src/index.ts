@@ -14,17 +14,18 @@ import {
   useEffect,
   useInterval,
   useMotion,
+  useShake,
   useState,
   useWifi,
 } from "@tsx-lvgl/runtime";
-export type { StateSetter } from "@tsx-lvgl/runtime";
+export type { ShakeState, StateSetter, UseShakeOptions } from "@tsx-lvgl/runtime";
 export type { CapabilityBinding, CapabilityObserveOptions, CapabilityState } from "@tsx-lvgl/capabilities";
 export type { WifiController, WifiLink, WifiNetwork, WifiScanRequest } from "@tsx-lvgl/connectivity";
 
 import {
   isShake,
 } from "@tsx-lvgl/sensors";
-export type { MotionSample } from "@tsx-lvgl/sensors";
+export type { MotionSample, ShakeThresholds } from "@tsx-lvgl/sensors";
 
 // The device resolver builds this same descriptor. Export through it so the
 // parity test guards both runtime module resolution and the public SDK facade.
@@ -39,6 +40,7 @@ const applicationFacade = createApplicationFacade({
   useEffect,
   useInterval,
   useMotion,
+  useShake,
   useState,
   useWifi,
 }) as Readonly<{
@@ -52,6 +54,7 @@ const applicationFacade = createApplicationFacade({
   useEffect: typeof useEffect;
   useInterval: typeof useInterval;
   useMotion: typeof useMotion;
+  useShake: typeof useShake;
   useState: typeof useState;
   useWifi: typeof useWifi;
 }>;
@@ -67,6 +70,7 @@ const {
   useEffect: facadeUseEffect,
   useInterval: facadeUseInterval,
   useMotion: facadeUseMotion,
+  useShake: facadeUseShake,
   useState: facadeUseState,
   useWifi: facadeUseWifi,
 } = applicationFacade;
@@ -82,6 +86,7 @@ export {
   facadeUseEffect as useEffect,
   facadeUseInterval as useInterval,
   facadeUseMotion as useMotion,
+  facadeUseShake as useShake,
   facadeUseState as useState,
   facadeUseWifi as useWifi,
 };

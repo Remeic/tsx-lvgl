@@ -1,4 +1,12 @@
-import { motionSchema, subscribeSensor, type MotionSample, type SensorSample, type SensorSchema } from "@tsx-lvgl/sensors";
+import {
+  isShake,
+  motionSchema,
+  subscribeSensor,
+  type MotionSample,
+  type SensorSample,
+  type SensorSchema,
+  type ShakeThresholds,
+} from "@tsx-lvgl/sensors";
 import type { CapabilityBinding, CapabilityObserveOptions } from "@tsx-lvgl/capabilities";
 import type { CapabilityState, OperationId, OperationState } from "@tsx-lvgl/capabilities";
 import type { ConnectivityContext, WifiController, WifiLink, WifiNetwork, WifiOperation, WifiScanRequest, WifiService } from "@tsx-lvgl/connectivity";
@@ -150,6 +158,46 @@ export function useMotion(options: CapabilityObserveOptions = {}): CapabilityBin
     return () => subscription.cancel();
   }, [options.enabled, options.instanceId, options.periodMs]);
   return binding;
+}
+
+export interface UseShakeOptions extends CapabilityObserveOptions, ShakeThresholds {
+  readonly cooldownMs?: number;
+}
+
+export interface ShakeState {
+  readonly count: number;
+  readonly detectedAtMs?: number;
+}
+
+const DEFAULT_SHAKE_COOLDOWN_MS = 700;
+
+/** Converts the motion stream into debounced shake events with per-app thresholds. */
+export function useShake(options: UseShakeOptions = {}): ShakeState {
+  requireFiber("useShake");
+  const cooldownMs = options.cooldownMs ?? DEFAULT_SHAKE_COOLDOWN_MS;
+  if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+    throw new Error("useShake cooldownMs must be a non-negative finite number");
+  }
+  const motion = useMotion(options);
+  const [shake, setShake] = useState<ShakeState>({ count: 0 });
+
+  useEffect(() => {
+    const state = motion.state;
+    if (state.status !== "ready" && state.status !== "stale") return;
+    if (!isShake(state.value, options)) return;
+    setShake((previous) => {
+      if (previous.detectedAtMs !== undefined
+        && state.observedAtMs - previous.detectedAtMs < cooldownMs) return previous;
+      return { count: previous.count + 1, detectedAtMs: state.observedAtMs };
+    });
+  }, [
+    motion.state,
+    options.accelerationDeltaMps2,
+    options.angularVelocityDps,
+    cooldownMs,
+  ]);
+
+  return shake;
 }
 
 /** Station state is device-owned; this hook owns only its subscription and in-flight commands. */

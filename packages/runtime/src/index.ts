@@ -17,10 +17,13 @@ export {
   useEffect,
   useInterval,
   useMotion,
+  useShake,
   useWifi,
   useSensor,
   useState,
   type StateSetter,
+  type ShakeState,
+  type UseShakeOptions,
 } from "./hooks.js";
 
 export {

@@ -508,7 +508,7 @@ const sdkAliasSource = `
   const jsx = require("@tsx-lvgl/sdk/jsx-runtime");
   exports.default = function App() {
     const sample = sdk.useMotion();
-    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,StyleSheet,Text,View,isShake,useEffect,useInterval,useMotion,useState,useWifi"
+    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,StyleSheet,Text,View,isShake,useEffect,useInterval,useMotion,useShake,useState,useWifi"
       ? "sdk"
       : "sdk-leak";
     return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample.state.status === "starting" ? surface : sample.state.status }) });

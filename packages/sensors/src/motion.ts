@@ -5,6 +5,11 @@ export interface MotionSample {
   readonly angularVelocityDps: readonly [number, number, number];
 }
 
+export interface ShakeThresholds {
+  readonly accelerationDeltaMps2?: number | null;
+  readonly angularVelocityDps?: number | null;
+}
+
 export const motionSchema: SensorSchema<MotionSample> = {
   id: "device.motion",
   version: 1,
@@ -22,11 +27,38 @@ export function isMotionSample(value: unknown): value is MotionSample {
   return isVector(candidate.accelerationMps2) && isVector(candidate.angularVelocityDps);
 }
 
-export function isShake(sample: MotionSample): boolean {
+export function isShake(
+  sample: MotionSample,
+  thresholds: ShakeThresholds = {},
+): boolean {
   const accelerationMagnitude = magnitude(sample.accelerationMps2);
   const rotationMagnitude = magnitude(sample.angularVelocityDps);
-  return Math.abs(accelerationMagnitude - EARTH_GRAVITY_MPS2) >= SHAKE_ACCELERATION_DELTA_MPS2
-    || rotationMagnitude >= SHAKE_ANGULAR_VELOCITY_DPS;
+  const accelerationThreshold = resolveThreshold(
+    "accelerationDeltaMps2",
+    thresholds.accelerationDeltaMps2,
+    SHAKE_ACCELERATION_DELTA_MPS2,
+  );
+  const rotationThreshold = resolveThreshold(
+    "angularVelocityDps",
+    thresholds.angularVelocityDps,
+    SHAKE_ANGULAR_VELOCITY_DPS,
+  );
+  return (accelerationThreshold !== null
+      && Math.abs(accelerationMagnitude - EARTH_GRAVITY_MPS2) >= accelerationThreshold)
+    || (rotationThreshold !== null && rotationMagnitude >= rotationThreshold);
+}
+
+function resolveThreshold(
+  name: keyof ShakeThresholds,
+  value: number | null | undefined,
+  fallback: number,
+): number | null {
+  if (value === null) return null;
+  const resolved = value ?? fallback;
+  if (!Number.isFinite(resolved) || resolved < 0) {
+    throw new Error(`${name} must be null or a non-negative finite number`);
+  }
+  return resolved;
 }
 
 type MotionVector = readonly [number, number, number];
