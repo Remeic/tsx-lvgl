@@ -63,11 +63,30 @@ board host or baked-in application require regenerating the embedded artifacts
 and rebuilding firmware; see the
 [runtime-port probe guide](../examples/esp-idf/runtime_port_probe/README.md).
 
+For the persistent example-app workflow, use the single guarded command below.
+It defaults to Pomodoro, keeps `--execute` explicit, regenerates the stable
+embedded `app.g1.*` artifacts, rebuilds the firmware and then delegates the
+physical write to `board:reload`:
+
+```bash
+npm run board:install -- \
+  --app pomodoro \
+  --port /dev/cu.usbmodemXXX \
+  --recovery-dir /path/to/board-recovery \
+  --esptool-python /path/to/esptool-5.3.1-venv/bin/python \
+  --execute
+```
+
+Omit `--execute` (or pass `--dry-run`) to build and inspect the guarded plan
+without opening the board. The public app-facing `tsx-lvgl dev --device`
+command remains the fast RAM hot-reload path; it intentionally does not flash.
+
 ## 3. Build the runtime-port probe
 
 The committed runtime-port probe is the development runtime host for the
-target board: it boots the embedded kernel, mounts the baked-in Counter app,
-and then accepts hot-reloaded bundles over the dev transport. Build it with
+target board: it boots the embedded kernel, mounts the persistent app selected
+by `board:install` (Pomodoro by default), and then accepts hot-reloaded bundles
+over the dev transport. Build it with
 the pinned toolchain:
 
 ```bash

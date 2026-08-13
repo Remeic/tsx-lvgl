@@ -40,6 +40,12 @@ test("CLI parser normalizes supported options and rejects malformed input", () =
   assert.throws(() => parseArgs(["update", "--source", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--wat"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.deepEqual(parseArgs(["dev", "--device", "--port", "/dev/cu.fake", "--json"]), { command: "dev", positional: [], device: true, port: "/dev/cu.fake", json: true });
+  assert.throws(() => parseArgs(["dev", "--port"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["dev", "--port", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.deepEqual(
+    parseArgs(["dev", "--artifact", "a", "--source", "s", "--device", "--port", "p", "--help"]),
+    { command: "help", positional: [], json: false, device: true, artifact: "a", source: "s", port: "p" },
+  );
 });
 
 test("CLI routes device dev and doctor through existing command names with deterministic JSON", async () => {
@@ -66,6 +72,12 @@ test("CLI routes device dev and doctor through existing command names with deter
   output = recorder();
   assert.equal(await runCli(["dev", "--port", "/dev/cu.fake"], "/cwd", ops, output.writer), 2);
   assert.match(output.errors[0], /requires dev --device/);
+  output = recorder();
+  assert.equal(await runCli(["doctor", "--device"], "/cwd", ops, output.writer), 2);
+  assert.match(output.errors[0], /requires --port/);
+  output = recorder();
+  assert.equal(await runCli(["doctor", "--port", "/dev/cu.fake"], "/cwd", ops, output.writer), 2);
+  assert.match(output.errors[0], /requires doctor --device/);
   output = recorder();
   const failingOps = operations({
     devProject: async () => { throw new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "serial disconnected"); },

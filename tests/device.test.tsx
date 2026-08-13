@@ -2,12 +2,14 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { ElementType } from "@tsx-lvgl/core";
 import {
+  NATIVE_STYLE_PROP,
   createClickRegistry,
   createDeviceScheduler,
   createKernel,
   createLvglHost,
   createNativeMotionSensor,
   type DeviceKernel,
+  type NativeBindings,
 } from "@tsx-lvgl/device";
 import type { RuntimeBundle, RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 import { motionSchema, type SensorContext } from "@tsx-lvgl/sensors";
@@ -219,6 +221,162 @@ test("replaceRoot loads the next screen, or a blank screen (0) when next is null
 });
 
 // ---------------------------------------------------------------------------
+// style
+// ---------------------------------------------------------------------------
+
+test("createInstance applies a style for every widget type, including Screen and View", () => {
+  const cases: ReadonlyArray<readonly [ElementType, Record<string, unknown>]> = [
+    ["Screen", { style: { backgroundColor: "red" } }],
+    ["View", { style: { backgroundColor: "red" } }],
+    ["Text", { text: "x", style: { backgroundColor: "red" } }],
+    ["Button", { label: "x", style: { backgroundColor: "red" } }],
+  ];
+  for (const [type, props] of cases) {
+    const lvgl = new FakeNativeLvgl();
+    const host = createLvglHost(lvgl, createClickRegistry());
+    const instance = host.createInstance(type, props);
+    assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.backgroundColor), 0xff0000, type);
+  }
+});
+
+test("createInstance with no style makes no style calls", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  host.createInstance("View", {});
+  assert.deepEqual(lvgl.setStyleCalls, []);
+  assert.deepEqual(lvgl.resetStyleCalls, []);
+});
+
+test("updateInstance emits setStyle only for the style key that actually changed", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { backgroundColor: "red", borderWidth: 1 } });
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { backgroundColor: "red", borderWidth: 1 } },
+    { style: { backgroundColor: "red", borderWidth: 2 } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.borderWidth, value: 2 }]);
+});
+
+test("updateInstance emits resetStyle when a style key is removed on the next render", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { borderWidth: 1 } });
+  host.updateInstance(instance, "View", { style: { borderWidth: 1 } }, { style: {} });
+  assert.deepEqual(lvgl.resetStyleCalls, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.borderWidth }]);
+});
+
+test("updateInstance with a re-normalized identical style makes zero native calls", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { backgroundColor: "red", padding: 4 } });
+  const setBefore = lvgl.setStyleCalls.length;
+  const resetBefore = lvgl.resetStyleCalls.length;
+  // A fresh object literal with the same content: the reconciler's shallow
+  // sameProps identity check re-triggers updateInstance every render, but the
+  // per-key diff must still emit nothing.
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { backgroundColor: "red", padding: 4 } },
+    { style: { backgroundColor: "red", padding: 4 } },
+  );
+  assert.equal(lvgl.setStyleCalls.length, setBefore);
+  assert.equal(lvgl.resetStyleCalls.length, resetBefore);
+});
+
+test("createInstance and updateInstance apply S2 width/left/display through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { width: 120, left: -4, display: "none" } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.width), 120);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.left), -4);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.display), 1);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { width: 120, left: -4, display: "none" } },
+    { style: { width: "50%", left: -4, display: "flex" } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.width, value: -51 },
+    { id: instanceId(instance), prop: NATIVE_STYLE_PROP.display, value: 0 },
+  ]);
+});
+
+test("createInstance and updateInstance apply S3 flexDirection/gap through the host contract", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { flexDirection: "row", gap: 4 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.flexDirection), 0);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.gap), 4);
+
+  const before = lvgl.setStyleCalls.length;
+  host.updateInstance(
+    instance,
+    "View",
+    { style: { flexDirection: "row", gap: 4 } },
+    { style: { flexDirection: "column", gap: 4 } },
+  );
+  const emitted = lvgl.setStyleCalls.slice(before);
+  assert.deepEqual(emitted, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.flexDirection, value: 1 }]);
+});
+
+test("createInstance and updateInstance apply S4 opacity/rotate through the host contract, and removing rotate resets it", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("View", { style: { opacity: 0.5, rotate: 45 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.opacity), 128);
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.rotate), 450);
+
+  host.updateInstance(instance, "View", { style: { opacity: 0.5, rotate: 45 } }, { style: { opacity: 0.5 } });
+  assert.deepEqual(
+    lvgl.resetStyleCalls.filter((call) => call.id === instanceId(instance)),
+    [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.rotate }],
+  );
+});
+
+test("createInstance and updateInstance apply fontSize through the host contract, and removing it resets it", () => {
+  const lvgl = new FakeNativeLvgl();
+  const host = createLvglHost(lvgl, createClickRegistry());
+  const instance = host.createInstance("Button", { label: "x", style: { fontSize: 24.4 } });
+  assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), 24);
+
+  host.updateInstance(
+    instance,
+    "Button",
+    { label: "x", style: { fontSize: 24.4 } },
+    { label: "x", style: {} },
+  );
+  assert.deepEqual(
+    lvgl.resetStyleCalls.filter((call) => call.id === instanceId(instance)),
+    [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.fontSize }],
+  );
+});
+
+test("createInstance and updateInstance ignore text-only fontSize on View and Screen", () => {
+  for (const type of ["View", "Screen"] as const) {
+    const lvgl = new FakeNativeLvgl();
+    const host = createLvglHost(lvgl, createClickRegistry());
+    const instance = host.createInstance(type, { style: { fontSize: 48 } });
+
+    assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), undefined, type);
+    assert.deepEqual(lvgl.setStyleCalls, [], type);
+
+    host.updateInstance(instance, type, { style: { fontSize: 48 } }, { style: {} });
+    assert.deepEqual(lvgl.setStyleCalls, [], type);
+    assert.deepEqual(lvgl.resetStyleCalls, [], type);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // scheduler
 // ---------------------------------------------------------------------------
 
@@ -384,7 +542,7 @@ const sdkAliasSource = `
   const jsx = require("@tsx-lvgl/sdk/jsx-runtime");
   exports.default = function App() {
     const sample = sdk.useMotion();
-    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,Text,View,isShake,useEffect,useInterval,useMotion,useState,useWifi"
+    const surface = Object.keys(sdk).sort().join(",") === "Button,Fragment,Screen,StyleSheet,Text,View,isShake,useEffect,useInterval,useMotion,useShake,useState,useWifi"
       ? "sdk"
       : "sdk-leak";
     return jsx.jsx(sdk.Screen, { children: jsx.jsx(sdk.Text, { text: sample.state.status === "starting" ? surface : sample.state.status }) });
@@ -429,6 +587,54 @@ test("kernel.start propagates the exact 'unknown module' message uncaught for an
     () => kernel.start({ manifest: manifest({ generation: 1, byteLength: badSource.length }), source: encode(badSource) }),
     (error: unknown) => error instanceof Error && error.message === "unknown module: @tsx-lvgl/nope",
   );
+});
+
+const capabilitiesAliasSource = `
+  const lib = require("@tsx-lvgl/core");
+  const capabilities = require("@tsx-lvgl/capabilities");
+  const connectivity = require("@tsx-lvgl/connectivity");
+  exports.default = function App() {
+    var ok = typeof capabilities.issue === "function" && typeof connectivity.WIFI_MAX_PENDING_COMMANDS === "number";
+    return lib.createVNode(lib.Screen, null, [lib.createVNode(lib.Text, { text: ok ? "ok" : "leak" })]);
+  };
+`;
+
+test("kernel resolves the capabilities and connectivity module aliases", () => {
+  const fake = makeFakeNative();
+  const kernel = createKernel(fake.native);
+  kernel.start({ manifest: manifest({ generation: 1, byteLength: capabilitiesAliasSource.length }), source: encode(capabilitiesAliasSource) });
+  assert.deepEqual(fake.lvgl.liveTexts(), ["ok"]);
+});
+
+test("kernel.dispose unmounts the tree and disposes the board transport", () => {
+  const { kernel, fake } = startKernel();
+  kernel.dispose();
+  assert.deepEqual(fake.lvgl.liveTexts(), []);
+  assert.throws(() => fake.board.setSink(() => undefined), /board adapter is disposed/);
+});
+
+test("kernel without a board transport skips board expire/dispose safely", () => {
+  const lvgl = new FakeNativeLvgl();
+  const timers = new FakeNativeTimers();
+  const sensors = new FakeNativeSensors();
+  let dispatch: ((id: number) => void) | undefined;
+  const native: NativeBindings = {
+    boardId: "esp32s3-waveshare-v1",
+    lvgl,
+    timers,
+    sensors,
+    onClick(next: (id: number) => void): void {
+      dispatch = next;
+    },
+    log(): void {},
+  };
+  const kernel = createKernel(native);
+  kernel.start({ manifest: manifest({ generation: 1, byteLength: sourceA.length }), source: encode(sourceA) });
+  assert.deepEqual(lvgl.liveTexts(), ["A:0"]);
+  kernel.pump();
+  kernel.dispose();
+  assert.deepEqual(lvgl.liveTexts(), []);
+  assert.equal(dispatch !== undefined, true);
 });
 
 test("stageReload commits a valid, monotonically newer generation and disposes the previous root", () => {

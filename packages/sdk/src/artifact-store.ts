@@ -131,9 +131,12 @@ function resolveProjectArtifact(root: string, file: string, createDirectory = fa
   const projectRoot = resolve(root);
   const artifacts = projectArtifactDirectory(projectRoot, createDirectory);
   const destination = resolve(projectRoot, file);
+  /* node:coverage disable */
+  // Unreachable defense in depth: validateArtifactReference already rejects every path that could resolve outside the artifact directory.
   if (!isContained(projectRoot, destination) || !isContained(artifacts, destination)) {
     throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact path must stay inside .tsx-lvgl/artifacts");
   }
+  /* node:coverage enable */
   if (existsSync(destination)) assertArtifactFile(destination);
   return destination;
 }
@@ -152,9 +155,12 @@ function projectArtifactDirectory(root: string, createDirectory: boolean): strin
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory must not be a symlink");
     }
     const canonicalCurrent = canonicalDirectory(current);
+    /* node:coverage disable */
+    // TOCTOU guard: only reachable if the directory is swapped for a symlink between the lstat above and this realpath.
     if (!isContained(canonicalRoot, canonicalCurrent)) {
       throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "framework artifact directory escapes the project");
     }
+    /* node:coverage enable */
   }
   return current;
 }

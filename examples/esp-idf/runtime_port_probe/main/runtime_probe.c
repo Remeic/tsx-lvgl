@@ -122,8 +122,8 @@ static JSValue new_wifi_board_event(JSContext *context, int32_t handle, uint32_t
 
 extern const uint8_t _binary_kernel_js_start[] asm("_binary_kernel_js_start");
 extern const uint8_t _binary_kernel_js_end[] asm("_binary_kernel_js_end");
-extern const uint8_t _binary_counter_g1_js_start[] asm("_binary_counter_g1_js_start");
-extern const uint8_t _binary_counter_g1_manifest_json_start[] asm("_binary_counter_g1_manifest_json_start");
+extern const uint8_t _binary_app_g1_js_start[] asm("_binary_app_g1_js_start");
+extern const uint8_t _binary_app_g1_manifest_json_start[] asm("_binary_app_g1_manifest_json_start");
 
 static void log_checkpoint(const char *checkpoint, const char *status, const char *detail)
 {
@@ -467,6 +467,33 @@ static JSValue js_native_lvgl_load_screen(JSContext *context, JSValueConst this_
     int32_t id = 0;
     if (JS_ToInt32(context, &id, argv[0])) return JS_EXCEPTION;
     lvgl_host_load_screen(probe->lvgl_host, id);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_native_lvgl_set_style(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 3) return JS_ThrowTypeError(context, "lvgl.setStyle(id, prop, value) requires 3 arguments");
+    int32_t id = 0, prop = 0, value = 0;
+    if (JS_ToInt32(context, &id, argv[0]) || JS_ToInt32(context, &prop, argv[1]) ||
+        JS_ToInt32(context, &value, argv[2])) {
+        return JS_EXCEPTION;
+    }
+    if (prop < 0 || prop >= LVGL_HOST_STYLE_PROP_COUNT) return JS_ThrowTypeError(context, "lvgl.setStyle: unknown style prop");
+    lvgl_host_set_style(probe->lvgl_host, id, prop, value);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_native_lvgl_reset_style(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+{
+    (void)this_value;
+    runtime_probe_t *probe = probe_from_context(context);
+    if (probe == NULL || argc < 2) return JS_ThrowTypeError(context, "lvgl.resetStyle(id, prop) requires 2 arguments");
+    int32_t id = 0, prop = 0;
+    if (JS_ToInt32(context, &id, argv[0]) || JS_ToInt32(context, &prop, argv[1])) return JS_EXCEPTION;
+    if (prop < 0 || prop >= LVGL_HOST_STYLE_PROP_COUNT) return JS_ThrowTypeError(context, "lvgl.resetStyle: unknown style prop");
+    lvgl_host_reset_style(probe->lvgl_host, id, prop);
     return JS_UNDEFINED;
 }
 
@@ -964,6 +991,9 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     JS_SetPropertyStr(context, lvgl, "dispose", JS_NewCFunction(context, js_native_lvgl_dispose, "dispose", 1));
     JS_SetPropertyStr(context, lvgl, "loadScreen",
                       JS_NewCFunction(context, js_native_lvgl_load_screen, "loadScreen", 1));
+    JS_SetPropertyStr(context, lvgl, "setStyle", JS_NewCFunction(context, js_native_lvgl_set_style, "setStyle", 3));
+    JS_SetPropertyStr(context, lvgl, "resetStyle",
+                      JS_NewCFunction(context, js_native_lvgl_reset_style, "resetStyle", 2));
     JS_SetPropertyStr(context, native, "lvgl", lvgl);
 
     JSValue timers = JS_NewObject(context);
@@ -994,7 +1024,7 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     return ESP_OK;
 }
 
-/* --- Boot: evaluate kernel.js, then mount the baked-in Counter bundle (generation 1) --- */
+/* --- Boot: evaluate kernel.js, then mount the stable embedded app bundle (generation 1) --- */
 
 esp_err_t runtime_probe_boot(runtime_probe_t *probe)
 {
@@ -1033,8 +1063,8 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     log_checkpoint("kernel_start", "pass", "boot_glue=present");
 
-    JSValue manifest_value = JS_NewString(context, (const char *)_binary_counter_g1_manifest_json_start);
-    JSValue source_value = JS_NewString(context, (const char *)_binary_counter_g1_js_start);
+    JSValue manifest_value = JS_NewString(context, (const char *)_binary_app_g1_manifest_json_start);
+    JSValue source_value = JS_NewString(context, (const char *)_binary_app_g1_js_start);
     JSValue argv[2] = {manifest_value, source_value};
     JSValue boot_result = JS_Call(context, boot_fn, JS_UNDEFINED, 2, argv);
     JS_FreeValue(context, manifest_value);
@@ -1048,7 +1078,7 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
     }
     JS_FreeValue(context, boot_result);
     process_pending_jobs(probe);
-    log_checkpoint("app_mount", "pass", "bundle=counter generation=1");
+    log_checkpoint("app_mount", "pass", "bundle=embedded generation=1");
 
     JSValue lastgen_result = JS_Call(context, probe->lastgen_fn, JS_UNDEFINED, 0, NULL);
     int32_t last_generation = 1;

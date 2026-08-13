@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
+
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
 const transportHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.h", import.meta.url), "utf8");
@@ -11,9 +13,20 @@ const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/c
 const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
+const embedRuntimeApp = readFileSync(new URL("../scripts/embed-runtime-app.mjs", import.meta.url), "utf8");
 const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
+const lvglHostHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.h", import.meta.url), "utf8");
+
+/** SCREAMING_SNAKE_CASE -> camelCase, e.g. "BACKGROUND_COLOR" -> "backgroundColor". */
+function toCamelCase(screamingSnakeCase) {
+  return screamingSnakeCase
+    .toLowerCase()
+    .split("_")
+    .map((part, index) => (index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join("");
+}
 
 function createReservationFence(slotCount = 4) {
   let nextReservation = 0;
@@ -53,6 +66,13 @@ test("runtime probe trims the ESP-IDF embedded kernel terminator before QuickJS 
   assert.match(source, /if \(kernel_length > 0U && _binary_kernel_js_start\[kernel_length - 1U\] == '\\0'\) kernel_length--;/);
   assert.match(kernelBuilder, /const KERNEL_BUDGET_BYTES = 128 \* 1024;/);
   assert.match(kernelBuilder, /finalBytes > KERNEL_BUDGET_BYTES/);
+});
+
+test("runtime probe uses stable embedded-app filenames so the app can change without C edits", () => {
+  assert.match(mainCmake, /EMBED_TXTFILES "kernel\.js" "app\.g1\.js" "app\.g1\.manifest\.json"/);
+  assert.match(source, /_binary_app_g1_js_start/);
+  assert.match(source, /_binary_app_g1_manifest_json_start/);
+  assert.match(embedRuntimeApp, /always use the stable app\.g1\.\* names/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {
@@ -120,7 +140,7 @@ test("optional providers report unavailable state without aborting application b
   assert.match(appMain, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
   assert.match(appMain, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
   assert.match(appMain, /status=unavailable/);
-  assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(16384U\)/);
+  assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(32768U\)/);
   assert.doesNotMatch(appMain, /xTaskCreate\(runtime_probe_task/);
   assert.match(appMain, /runtime_probe_task\(probe\);/);
   assert.ok(appMain.indexOf("bundle_transport_start(probe)") < appMain.indexOf("runtime_probe_start_sensors(probe)"));
@@ -260,4 +280,19 @@ test("Wi-Fi dequeued-before-cancel race consumes a marked reservation before sid
   const consume = component.match(/static bool take_command_slot[\s\S]*?\n}\n\nstatic void mark_cancelled_command/);
   assert.ok(consume, "reservation consumer must remain present");
   assert.ok(consume[0].indexOf("!wifi->command_slots[command->slot_index].cancelled") < consume[0].indexOf("release_command_slot"));
+});
+
+test("runtime probe registers setStyle/resetStyle bindings and rejects unknown style prop codes", () => {
+  assert.match(source, /JS_SetPropertyStr\(context, lvgl, "setStyle", JS_NewCFunction\(context, js_native_lvgl_set_style, "setStyle", 3\)\)/);
+  assert.match(source, /JS_SetPropertyStr\(context, lvgl, "resetStyle",\s*\n\s*JS_NewCFunction\(context, js_native_lvgl_reset_style, "resetStyle", 2\)\)/);
+  assert.match(source, /prop < 0 \|\| prop >= LVGL_HOST_STYLE_PROP_COUNT\) return JS_ThrowTypeError\(context, "lvgl\.setStyle: unknown style prop"\)/);
+  assert.match(source, /prop < 0 \|\| prop >= LVGL_HOST_STYLE_PROP_COUNT\) return JS_ThrowTypeError\(context, "lvgl\.resetStyle: unknown style prop"\)/);
+});
+
+test("C-parity gate: lvgl_host_style_prop_t codes exactly match NATIVE_STYLE_PROP", () => {
+  const matches = [...lvglHostHeader.matchAll(/LVGL_HOST_STYLE_(\w+) = (\d+)/g)];
+  assert.ok(matches.length > 0, "expected at least one style prop code in lvgl_host.h");
+  const fromHeader = {};
+  for (const [, name, value] of matches) fromHeader[toCamelCase(name)] = Number(value);
+  assert.deepEqual(fromHeader, NATIVE_STYLE_PROP);
 });

@@ -18,6 +18,7 @@ import {
   updateProject,
   verifyProject,
 } from "../packages/sdk/dist/project.js";
+import { NODE_SERIAL_RUNTIME } from "../packages/sdk/dist/serial.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHA = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }).stdout.trim()
@@ -72,6 +73,93 @@ function archive(path, name, content, sizeText = undefined) {
     Buffer.alloc(1024),
   ])));
 }
+
+/**
+ * A minimal auto-responding TSXB device counterpart: it accepts whatever
+ * generation/manifest the host proposes (always monotonic) so a real push
+ * through `devProject`'s device branch completes without real hardware.
+ */
+function autoDeviceChannel() {
+  const lineListeners = new Set();
+  const errorListeners = new Set();
+  let lastManifest;
+  return {
+    write(frame) {
+      queueMicrotask(() => {
+        if (frame.startsWith("TSXB BEGIN ")) {
+          lastManifest = JSON.parse(Buffer.from(frame.slice("TSXB BEGIN ".length), "base64").toString("utf8"));
+          const line = `TSXB RDY maxBytes=999999999 protocol=${lastManifest.protocolVersion} board=${lastManifest.boardId} lastGeneration=${lastManifest.generation - 1}`;
+          for (const listener of lineListeners) listener(line);
+        } else if (frame.startsWith("TSXB DATA ")) {
+          const seq = frame.split(" ")[2];
+          for (const listener of lineListeners) listener(`TSXB ACK ${seq}`);
+        } else if (frame.startsWith("TSXB END ")) {
+          const line = `TSXB OK bundle=${lastManifest.bundleId} generation=${lastManifest.generation} epoch=1`;
+          for (const listener of lineListeners) listener(line);
+        }
+      });
+      return Promise.resolve();
+    },
+    onLine(listener) {
+      lineListeners.add(listener);
+      return () => lineListeners.delete(listener);
+    },
+    onError(listener) {
+      errorListeners.add(listener);
+      return () => errorListeners.delete(listener);
+    },
+    close() {
+      return Promise.resolve();
+    },
+  };
+}
+
+test("dev pushes through the device branch using an injected serial channel", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-dev-device-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "app");
+  await createProject(root, packArtifact(sandbox));
+
+  const originalOpen = NODE_SERIAL_RUNTIME.open;
+  NODE_SERIAL_RUNTIME.open = () => autoDeviceChannel();
+  try {
+    const result = await devProject(root, { device: true, port: "/dev/cu.fake" });
+    assert.equal(result.bundleId, "app");
+    assert.equal(result.device.epoch, 1);
+    assert.equal(result.device.retryCount, 0);
+  } finally {
+    NODE_SERIAL_RUNTIME.open = originalOpen;
+  }
+});
+
+test("dev device branch propagates an already-diagnostic device failure unwrapped", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-dev-device-bad-port-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "app");
+  await createProject(root, packArtifact(sandbox));
+
+  await assert.rejects(
+    devProject(root, { device: true, port: "not-a-real-port" }),
+    { code: DIAGNOSTIC_CODES.DEVICE_PORT_INVALID },
+  );
+});
+
+test("doctor reports device port syntax validity without opening a real channel", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-doctor-device-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "app");
+  await createProject(root, packArtifact(sandbox));
+
+  const result = doctorProject(root, { device: true, port: "/dev/cu.fake" });
+  const check = result.checks.find((entry) => entry.id === "DEVICE_PORT");
+  assert.equal(check.ok, true);
+  assert.equal(check.successCode, "DOCTOR_DEVICE_PORT_OK");
+
+  const withoutPort = doctorProject(root, { device: true });
+  const missingPortCheck = withoutPort.checks.find((entry) => entry.id === "DEVICE_PORT");
+  assert.equal(missingPortCheck.ok, false);
+  assert.equal(missingPortCheck.diagnosticCode, DIAGNOSTIC_CODES.DEVICE_PORT_INVALID);
+});
 
 test("doctor keeps sequencing diagnostics when config or lock prerequisites fail", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-doctor-sequencing-"));

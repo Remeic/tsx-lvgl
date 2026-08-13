@@ -58,7 +58,13 @@ export interface SensorSubscription {
   cancel(): void;
 }
 
-export { isMotionSample, isShake, motionSchema, type MotionSample } from "./motion.js";
+export {
+  isMotionSample,
+  isShake,
+  motionSchema,
+  type MotionSample,
+  type ShakeThresholds,
+} from "./motion.js";
 
 /**
  * Creates the platform-neutral registry used by the runtime composition root.

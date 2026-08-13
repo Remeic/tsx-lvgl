@@ -100,9 +100,11 @@ Do not write anything while any read, size, equality, checksum, structure or arc
 
 If any security field is unknown, stop before reading for acceptance and before every write. QEMU or an official image does not authorize a physical-board restore path.
 
-## Restore — disabled until the manifest passes
+## Factory restore — disabled until the manifest passes
 
-No standalone write command is published while the per-unit manifest is in hard-stop status. When a future manifest explicitly enables it, the guarded procedure must:
+The generic full-flash factory-restore command remains disabled while the
+per-unit manifest is in hard-stop status. If a future manifest explicitly
+enables it, the guarded procedure must:
 
 1. append a pre-write `START` record;
 2. recheck same-device identity and security/eFuse state in the same session;
@@ -118,9 +120,11 @@ Esptool 5.3.1 uses `hard-reset` by default. A separate `verify-flash` after that
 
 ## App-only development reload
 
-The repository provides `npm run board:reload` for the V1 application image.
-This is a development convenience layered on top of the recovery gate, not a
-replacement for it. The wrapper requires the external per-unit recovery
+The repository provides `npm run board:install` for the V1 example application
+and `npm run board:reload` as its lower-level artifact-only primitive. The
+install command is a development convenience layered on top of the recovery
+gate, not a replacement for it: it regenerates the selected embedded app and
+then delegates the write to the reload primitive. The workflow requires the external per-unit recovery
 directory, creates a `0600` operation log before the first serial command,
 rechecks the same-unit identity/security/eFuse evidence, validates the local
 image offline, writes only the app partition at `0x10000`, runs a separate

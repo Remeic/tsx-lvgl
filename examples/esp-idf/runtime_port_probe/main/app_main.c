@@ -20,7 +20,9 @@ static RTC_DATA_ATTR uint32_t probe_boot_count;
 /* Nested LVGL reparenting plus the style ABI can recurse through layout while
  * the owner task mounts a candidate tree. Keep enough headroom for that
  * native call chain; the project permits task stacks in external PSRAM. */
-#define RUNTIME_PROBE_BOOT_STACK_WORDS (16384U)
+/* 16384 still overflowed while mounting a styled tree of ~8 widgets with two
+ * flex containers (hardware panic: stack overflow in runtime_probe_boot). */
+#define RUNTIME_PROBE_BOOT_STACK_WORDS (32768U)
 
 static void runtime_probe_boot_task(void *arg)
 {

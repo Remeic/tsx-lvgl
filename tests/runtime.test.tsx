@@ -8,11 +8,14 @@ import {
   useEffect,
   useInterval,
   useSensor,
+  useShake,
   useState,
+  useWifi,
   type RuntimeHostInstance,
 } from "@tsx-lvgl/runtime";
-import type { SensorSchema } from "@tsx-lvgl/sensors";
+import { motionSchema, type SensorSchema } from "@tsx-lvgl/sensors";
 import type { CapabilityRuntime } from "@tsx-lvgl/capabilities";
+import { MemoryWifiService, type WifiController } from "@tsx-lvgl/connectivity";
 import {
   FakeHost,
   FakeSensor,
@@ -1336,4 +1339,183 @@ test("syncHostAncestor climbs past intermediate component ancestors to the neare
   scheduler.flush();
   assert.equal(screen.children.some((child) => child.props.text === "optional-leaf"), true);
   runtime.unmount();
+});
+
+test("useShake falls back to its default cooldown when none is supplied", () => {
+  const { runtime } = createHarness();
+  let shake: ReturnType<typeof useShake> | undefined;
+  function App(): VNode {
+    shake = useShake();
+    return <Screen><Text text={String(shake.count)} /></Screen>;
+  }
+
+  runtime.mount(<App />);
+  assert.equal(shake!.count, 0);
+  runtime.unmount();
+});
+
+test("runtime falls back to a no-op board and undefined wifi when neither is configured", () => {
+  const { runtime } = createHarness();
+  assert.equal(runtime.wifi, undefined);
+
+  const binding = runtime.board.getBinding(motionSchema, { periodMs: 10 });
+  assert.equal(binding.state.status, "unsupported");
+  assert.deepEqual(binding.instances, []);
+
+  const seen: string[] = [];
+  const subscription = runtime.board.subscribe(
+    motionSchema,
+    {},
+    { reloadEpoch: 0, isCancelled: () => false },
+    (nextBinding) => seen.push(nextBinding.state.status),
+  );
+  assert.deepEqual(seen, ["unsupported"]);
+  assert.doesNotThrow(() => subscription.cancel());
+
+  assert.deepEqual(runtime.board.diagnostics(), {
+    effectivePeriodsMs: {},
+    queueDepth: 0,
+    queueHighWater: 0,
+    droppedEvents: 0,
+    activeOwners: [],
+    resourceUse: { observers: 0 },
+  });
+  assert.doesNotThrow(() => runtime.board.dispose());
+});
+
+test("useWifi reports an unsupported station and inert operations when no Wi-Fi service is configured", () => {
+  const { runtime } = createHarness();
+  let controller: WifiController | undefined;
+  function App(): VNode {
+    controller = useWifi();
+    return <Screen><Text text={controller.state.status} /></Screen>;
+  }
+
+  runtime.mount(<App />);
+  assert.equal(controller!.state.status, "unsupported");
+
+  // No scan has been issued yet: cancelling is inert.
+  assert.doesNotThrow(() => controller!.cancelScan());
+
+  const scanId = controller!.scanNetworks({});
+  assert.equal(scanId > 0, true);
+  assert.equal(controller!.scan.status, "failed");
+  assert.equal(controller!.scan.status === "failed" ? controller!.scan.issue.code : "", "unsupported");
+  assert.doesNotThrow(() => controller!.cancelScan());
+
+  const connectId = controller!.connect();
+  assert.equal(connectId > 0, true);
+  assert.equal(controller!.connection.status, "failed");
+
+  const disconnectId = controller!.disconnect();
+  assert.equal(disconnectId > 0, true);
+  assert.notEqual(disconnectId, connectId);
+  assert.equal(controller!.connection.status, "failed");
+
+  runtime.unmount();
+});
+
+test("useWifi drives scan and connection operations through a configured Wi-Fi service", () => {
+  const wifi = new MemoryWifiService();
+  const { host, runtime } = createHarness({ wifi });
+  let controller: WifiController | undefined;
+  function App(): VNode {
+    controller = useWifi();
+    return <Screen><Text text={controller.state.status} /></Screen>;
+  }
+
+  runtime.mount(<App />);
+  assert.equal(host.text(), "ready");
+
+  // No scan has been issued yet: cancelling is inert (undefined operation branch).
+  assert.doesNotThrow(() => controller!.cancelScan());
+
+  const firstScanId = controller!.scanNetworks({});
+  const runningScan = controller!.scan;
+  assert.equal(runningScan.status, "running");
+  wifi.completeScan(firstScanId, [{ id: "net", rssiDbm: -50, channel: 1, authKind: "wpa2" }]);
+  const succeededScan = controller!.scan;
+  assert.equal(succeededScan.status, "succeeded");
+
+  // A second scan supersedes the first subscription/operation (defined branch).
+  const secondScanId = controller!.scanNetworks({});
+  assert.notEqual(secondScanId, firstScanId);
+  const secondRunningScan = controller!.scan;
+  assert.equal(secondRunningScan.status, "running");
+  controller!.cancelScan();
+  const cancelledScan = controller!.scan;
+  assert.equal(cancelledScan.status === "failed" ? cancelledScan.issue.code : "", "cancelled");
+
+  const connectId = controller!.connect();
+  const runningConnection = controller!.connection;
+  assert.equal(runningConnection.status, "running");
+  wifi.completeConnect(connectId, { rssiDbm: -40, channel: 6, authKind: "wpa2" });
+  const succeededConnection = controller!.connection;
+  assert.equal(succeededConnection.status, "succeeded");
+
+  // disconnect supersedes the completed connect subscription (defined branch).
+  const disconnectId = controller!.disconnect();
+  assert.notEqual(disconnectId, connectId);
+  const runningDisconnect = controller!.connection;
+  assert.equal(runningDisconnect.status, "running");
+
+  runtime.unmount();
+  // Session cleanup cancels the still-running disconnect operation.
+  const finalOperation = wifi.getOperation<void>(disconnectId);
+  assert.equal(finalOperation.status, "failed");
+
+  wifi.dispose();
+});
+
+test("useWifi commands are fenced once the owning session is disposed", () => {
+  const wifi = new MemoryWifiService();
+  const { runtime } = createHarness({ wifi });
+  let controller: WifiController | undefined;
+  function App(): VNode {
+    controller = useWifi();
+    return <Screen><Text text="wifi" /></Screen>;
+  }
+
+  runtime.mount(<App />);
+  runtime.unmount();
+
+  controller!.connect();
+  const fencedConnection = controller!.connection;
+  assert.equal(fencedConnection.status, "failed");
+  assert.equal(fencedConnection.status === "failed" ? fencedConnection.issue.code : "", "cancelled");
+
+  wifi.dispose();
+});
+
+test("useWifi commands are fenced when their fiber unmounts but the session stays active", () => {
+  const wifi = new MemoryWifiService();
+  const { host, scheduler, runtime } = createHarness({ wifi });
+  let controller: WifiController | undefined;
+  function WifiPanel(): VNode {
+    controller = useWifi();
+    return <Text text="panel" />;
+  }
+  function App(): VNode {
+    const [show, setShow] = useState(true);
+    return (
+      <Screen>
+        {show ? <WifiPanel /> : <Text text="hidden" />}
+        <Button label="hide" onClick={() => setShow(false)} />
+      </Screen>
+    );
+  }
+
+  runtime.mount(<App />);
+  assert.ok(controller);
+  host.click("hide");
+  scheduler.flush();
+  assert.equal(host.text(), "hidden");
+
+  controller!.connect();
+  const fencedConnection = controller!.connection;
+  assert.equal(fencedConnection.status, "failed");
+  assert.equal(fencedConnection.status === "failed" ? fencedConnection.issue.code : "", "cancelled");
+
+  runtime.unmount();
+  wifi.dispose();
 });

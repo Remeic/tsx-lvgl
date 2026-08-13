@@ -1,6 +1,7 @@
 import type { ElementType } from "@tsx-lvgl/core";
 import type { RuntimeHost, RuntimeHostInstance } from "@tsx-lvgl/runtime";
 import type { NativeLvgl, NativeWidgetKind } from "./native.js";
+import { applyStyleDiff, normalizeStyle, type NormalizedStyle, type StyleTarget } from "./style.js";
 
 /**
  * Owns the id -> click handler map. A plain `Map` wrapper rather than a
@@ -31,7 +32,10 @@ export function createClickRegistry(): ClickRegistry {
 interface DeviceInstance extends RuntimeHostInstance {
   readonly type: ElementType;
   readonly id: number;
+  style: NormalizedStyle;
 }
+
+const EMPTY_STYLE: NormalizedStyle = new Map();
 
 const widgetKindByType: Readonly<Record<ElementType, NativeWidgetKind>> = {
   Screen: "screen",
@@ -46,6 +50,10 @@ function textOf(props: Readonly<Record<string, unknown>>): string {
 
 function labelOf(props: Readonly<Record<string, unknown>>): string {
   return String(props.label);
+}
+
+function styleTargetForElement(type: ElementType): StyleTarget {
+  return type === "Text" || type === "Button" ? "text" : "view";
 }
 
 function asDevice(instance: RuntimeHostInstance): DeviceInstance {
@@ -71,7 +79,9 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
           native.setClickable(id, true);
         }
       }
-      const instance: DeviceInstance = { type, id };
+      const style = normalizeStyle(props.style, styleTargetForElement(type));
+      applyStyleDiff(native, id, EMPTY_STYLE, style);
+      const instance: DeviceInstance = { type, id, style };
       return instance;
     },
 
@@ -86,7 +96,13 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       previousProps: Readonly<Record<string, unknown>>,
       nextProps: Readonly<Record<string, unknown>>,
     ): void {
-      const id = asDevice(instance).id;
+      const device = asDevice(instance);
+      const id = device.id;
+
+      const nextStyle = normalizeStyle(nextProps.style, styleTargetForElement(device.type));
+      applyStyleDiff(native, id, device.style, nextStyle);
+      device.style = nextStyle;
+
       if (type === "Text") {
         const next = textOf(nextProps);
         if (next !== textOf(previousProps)) native.setText(id, next);

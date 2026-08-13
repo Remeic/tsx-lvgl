@@ -43,10 +43,11 @@ export default function Counter(): VNode {
 
 <!-- TODO: board capture GIF of the live-reload loop goes here -->
 
-This loop is not aspirational: the Counter golden loop — build on the host,
-push over USB Serial/JTAG, watch the app swap live, drive it with touch and
-shake — is closed on the physical Waveshare ESP32-S3-Touch-AMOLED-1.8 V1
-(SH8601 display, FT3168 touch, QMI8658 IMU).
+This loop is not aspirational: the runtime-probe golden loop — build on the
+host, push over USB Serial/JTAG, watch the app swap live, drive it with touch
+and shake — is closed on the physical Waveshare ESP32-S3-Touch-AMOLED-1.8 V1
+(SH8601 display, FT3168 touch, QMI8658 IMU). The persistent board example is
+Pomodoro; Counter remains a compact host and hot-reload fixture.
 
 ## Why TSX-LVGL?
 
@@ -56,12 +57,12 @@ third path — a runtime small enough to live beside LVGL on an ESP32:
 
 - **Typed TSX, not widget plumbing** — a deliberately small component
   vocabulary (`Screen`, `View`, `Text`, `Button`) with immutable VNodes,
-  keyed reconciliation and `useState`/`useEffect`/`useInterval`.
+  typed style props, keyed reconciliation and `useState`/`useEffect`/`useInterval`.
 - **Seconds, not reflash cycles** — deterministic bundles hot-pushed over a
   dev USB transport; the same contracts run host-side without a board.
-- **Hardware as typed capabilities** — `useMotion` with `isShake`, a fenced
-  Wi-Fi station via `useWifi`; validated, versioned samples with reload-epoch
-  fencing so stale callbacks can't touch the current app.
+- **Hardware as typed capabilities** — `useMotion`, configurable `useShake`,
+  and a fenced Wi-Fi station via `useWifi`; validated, versioned samples with
+  reload-epoch fencing so stale callbacks can't touch the current app.
 - **Safe by construction** — manifest/size/SHA-256 validation, bounded PSRAM
   staging, transactional root replacement: a bad bundle is rejected while the
   previous app stays live.
@@ -124,6 +125,7 @@ in-memory root; a rejected bundle does not advance the generation. Deep dive:
 Done and proven:
 
 - [x] Typed TSX facade with immutable VNodes and keyed reconciliation
+- [x] Typed widget styling and configurable shake detection
 - [x] Deterministic bundles with manifest + SHA-256
 - [x] Transactional hot reload (host-tested and closed on the physical board)
 - [x] Motion capability with on-board IMU sampling and shake detection
@@ -137,7 +139,7 @@ Next, each an explicit gate with its own evidence:
 - [ ] Persistent last-known-good storage
 - [ ] FT3168/I2C warm-reset fix ([diagnosis](docs/diagnostics/ft3168-i2c-reset.md))
 - [ ] Pure-JavaScript dependency bundling into app bundles
-- [ ] Wider widget vocabulary and styling
+- [ ] Wider widget vocabulary
 - [ ] State migration across reloads
 - [ ] Authenticated transport / OTA (the dev transport is integrity-checked
       but unauthenticated, and is not a production update channel)

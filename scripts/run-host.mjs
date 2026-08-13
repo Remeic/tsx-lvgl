@@ -84,7 +84,7 @@ function createConsoleNative() {
   const lvgl = {
     create(kind) {
       const id = nextId++;
-      nodes.set(id, { id, kind, text: undefined, parent: null, children: [] });
+      nodes.set(id, { id, kind, text: undefined, parent: null, children: [], styles: new Map() });
       return id;
     },
     insert(parent, child, index) {
@@ -101,6 +101,16 @@ function createConsoleNative() {
     setClickable(id, clickable) {
       if (clickable) clickableIds.add(id);
       else clickableIds.delete(id);
+    },
+    setStyle(id, prop, value) {
+      const node = nodes.get(id);
+      if (node === undefined) throw new Error(`unknown node ${id}`);
+      node.styles.set(prop, value);
+    },
+    resetStyle(id, prop) {
+      const node = nodes.get(id);
+      if (node === undefined) throw new Error(`unknown node ${id}`);
+      node.styles.delete(prop);
     },
     remove(parent, child) {
       const parentNode = nodes.get(parent);
@@ -229,7 +239,10 @@ function createConsoleNative() {
     if (node === undefined) return;
     const indent = "  ".repeat(depth);
     const label = node.kind === "text" || node.kind === "button" ? `${node.kind}: ${node.text}` : node.kind;
-    lines.push(`${indent}${label}`);
+    const style = node.styles.size === 0
+      ? ""
+      : ` style{${[...node.styles].map(([prop, value]) => `${prop}=${value}`).join(",")}}`;
+    lines.push(`${indent}${label}${style}`);
     for (const child of node.children) renderNode(child, depth + 1, lines);
   }
 

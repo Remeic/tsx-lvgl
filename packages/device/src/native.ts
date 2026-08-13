@@ -23,6 +23,10 @@ export interface NativeLvgl {
   dispose(id: number): void;
   /** Loads `id` as the active screen. `0` loads a blank screen (no root). */
   loadScreen(id: number): void;
+  /** Applies one pre-normalized style value. `prop` is a NATIVE_STYLE_PROP code (style.ts, mirrored by lvgl_host_style_prop_t — append-only, never renumber). Values: colors 0xRRGGBB, px ints, enums by code. */
+  setStyle(id: number, prop: number, value: number): void;
+  /** Removes a previously applied style prop, restoring the baseline default. */
+  resetStyle(id: number, prop: number): void;
 }
 
 export interface NativeTimers {
