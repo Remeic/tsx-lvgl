@@ -9,6 +9,7 @@ import {
   createLvglHost,
   createNativeMotionSensor,
   type DeviceKernel,
+  type NativeBindings,
 } from "@tsx-lvgl/device";
 import type { RuntimeBundle, RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 import { motionSchema, type SensorContext } from "@tsx-lvgl/sensors";
@@ -586,6 +587,54 @@ test("kernel.start propagates the exact 'unknown module' message uncaught for an
     () => kernel.start({ manifest: manifest({ generation: 1, byteLength: badSource.length }), source: encode(badSource) }),
     (error: unknown) => error instanceof Error && error.message === "unknown module: @tsx-lvgl/nope",
   );
+});
+
+const capabilitiesAliasSource = `
+  const lib = require("@tsx-lvgl/core");
+  const capabilities = require("@tsx-lvgl/capabilities");
+  const connectivity = require("@tsx-lvgl/connectivity");
+  exports.default = function App() {
+    var ok = typeof capabilities.issue === "function" && typeof connectivity.WIFI_MAX_PENDING_COMMANDS === "number";
+    return lib.createVNode(lib.Screen, null, [lib.createVNode(lib.Text, { text: ok ? "ok" : "leak" })]);
+  };
+`;
+
+test("kernel resolves the capabilities and connectivity module aliases", () => {
+  const fake = makeFakeNative();
+  const kernel = createKernel(fake.native);
+  kernel.start({ manifest: manifest({ generation: 1, byteLength: capabilitiesAliasSource.length }), source: encode(capabilitiesAliasSource) });
+  assert.deepEqual(fake.lvgl.liveTexts(), ["ok"]);
+});
+
+test("kernel.dispose unmounts the tree and disposes the board transport", () => {
+  const { kernel, fake } = startKernel();
+  kernel.dispose();
+  assert.deepEqual(fake.lvgl.liveTexts(), []);
+  assert.throws(() => fake.board.setSink(() => undefined), /board adapter is disposed/);
+});
+
+test("kernel without a board transport skips board expire/dispose safely", () => {
+  const lvgl = new FakeNativeLvgl();
+  const timers = new FakeNativeTimers();
+  const sensors = new FakeNativeSensors();
+  let dispatch: ((id: number) => void) | undefined;
+  const native: NativeBindings = {
+    boardId: "esp32s3-waveshare-v1",
+    lvgl,
+    timers,
+    sensors,
+    onClick(next: (id: number) => void): void {
+      dispatch = next;
+    },
+    log(): void {},
+  };
+  const kernel = createKernel(native);
+  kernel.start({ manifest: manifest({ generation: 1, byteLength: sourceA.length }), source: encode(sourceA) });
+  assert.deepEqual(lvgl.liveTexts(), ["A:0"]);
+  kernel.pump();
+  kernel.dispose();
+  assert.deepEqual(lvgl.liveTexts(), []);
+  assert.equal(dispatch !== undefined, true);
 });
 
 test("stageReload commits a valid, monotonically newer generation and disposes the previous root", () => {
