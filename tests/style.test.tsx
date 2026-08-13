@@ -196,6 +196,7 @@ test("an invalid dimension string or NaN is skipped", () => {
   assert.equal(normalizeStyle({ width: " %" }).has(P.width), false);
   assert.equal(normalizeStyle({ width: "big" }).has(P.width), false, "not a percent string and not \"auto\"");
   assert.equal(normalizeStyle({ width: Number.NaN }).has(P.width), false);
+  assert.equal(normalizeStyle({ width: "1e400%" }).has(P.width), false, "regex-valid percent that parses to a non-finite number is skipped");
 });
 
 test("unbounded encoded numbers outside signed int32 are skipped at the TS ABI boundary", () => {
@@ -305,6 +306,7 @@ test("scale is finite number >= 0, scaled by 256 (LV_SCALE_NONE = 100%)", () => 
 test("negative or non-finite scale is skipped", () => {
   assert.equal(normalizeStyle({ scale: -1 }).has(P.scale), false);
   assert.equal(normalizeStyle({ scale: Number.NaN }).has(P.scale), false);
+  assert.equal(normalizeStyle({ scale: 1e308 }).has(P.scale), false, "finite input whose *256 scaling overflows to Infinity is skipped");
 });
 
 test("fontSize accepts finite positive px, rounded", () => {
