@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packScript = join(repositoryRoot, "scripts", "pack-sdk.mjs");
 const sourceSha = "0123456789abcdef0123456789abcdef01234567";
 
 test("registry SDK pack is public, self-contained, publish-clean, and installs its CLI", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-registry-pack-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
-  const packed = runPack(sandbox, "clean");
+  const frameworkRoot = createFrameworkFixture(sandbox);
+  const packed = runPack(sandbox, frameworkRoot, "clean");
   assert.equal(packed.distribution, "registry");
   assert.equal(packed.sourceSha, sourceSha);
   assert.equal(packed.sourceDirty, false);
@@ -68,24 +68,23 @@ test("registry SDK pack is public, self-contained, publish-clean, and installs i
 test("registry SDK pack refuses a dirty source tree", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-registry-pack-dirty-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
-  const result = runPackResult(sandbox, "dirty");
+  const result = runPackResult(sandbox, createFrameworkFixture(sandbox), "dirty");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /registry packs require a clean source tree/);
 });
 
 test("registry SDK pack rebuilds generated output and excludes orphan files before staging", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-registry-pack-stale-"));
-  const cliOutput = join(repositoryRoot, "packages", "sdk", "dist", "cli.js");
-  const orphanOutput = join(repositoryRoot, "packages", "sdk", "dist", "registry-orphan.js");
+  const frameworkRoot = createFrameworkFixture(sandbox);
+  const cliOutput = join(frameworkRoot, "packages", "sdk", "dist", "cli.js");
+  const orphanOutput = join(frameworkRoot, "packages", "sdk", "dist", "registry-orphan.js");
   const original = readFileSync(cliOutput, "utf8");
   const staleMarker = "registry-pack-stale-output";
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
-  t.after(() => writeFileSync(cliOutput, original, "utf8"));
-  t.after(() => rmSync(orphanOutput, { force: true }));
 
   writeFileSync(cliOutput, `${original}\n// ${staleMarker}\n`, "utf8");
   writeFileSync(orphanOutput, "export const orphan = true;\n", "utf8");
-  const packed = runPack(sandbox, "clean");
+  const packed = runPack(sandbox, frameworkRoot, "clean");
 
   const extracted = join(sandbox, "extracted");
   mkdirSync(extracted);
@@ -95,13 +94,23 @@ test("registry SDK pack rebuilds generated output and excludes orphan files befo
   assert.equal(existsSync(join(extracted, "package", "dist", "registry-orphan.js")), false);
 });
 
-function runPack(sandbox, gitState) {
-  const result = runPackResult(sandbox, gitState);
+function createFrameworkFixture(sandbox) {
+  const frameworkRoot = join(sandbox, "framework");
+  mkdirSync(frameworkRoot);
+  cpSync(join(repositoryRoot, "tsconfig.base.json"), join(frameworkRoot, "tsconfig.base.json"));
+  cpSync(join(repositoryRoot, "packages"), join(frameworkRoot, "packages"), { recursive: true });
+  cpSync(join(repositoryRoot, "scripts"), join(frameworkRoot, "scripts"), { recursive: true });
+  symlinkSync(join(repositoryRoot, "node_modules"), join(frameworkRoot, "node_modules"), "dir");
+  return frameworkRoot;
+}
+
+function runPack(sandbox, frameworkRoot, gitState) {
+  const result = runPackResult(sandbox, frameworkRoot, gitState);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
 
-function runPackResult(sandbox, gitState) {
+function runPackResult(sandbox, frameworkRoot, gitState) {
   const bin = join(sandbox, "bin");
   mkdirSync(bin);
   const git = join(bin, "git");
@@ -113,8 +122,8 @@ case "$*" in
 esac
 `);
   chmodSync(git, 0o755);
-  return spawnSync(process.execPath, [packScript, "--registry", "--out", join(sandbox, "artifacts"), "--json"], {
-    cwd: repositoryRoot,
+  return spawnSync(process.execPath, [join(frameworkRoot, "scripts", "pack-sdk.mjs"), "--registry", "--out", join(sandbox, "artifacts"), "--json"], {
+    cwd: frameworkRoot,
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
   });
