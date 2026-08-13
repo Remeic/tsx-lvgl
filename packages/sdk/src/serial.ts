@@ -95,6 +95,10 @@ export const NODE_SERIAL_RUNTIME: SerialRuntime = {
  * Open nonblocking and poll the descriptor so a closed device session cannot
  * leave the CLI stuck in an uninterruptible read.
  */
+/* node:coverage disable */
+// Coverage requires a real serial device: the poll loop's data, backpressure, and close-race
+// branches only fire with hardware timing. Functionally exercised by the macOS-only loopback
+// test in tests/serial-runtime.test.mjs; excluded so coverage stays deterministic across platforms.
 function openPosixSerialInput(port: string): Readable {
   const descriptor = openSync(port, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
   let polling = false;
@@ -147,6 +151,7 @@ function openPosixSerialInput(port: string): Readable {
     },
   });
 }
+/* node:coverage enable */
 
 /** Closes the three Node resources as one observable async operation. */
 export function closeSerialResources({ lines, input, output }: ClosableSerialResources): Promise<void> {

@@ -167,10 +167,13 @@ export async function runDevicePush(
     };
     const succeed = async (progress: PushProgress): Promise<void> => {
       if (settled) return;
+      /* node:coverage disable */
+      // Unreachable through the real protocol: the bundler's handleOk always sets result before state becomes "done".
       if (progress.result === undefined) {
         await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "device push ended without a result"));
         return;
       }
+      /* node:coverage enable */
       settled = true;
       detach();
       const closeError = await closeBestEffort();

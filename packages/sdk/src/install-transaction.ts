@@ -623,9 +623,12 @@ function assertRollbackDirectory(projectRoot: string, rollbackRoot: string): voi
     throw recoveryFailure("rollback directory must not be a symlink");
   }
   const canonicalRollback = canonicalDirectory(rollbackRoot, "rollback directory is unavailable");
+  /* node:coverage disable */
+  // TOCTOU guard: only reachable if the directory is swapped between the lstat above and this realpath.
   if (dirname(canonicalRollback) !== expectedParent || basename(canonicalRollback) !== basename(rollbackRoot)) {
     throw recoveryFailure("rollback directory escapes the project sibling");
   }
+  /* node:coverage enable */
 }
 
 function assertRollbackChildDirectory(projectRoot: string, rollbackRoot: string, child: string): void {
@@ -636,9 +639,12 @@ function assertRollbackChildDirectory(projectRoot: string, rollbackRoot: string,
   }
   const canonicalRollback = canonicalDirectory(rollbackRoot, "rollback directory is unavailable");
   const canonicalChild = canonicalDirectory(child, "rollback metadata directory is unavailable");
+  /* node:coverage disable */
+  // TOCTOU guard: only reachable if the directory is swapped between the lstat above and this realpath.
   if (!isContained(canonicalRollback, canonicalChild)) {
     throw recoveryFailure("rollback metadata directory escapes its transaction");
   }
+  /* node:coverage enable */
 }
 
 function assertProjectStateDirectory(root: string, state: string): void {
@@ -648,9 +654,12 @@ function assertProjectStateDirectory(root: string, state: string): void {
     throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory must not be a symlink");
   }
   const stateCanonical = canonicalDirectory(state, "project state directory is unavailable");
+  /* node:coverage disable */
+  // TOCTOU guard: only reachable if the directory is swapped between the lstat above and this realpath.
   if (!isContained(rootCanonical, stateCanonical)) {
     throw new CliError(DIAGNOSTIC_CODES.SOURCE_PATH_LEAK, "project state directory escapes the project");
   }
+  /* node:coverage enable */
 }
 
 function canonicalDirectory(path: string, message: string): string {

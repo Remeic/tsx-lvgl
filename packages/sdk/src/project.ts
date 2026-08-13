@@ -130,9 +130,12 @@ export async function createProject(
       await installLockedArtifact(root, lock, adapters);
       return { root, lock };
     });
+  /* node:coverage disable */
+  // V8 records a phantom untaken branch for this rethrowing catch even when both failure paths are tested.
   } catch (error) {
     restoreCreateTarget(root, targetExisted);
     throw error;
+  /* node:coverage enable */
   } finally {
     cleanupGeneratedArtifact();
   }
