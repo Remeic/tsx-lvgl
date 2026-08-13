@@ -131,12 +131,13 @@ export async function createProject(
       return { root, lock };
     });
   /* node:coverage disable */
-  // V8 records a phantom untaken branch for this rethrowing catch even when both failure paths are tested.
+  // V8 records a phantom untaken branch for this rethrowing catch (including its closing
+  // brace) even when both failure paths are tested, since the catch body never completes normally.
   } catch (error) {
     restoreCreateTarget(root, targetExisted);
     throw error;
-  /* node:coverage enable */
   } finally {
+  /* node:coverage enable */
     cleanupGeneratedArtifact();
   }
 }

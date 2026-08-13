@@ -470,6 +470,100 @@ test("a synchronous listener-registration failure fails the push immediately", a
   );
 });
 
+test("a non-Error async serial error is stringified into the device failure message", async () => {
+  const fake = fakeRuntime();
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  fake.emitError("boom-string");
+  await assert.rejects(pending, { code: DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, message: "boom-string" });
+});
+
+test("a serial error object whose stringification throws still settles the listener without an unhandled rejection", async () => {
+  const fake = fakeRuntime();
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  pending.catch(() => {});
+  const writesBefore = fake.writes.length;
+  const poison = { toString() { throw new Error("stringify boom"); } };
+  fake.emitError(poison);
+  await settleTasks();
+  // fail() itself rejected while stringifying the error, before it ever reached detach(), so
+  // the onError listener's own .catch(() => {}) had to absorb that rejection on its own instead
+  // of crashing the process or leaving an unhandled rejection (no ABORT could be sent either).
+  assert.equal(fake.writes.length, writesBefore);
+});
+
+test("a stale arm timer firing after settlement is a safe no-op", async () => {
+  const fake = fakeRuntime();
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  const staleTimer = fake.timers.findLast((timer) => !timer.cancelled);
+  fake.emit(rdy(4));
+  await settleTasks();
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=40");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 40, retryCount: 0 });
+  const writesBefore = fake.writes.length;
+  staleTimer.callback();
+  assert.equal(fake.writes.length, writesBefore);
+});
+
+test("a stale arm timer superseded by a legitimate rearm is ignored", async () => {
+  const fake = fakeRuntime();
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  const staleTimer = fake.timers.findLast((timer) => !timer.cancelled);
+  fake.emit(rdy(4));
+  await settleTasks();
+  const writesBefore = fake.writes.length;
+  staleTimer.callback();
+  assert.equal(fake.writes.length, writesBefore);
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=41");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 41, retryCount: 0 });
+});
+
+test("a timeout enqueued just before RDY is superseded by the rearm before it runs", async () => {
+  const fake = fakeRuntime();
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  const staleTimer = fake.timers.findLast((timer) => !timer.cancelled);
+  fake.emit(rdy(4));
+  staleTimer.callback();
+  await settleTasks();
+  assert.match(fake.writes[1], /^TSXB DATA 1 /);
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=42");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 42, retryCount: 0 });
+  assert.equal(fake.writes.filter((line) => line === "TSXB ABORT").length, 0);
+});
+
+test("a line arriving after settlement is a safe no-op when its unsubscribe function cannot remove it", async () => {
+  const fake = fakeRuntime();
+  const originalOpen = fake.runtime.serial.open;
+  fake.runtime.serial.open = (port) => {
+    const channel = originalOpen(port);
+    return {
+      ...channel,
+      onLine: (listener) => { channel.onLine(listener); return () => { throw new Error("unsubscribe line boom"); }; },
+    };
+  };
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  fake.emit(rdy(4));
+  await settleTasks();
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=43");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 43, retryCount: 0 });
+  const writesBefore = fake.writes.length;
+  fake.emit(rdy(4));
+  assert.equal(fake.writes.length, writesBefore);
+});
+
 test("serial resource close destroys the output immediately", async () => {
   let destroyed = false;
   await closeSerialResources({

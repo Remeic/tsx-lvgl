@@ -323,6 +323,69 @@ test("artifact recovery refuses a swapped state parent before rename or cleanup"
   }
 });
 
+test("artifact recovery skips a stale stage-directory entry that is not a plain directory and prunes real ones via the hook", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-stage-prune-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const state = join(root, ".tsx-lvgl");
+  mkdirSync(state, { recursive: true });
+  const fakeStage = join(state, ".artifacts-stage-not-a-directory");
+  writeFileSync(fakeStage, "leftover file, not a staged directory");
+  const realStage = join(state, ".artifacts-stage-real");
+  mkdirSync(realStage);
+
+  const mutated = [];
+  recoverProjectArtifactState(root, {
+    beforeRecoveryMutation: (path) => mutated.push(path),
+  });
+
+  assert.equal(existsSync(fakeStage), true);
+  assert.equal(existsSync(realStage), false);
+  assert.deepEqual(mutated, [realStage]);
+});
+
+test("artifact-store reports an unavailable project root when it is a regular file", () => {
+  const file = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-root-file-"));
+  const rootAsFile = join(file, "not-a-directory");
+  writeFileSync(rootAsFile, "not a directory");
+  try {
+    assert.throws(
+      () => DEFAULT_ARTIFACT_STORE.resolve(rootAsFile, lock()),
+      { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+    );
+  } finally {
+    rmSync(file, { recursive: true, force: true });
+  }
+});
+
+test("artifact-store install hooks fire for both rename checkpoints and restore after a failed second rename", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-second-rename-hooks-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+  writeFileSync(sourceArtifact, "new artifact bytes");
+  const initial = join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz");
+  writeFileSync(initial, "old artifact bytes");
+
+  let beforeSecondRenameCalls = 0;
+  let failSecondRenameCalls = 0;
+  const failure = new Error("second rename hook failure");
+  const store = createArtifactStore({
+    beforeSecondRename: () => { beforeSecondRenameCalls += 1; },
+    failSecondRename: () => {
+      failSecondRenameCalls += 1;
+      throw failure;
+    },
+  });
+
+  assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), (error) => error === failure);
+  assert.equal(beforeSecondRenameCalls, 1);
+  assert.equal(failSecondRenameCalls, 1);
+  assert.equal(readFileSync(join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz"), "utf8"), "old artifact bytes");
+  assert.equal(existsSync(join(root, ".tsx-lvgl", ".artifacts-backup")), false);
+});
+
 test("artifact references reject every non-canonical persisted path shape", () => {
   for (const file of [
     "/tmp/sdk.tgz",

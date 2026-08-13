@@ -729,6 +729,287 @@ test("captured artifact snapshots reject a malformed backup produced by a custom
   }
 });
 
+test("recovery resumes past a directory already marked restored on a prior interrupted pass", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-resume-restored-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "node_modules", "keep"), { recursive: true });
+  await writeFile(join(root, "node_modules", "keep", "marker.txt"), "before\n");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {
+      await mkdir(join(root, "node_modules", "keep"), { recursive: true });
+      await writeFile(join(root, "node_modules", "keep", "marker.txt"), "after\n");
+    }, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "action-completed") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+
+  let existsCalls = 0;
+  assert.throws(
+    () => recoverInterruptedInstall(root, {
+      ...DEFAULT_INSTALL_TRANSACTION_FS,
+      exists: (path) => {
+        existsCalls += 1;
+        if (existsCalls === 4) throw new Error("interrupted mid-recovery");
+        return existsSync(path);
+      },
+    }),
+    /interrupted mid-recovery/,
+  );
+
+  recoverInterruptedInstall(root);
+  assert.equal(await readFile(join(root, "node_modules", "keep", "marker.txt"), "utf8"), "before\n");
+  assert.equal(existsSync(join(root, ".tsx-lvgl", "install-transaction.json")), false);
+});
+
+test("recovery rejects a journal path that is not a regular file", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-journal-nonfile-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "journal-created") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const journalPath = join(root, ".tsx-lvgl", "install-transaction.json");
+  rmSync(journalPath, { force: true });
+  mkdirSync(journalPath);
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("recovery rejects a journal whose directory recovery marker is tampered", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-journal-directory-shape-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "journal-created") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const journalPath = join(root, ".tsx-lvgl", "install-transaction.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.directories[0].recovery = "bogus";
+  writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("recovery rejects a journal whose rollback directory string is unsafe", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-unsafe-rollback-string-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "journal-created") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const journalPath = join(root, ".tsx-lvgl", "install-transaction.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8"));
+  journal.rollbackDirectory = "../escape";
+  writeFileSync(journalPath, `${JSON.stringify(journal)}\n`);
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("recovery rejects a pending-rollback path that is not a regular file", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-pending-nonfile-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  await mkdir(root);
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => "unreachable", undefined, {
+      beforeJournalTemporaryOpen: () => { throw new InstallTransactionInterruptedError(); },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const pendingPath = join(root, ".tsx-lvgl", "install-transaction-pending.json");
+  rmSync(pendingPath, { force: true });
+  mkdirSync(pendingPath);
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("recovery rejects a well-formed but semantically invalid pending-rollback record", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-pending-shape-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => "unreachable", undefined, {
+      beforeJournalTemporaryOpen: () => { throw new InstallTransactionInterruptedError(); },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const pendingPath = join(root, ".tsx-lvgl", "install-transaction-pending.json");
+  writeFileSync(pendingPath, JSON.stringify({ version: 1, rollbackDirectory: "x", rollbackToken: "not-a-token" }));
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("cleanup refuses a rollback directory whose ownership marker is not a regular file", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-owner-nonfile-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "action-completed") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+
+  const rollbackRoot = join(
+    dirname(root),
+    readdirSync(dirname(root)).find((entry) => entry.startsWith(`.${basename(root)}.tsx-lvgl-install-rollback-`)),
+  );
+  const marker = join(rollbackRoot, ".tsx-lvgl-install-owner.json");
+  rmSync(marker, { force: true });
+  mkdirSync(marker);
+
+  assert.throws(() => recoverInterruptedInstall(root), { code: "INSTALL_RECOVERY_FAILED" });
+});
+
+test("transaction rejects a project root replaced by a regular file before journal persistence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-root-swap-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => "unreachable", undefined, {
+      beforeJournalPersist: () => {
+        rmSync(root, { recursive: true, force: true });
+        writeFileSync(root, "not a directory");
+      },
+    }),
+    { code: "SOURCE_PATH_LEAK" },
+  );
+});
+
+test("cleanup refuses a rollback directory whose raw parent string no longer matches even though it canonically resolves beside the project", async (t) => {
+  // assertRollbackDirectory (run once, up front, while creating the rollback directory)
+  // compares canonical/realpath parents, so a symlinked alias for the sibling directory
+  // passes it cleanly. cleanupOwnedRollbackDirectory instead compares the raw, non-canonical
+  // parent string at cleanup time, so the very same alias trips its own independent guard.
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-rollback-parent-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  await mkdir(root);
+  const alias = join(sandbox, "alias-sibling");
+  symlinkSync(sandbox, alias, "dir");
+
+  await assert.rejects(
+    withInstallTransaction(root, async () => "done", {
+      ...DEFAULT_INSTALL_TRANSACTION_FS,
+      makeSiblingTemporaryDirectory: (_projectRoot, prefix) => mkdtempSync(join(alias, prefix)),
+    }),
+    { code: "INSTALL_RECOVERY_FAILED" },
+  );
+});
+
+test("cleanup tolerates a rollback directory removed before its owned cleanup pass", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-rollback-gone-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "cleanup-recorded") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const rollbackRoot = join(
+    dirname(root),
+    readdirSync(dirname(root)).find((entry) => entry.startsWith(`.${basename(root)}.tsx-lvgl-install-rollback-`)),
+  );
+  rmSync(rollbackRoot, { recursive: true, force: true });
+  recoverInterruptedInstall(root);
+  assert.equal(existsSync(join(root, ".tsx-lvgl", "install-transaction.json")), false);
+});
+
+test("cleanup tolerates a project state directory removed during its own cleanup pass", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-state-gone-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "cleanup-recorded") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const state = join(root, ".tsx-lvgl");
+  const rollbackRoot = join(
+    dirname(root),
+    readdirSync(dirname(root)).find((entry) => entry.startsWith(`.${basename(root)}.tsx-lvgl-install-rollback-`)),
+  );
+  const filesystem = {
+    ...DEFAULT_INSTALL_TRANSACTION_FS,
+    remove: (path, options) => {
+      rmSync(path, options);
+      if (path === rollbackRoot) rmSync(state, { recursive: true, force: true });
+    },
+  };
+  recoverInterruptedInstall(root, filesystem);
+  // cleanupJournal recreates the state directory to locate the journal path it still needs to
+  // remove; the temporary-file sweep it skipped over left nothing behind either way.
+  assert.equal(existsSync(join(state, "install-transaction.json")), false);
+});
+
+test("owned journal temporary cleanup removes matching files but skips non-regular entries", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-temp-nonregular-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "journal-created") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const state = join(root, ".tsx-lvgl");
+  const journal = JSON.parse(readFileSync(join(state, "install-transaction.json"), "utf8"));
+  const bogusDir = join(state, `.install-transaction.json.${journal.rollbackToken}.bogus.tmp`);
+  const orphanFile = join(state, `.install-transaction.json.${journal.rollbackToken}.orphan.tmp`);
+  mkdirSync(bogusDir);
+  writeFileSync(orphanFile, "orphan\n");
+
+  recoverInterruptedInstall(root);
+
+  assert.equal(existsSync(bogusDir), true);
+  assert.equal(existsSync(orphanFile), false);
+});
+
+test("owned journal temporary cleanup re-validates a matched entry the hook swaps for a directory", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-temp-swap-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(
+    withInstallTransaction(root, async () => {}, undefined, {
+      afterTransition: (transition) => {
+        if (transition === "journal-created") throw new InstallTransactionInterruptedError();
+      },
+    }),
+    InstallTransactionInterruptedError,
+  );
+  const state = join(root, ".tsx-lvgl");
+  const journal = JSON.parse(readFileSync(join(state, "install-transaction.json"), "utf8"));
+  const temporary = join(state, `.install-transaction.json.${journal.rollbackToken}.swap.tmp`);
+  writeFileSync(temporary, "temp\n");
+
+  recoverInterruptedInstall(root, undefined, {
+    beforeOwnedJournalTemporaryCleanup: (path) => {
+      if (path === temporary) {
+        rmSync(path, { force: true });
+        mkdirSync(path);
+      }
+    },
+  });
+
+  assert.equal(existsSync(temporary), true);
+});
+
 test("recovery keeps a committed transaction when interruption follows its cleanup checkpoint", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-install-committed-recovery-"));
   t.after(() => rm(root, { recursive: true, force: true }));

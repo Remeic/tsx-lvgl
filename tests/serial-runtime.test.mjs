@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -98,6 +98,22 @@ test("NODE_SERIAL_RUNTIME reports asynchronous stream errors through onError", a
     const error = await waitFor(channel, "onError");
     assert.equal(error.code, "EACCES");
     await channel.close();
+  });
+});
+
+test("NODE_SERIAL_RUNTIME rejects a pending write when the underlying stream fails to open", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-serial-write-error-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const directoryPath = join(sandbox, "not-a-file");
+  mkdirSync(directoryPath);
+
+  await withFakeStty(0, async () => {
+    const channel = NODE_SERIAL_RUNTIME.open(directoryPath);
+    const errors = [];
+    const unsubscribeError = channel.onError((error) => errors.push(error));
+    await assert.rejects(channel.write("boom"));
+    unsubscribeError();
+    await channel.close().catch(() => {});
   });
 });
 

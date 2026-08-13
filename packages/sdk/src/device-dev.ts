@@ -166,8 +166,11 @@ export async function runDevicePush(
       reject(primaryError);
     };
     const succeed = async (progress: PushProgress): Promise<void> => {
-      if (settled) return;
       /* node:coverage disable */
+      // Unreachable: succeed is only invoked synchronously from apply's own "done" branch right
+      // after apply's identical settled-check, with no await in between (handleOk always sends
+      // an empty frame list for "done"), so settled cannot flip between the two checks.
+      if (settled) return;
       // Unreachable through the real protocol: the bundler's handleOk always sets result before state becomes "done".
       if (progress.result === undefined) {
         await fail(new CliError(DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, "device push ended without a result"));
@@ -201,7 +204,14 @@ export async function runDevicePush(
       }, timeoutMs);
     };
     const apply = async (progress: PushProgress): Promise<void> => {
+      /* node:coverage disable */
+      // Unreachable: every caller is already gated by an identical settled-check with no await
+      // in between (the enqueue wrapper's own "!settled" guard, or a synchronous check inside the
+      // same closure), and any in-flight write that could otherwise create a gap is force-rejected
+      // by cancelPendingIo the instant a concurrent fail()/succeed() sets settled, so no caller can
+      // ever resume past that gap with settled newly true.
       if (settled) return;
+      /* node:coverage enable */
       state = progress.state;
       if (progress.state === "failed") {
         // The pure session represents failure with an ABORT frame. Delegate
