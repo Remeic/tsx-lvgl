@@ -208,7 +208,11 @@ function buildSdk({ force = false, clean = false } = {}) {
 
 function cleanSdkBuildOutputs() {
   for (const packageRoot of [SDK_ROOT, ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name))]) {
-    rmSync(resolve(packageRoot, "dist"), { recursive: true, force: true });
+    // A local pack can be finishing its incremental build while a release pack
+    // starts. Node retries ENOTEMPTY for recursive removal with these options;
+    // once the concurrent writer exits, this release-only path still rebuilds
+    // from an empty output directory.
+    rmSync(resolve(packageRoot, "dist"), { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   }
 }
 
