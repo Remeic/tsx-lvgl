@@ -118,7 +118,7 @@ function main() {
   if (options.registry && sourceDirty) {
     throw new Error("registry packs require a clean source tree");
   }
-  buildSdk();
+  buildSdk({ force: options.registry, clean: options.registry });
   const stagingRoot = mkdtempSync(join(tmpdir(), "tsx-lvgl-sdk-pack-"));
   try {
     const stagingDist = resolve(stagingRoot, "dist");
@@ -183,20 +183,33 @@ function createPortablePackage(sdkPackage, registry) {
   return portablePackage;
 }
 
-function buildSdk() {
+function buildSdk({ force = false, clean = false } = {}) {
   // Stryker has just emitted instrumented JavaScript while preserving the
   // strict-build declaration snapshot. Rebuilding here would widen literal
   // public types solely because of instrumentation before consumer typechecks.
-  if (process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
+  if (!force && process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
   // Consumer contracts pack concurrently. Reusing a current project build
   // avoids two `tsc --force` processes racing over shared declaration output.
-  if (!sdkBuildIsStale()) return;
+  if (!force && !sdkBuildIsStale()) return;
+  if (clean) cleanSdkBuildOutputs();
   const tscPath = resolve(ROOT, "node_modules/typescript/bin/tsc");
   if (!existsSync(tscPath)) throw new Error("missing root node_modules/typescript; run npm ci first");
-  run(process.execPath, [tscPath, "-b", resolve(SDK_ROOT, "tsconfig.json"), "--force", "--pretty", "false"], {
+  const buildTargets = clean
+    ? [
+        ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name, "tsconfig.json")),
+        resolve(SDK_ROOT, "tsconfig.json"),
+      ]
+    : [resolve(SDK_ROOT, "tsconfig.json")];
+  run(process.execPath, [tscPath, "-b", ...buildTargets, "--force", "--pretty", "false"], {
     cwd: ROOT,
     stdio: "pipe",
   });
+}
+
+function cleanSdkBuildOutputs() {
+  for (const packageRoot of [SDK_ROOT, ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name))]) {
+    rmSync(resolve(packageRoot, "dist"), { recursive: true, force: true });
+  }
 }
 
 function sdkBuildIsStale() {

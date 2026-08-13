@@ -15,6 +15,7 @@ test("registry SDK pack is public, self-contained, publish-clean, and installs i
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
   const packed = runPack(sandbox, "clean");
   assert.equal(packed.distribution, "registry");
+  assert.equal(packed.sourceSha, sourceSha);
   assert.equal(packed.sourceDirty, false);
 
   const extracted = join(sandbox, "extracted");
@@ -35,6 +36,13 @@ test("registry SDK pack is public, self-contained, publish-clean, and installs i
   assert.deepEqual(packageJson.bundleDependencies, undefined);
   assert.equal(packageJson.bin["tsx-lvgl"], "dist/cli.js");
   assert.equal(existsSync(join(packageRoot, "provenance.json")), true);
+  assert.deepEqual(JSON.parse(readFileSync(join(packageRoot, "provenance.json"), "utf8")), {
+    formatVersion: 1,
+    packageName: "@tsx-lvgl/sdk",
+    version: "0.1.0",
+    sourceSha,
+    sourceDirty: false,
+  });
   assert.equal(existsSync(join(packageRoot, "dist", "vendor", "runtime", "index.js")), true);
   assert.equal(existsSync(join(packageRoot, "dist", "tsconfig.tsbuildinfo")), false);
 
@@ -63,6 +71,28 @@ test("registry SDK pack refuses a dirty source tree", (t) => {
   const result = runPackResult(sandbox, "dirty");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /registry packs require a clean source tree/);
+});
+
+test("registry SDK pack rebuilds generated output and excludes orphan files before staging", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-registry-pack-stale-"));
+  const cliOutput = join(repositoryRoot, "packages", "sdk", "dist", "cli.js");
+  const orphanOutput = join(repositoryRoot, "packages", "sdk", "dist", "registry-orphan.js");
+  const original = readFileSync(cliOutput, "utf8");
+  const staleMarker = "registry-pack-stale-output";
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  t.after(() => writeFileSync(cliOutput, original, "utf8"));
+  t.after(() => rmSync(orphanOutput, { force: true }));
+
+  writeFileSync(cliOutput, `${original}\n// ${staleMarker}\n`, "utf8");
+  writeFileSync(orphanOutput, "export const orphan = true;\n", "utf8");
+  const packed = runPack(sandbox, "clean");
+
+  const extracted = join(sandbox, "extracted");
+  mkdirSync(extracted);
+  execFileSync("tar", ["-xzf", packed.artifactPath, "-C", extracted]);
+  const packedCli = readFileSync(join(extracted, "package", "dist", "cli.js"), "utf8");
+  assert.doesNotMatch(packedCli, new RegExp(staleMarker));
+  assert.equal(existsSync(join(extracted, "package", "dist", "registry-orphan.js")), false);
 });
 
 function runPack(sandbox, gitState) {
