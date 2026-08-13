@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runDevicePush } from "../packages/sdk/dist/device-dev.js";
+import { doctorDevicePort, runDevicePush } from "../packages/sdk/dist/device-dev.js";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import { closeSerialResources, validateSerialPort } from "../packages/sdk/dist/serial.js";
 
@@ -364,6 +364,110 @@ test("serial port validation is machine-local and never accepts shell-shaped inp
   for (const candidate of ["", "relative", "/tmp/serial", "/dev/cu.ok;rm -rf /", "--port"]) {
     assert.throws(() => validateSerialPort(candidate), { code: DIAGNOSTIC_CODES.DEVICE_PORT_INVALID });
   }
+});
+
+test("doctorDevicePort validates syntax without opening a real channel", () => {
+  assert.equal(doctorDevicePort("/dev/cu.fake"), "device serial port syntax is valid (not opened)");
+  assert.throws(() => doctorDevicePort("not-a-port"), { code: DIAGNOSTIC_CODES.DEVICE_PORT_INVALID });
+});
+
+test("device push completes through a runtime whose clearTimer always throws", async () => {
+  const fake = fakeRuntime();
+  fake.runtime.clearTimer = () => { throw new Error("clearTimer boom"); };
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  fake.emit(rdy(4));
+  await settleTasks();
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=20");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 20, retryCount: 0 });
+});
+
+test("device push completes despite listener-unsubscribe functions that throw during detach", async () => {
+  const fake = fakeRuntime();
+  const originalOpen = fake.runtime.serial.open;
+  fake.runtime.serial.open = (port) => {
+    const channel = originalOpen(port);
+    return {
+      ...channel,
+      onLine: (listener) => { channel.onLine(listener); return () => { throw new Error("unsubscribe line boom"); }; },
+      onError: (listener) => { channel.onError(listener); return () => { throw new Error("unsubscribe error boom"); }; },
+    };
+  };
+  const pending = runDevicePush(bundle, "/dev/cu.fake", fake.runtime);
+  await settleTasks();
+  fake.emit(rdy(4));
+  await settleTasks();
+  fake.emit("TSXB ACK 1");
+  await settleTasks();
+  fake.emit("TSXB OK bundle=app generation=5 epoch=21");
+  assert.deepEqual(await pending, { bundleId: "app", generation: 5, epoch: 21, retryCount: 0 });
+});
+
+test("a synchronously firing deadline is fenced before boundedIo finishes arming it", async () => {
+  let clearCalls = 0;
+  const runtime = {
+    serial: {
+      open: () => ({
+        write: () => new Promise(() => {}),
+        onLine: () => () => {},
+        onError: () => () => {},
+        close: () => Promise.resolve(),
+      }),
+    },
+    setTimer: (callback) => {
+      callback();
+      return {};
+    },
+    clearTimer: () => {
+      clearCalls += 1;
+      throw new Error("clearTimer boom");
+    },
+  };
+  await assert.rejects(
+    runDevicePush(bundle, "/dev/cu.fake", runtime),
+    { code: DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, message: "serial write timed out" },
+  );
+  assert.ok(clearCalls >= 1);
+});
+
+test("boundedIo settles with the underlying error when arming its deadline throws synchronously", async () => {
+  const runtime = {
+    serial: {
+      open: () => ({
+        write: () => Promise.resolve(),
+        onLine: () => () => {},
+        onError: () => () => {},
+        close: () => Promise.resolve(),
+      }),
+    },
+    setTimer: () => { throw new Error("setTimer boom"); },
+    clearTimer: () => {},
+  };
+  await assert.rejects(
+    runDevicePush(bundle, "/dev/cu.fake", runtime),
+    { code: DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, message: "setTimer boom" },
+  );
+});
+
+test("a synchronous listener-registration failure fails the push immediately", async () => {
+  const runtime = {
+    serial: {
+      open: () => ({
+        write: () => Promise.resolve(),
+        onLine: () => { throw new Error("onLine boom"); },
+        onError: () => () => {},
+        close: () => Promise.resolve(),
+      }),
+    },
+    setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+    clearTimer: (timer) => clearTimeout(timer),
+  };
+  await assert.rejects(
+    runDevicePush(bundle, "/dev/cu.fake", runtime),
+    { code: DIAGNOSTIC_CODES.DEVICE_PUSH_FAILED, message: "onLine boom" },
+  );
 });
 
 test("serial resource close destroys the output immediately", async () => {

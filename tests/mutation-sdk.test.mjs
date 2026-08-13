@@ -149,6 +149,68 @@ test("artifact-store refuses artifact-directory and final-file symlink escapes w
   assert.equal(readFileSync(outsideArtifact, "utf8"), "keep this outside value");
 });
 
+test("artifact-store reports an unavailable project root instead of guessing its layout", () => {
+  assert.throws(
+    () => DEFAULT_ARTIFACT_STORE.resolve("/tmp/tsx-lvgl-artifact-store-missing-root-xyz", lock()),
+    { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+  );
+});
+
+test("artifact-store install recovers when the completed second rename is replaced by a link", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-post-rename-swap-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(sourceArtifact, "new artifact bytes");
+  const initial = join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz");
+  writeFileSync(initial, "old artifact bytes");
+
+  const store = createArtifactStore({
+    afterSecondRename: () => {
+      rmSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+      symlinkSync(outside, join(root, ".tsx-lvgl", "artifacts"), "dir");
+    },
+  });
+
+  assert.throws(() => store.install(root, sourceArtifact, metadata(sourceArtifact)), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+  assert.equal(existsSync(join(outside, "tsx-lvgl-sdk-0.1.0.tgz")), false);
+  assert.equal(readFileSync(join(root, ".tsx-lvgl", "artifacts", "tsx-lvgl-sdk-0.1.0.tgz"), "utf8"), "old artifact bytes");
+});
+
+test("artifact-store install refuses to stage an existing artifacts directory containing a symlink", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-copy-entry-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  const sourceArtifact = join(sandbox, "sdk.tgz");
+  mkdirSync(join(root, ".tsx-lvgl", "artifacts"), { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(sourceArtifact, "new artifact bytes");
+  writeFileSync(join(outside, "linked.tgz"), "outside value");
+  symlinkSync(join(outside, "linked.tgz"), join(root, ".tsx-lvgl", "artifacts", "linked.tgz"));
+
+  assert.throws(
+    () => DEFAULT_ARTIFACT_STORE.install(root, sourceArtifact, metadata(sourceArtifact)),
+    { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK },
+  );
+  assert.equal(readFileSync(join(outside, "linked.tgz"), "utf8"), "outside value");
+});
+
+test("artifact-store resolve rejects a symlinked artifacts directory without opening it", (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-resolve-symlink-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "project");
+  const outside = join(sandbox, "outside");
+  mkdirSync(join(root, ".tsx-lvgl"), { recursive: true });
+  mkdirSync(outside);
+  symlinkSync(outside, join(root, ".tsx-lvgl", "artifacts"), "dir");
+
+  assert.throws(() => DEFAULT_ARTIFACT_STORE.resolve(root, lock()), { code: DIAGNOSTIC_CODES.SOURCE_PATH_LEAK });
+});
+
 test("artifact-store stage swap cannot be redirected when artifacts is replaced after validation", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-artifact-swap-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
