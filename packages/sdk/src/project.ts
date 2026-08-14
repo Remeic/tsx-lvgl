@@ -620,6 +620,7 @@ function consumerAgentsTemplate(): string {
     `- ${tick}<package-manager> run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
     `- ${tick}<package-manager> run update${tick} — explicitly package a configured framework checkout and update the pin.`,
     `- ${tick}<package-manager> run dev${tick} — run one deterministic headless kernel check.`,
+    `- ${tick}<package-manager> run dev -- --device --port <serial-port>${tick} — keep a development watcher running; the configured TSX entry is rebuilt and pushed after each accepted save.`,
     `- ${tick}<package-manager> run check${tick} — typecheck the app through the SDK facade.`,
     `- ${tick}<package-manager> run build${tick} — typecheck and emit the deterministic JavaScript bundle.`,
     `- ${tick}<package-manager> run doctor${tick} — inspect lock, artifact, installation, portability and engine diagnostics; append ${tick}-- --json${tick} for machine output.`,

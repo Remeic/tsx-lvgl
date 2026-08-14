@@ -79,7 +79,9 @@ npm run board:install -- \
 
 Omit `--execute` (or pass `--dry-run`) to build and inspect the guarded plan
 without opening the board. The public app-facing `tsx-lvgl dev --device`
-command remains the fast RAM hot-reload path; it intentionally does not flash.
+command is the long-lived RAM hot-reload path for a consumer project; it
+intentionally does not flash. The framework-only `npm run dev:board` helper
+accepts an explicit entry for direct examples and uses the same watcher.
 
 ## 3. Build the runtime-port probe
 

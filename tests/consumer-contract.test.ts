@@ -284,10 +284,13 @@ process.exit(17);
     dependencies: Record<string, string>;
     workspaces?: unknown;
     engines?: { node?: unknown };
+    scripts?: Record<string, string>;
   };
   assert.deepEqual(Object.keys(packageJson.dependencies), ["@tsx-lvgl/sdk"]);
   assert.equal(packageJson.workspaces, undefined);
   assert.equal(packageJson.engines?.node, ">=24.19.0 <25");
+  assert.equal(packageJson.scripts?.dev, "tsx-lvgl dev");
+  assert.match(readFileSync(join(appRoot, "AGENTS.md"), "utf8"), /run dev -- --device --port/);
   assert.equal(existsSync(join(appRoot, "node_modules/@tsx-lvgl/core")), false);
 
   const portableFiles = [

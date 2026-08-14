@@ -7,7 +7,7 @@ import { parseCli as parseWatchCli } from "../scripts/watch-push.mjs";
 const bundle = (generation) => ({
   manifest: {
     protocolVersion: 1,
-    bundleId: "pomodoro",
+    bundleId: "app",
     boardId: "waveshare-v1",
     generation,
     byteLength: 1,
@@ -32,13 +32,13 @@ const waitFor = async (predicate) => {
 
 test("watch-push CLI requires a TSX entry and local serial port", () => {
   assert.deepEqual(
-    parseWatchCli(["--entry", "examples/apps/pomodoro.tsx", "--port", "/dev/cu.usbmodem1101"]),
+    parseWatchCli(["--entry", "src/App.tsx", "--port", "/dev/cu.usbmodem1101"]),
     {
       help: false,
       options: {
-        entry: "examples/apps/pomodoro.tsx",
+        entry: "src/App.tsx",
         port: "/dev/cu.usbmodem1101",
-        bundleId: "pomodoro",
+        bundleId: "app",
         generation: 1,
         boardId: "waveshare.esp32s3.touch-amoled-1.8",
       },
@@ -71,7 +71,7 @@ test("device watch coalesces saves and serializes monotonic pushes", async () =>
       pushed.push(next.manifest.generation);
       if (pushed.length === 2) await secondPush.promise;
       activePushes -= 1;
-      return { bundleId: "pomodoro", generation: next.manifest.generation, epoch: pushed.length, retryCount: 0 };
+      return { bundleId: "app", generation: next.manifest.generation, epoch: pushed.length, retryCount: 0 };
     },
     onAccepted: (result) => accepted.push(result.generation),
     onRejected: (error) => assert.fail(error.message),
@@ -111,7 +111,7 @@ test("device watch keeps the accepted app after a compile error and recovers on 
       if (buildCount === 2) throw new Error("TSX does not compile");
       return bundle(generation);
     },
-    push: async (next) => ({ bundleId: "pomodoro", generation: next.manifest.generation, epoch: accepted.length + 1, retryCount: 0 }),
+    push: async (next) => ({ bundleId: "app", generation: next.manifest.generation, epoch: accepted.length + 1, retryCount: 0 }),
     onAccepted: (result) => accepted.push(result.generation),
     onRejected: (error) => rejected.push(error.message),
   });
@@ -147,7 +147,7 @@ test("device watch ignores duplicate notifications when compiled content is unch
     },
     push: async (next) => {
       pushes += 1;
-      return { bundleId: "pomodoro", generation: next.manifest.generation, epoch: pushes, retryCount: 0 };
+      return { bundleId: "app", generation: next.manifest.generation, epoch: pushes, retryCount: 0 };
     },
     onAccepted: () => {},
     onRejected: (error) => assert.fail(error.message),

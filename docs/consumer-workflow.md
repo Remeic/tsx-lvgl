@@ -18,20 +18,25 @@ cd my-app
 
 ## Device-backed dev mode
 
-When a development runtime is already running on a locally attached board,
-one command builds and pushes the app bundle without reflashing firmware:
+When a development runtime is already running on a locally attached board, keep
+this command running. It pushes the initial bundle immediately, then watches
+the entry configured in `tsx-lvgl.json` and pushes each accepted save without
+reflashing firmware:
 
 ```bash
 <package-manager> run dev -- --device --port /dev/cu.usbmodemXXX --json
 <package-manager> run doctor -- --device --port /dev/cu.usbmodemXXX --json
 ```
 
-`dev --device` uses the TSXB development transport, negotiates one monotonic
-generation from the board's `RDY lastGeneration` reply, and makes at most one
-retry. The port and negotiated generation stay in memory for that invocation;
-they are never written to `tsx-lvgl.json`, the framework lock, or other
-portable project files. `doctor --device` only validates local port syntax and
-does not open, reset, flash, or otherwise touch a board.
+`dev --device` uses the TSXB development transport for every accepted build,
+negotiates one monotonic generation from the board's `RDY lastGeneration` reply,
+and makes at most one retry per push. Rapid saves are coalesced, builds and
+pushes are serialized, and a failed build or push leaves the last accepted app
+running while the watcher waits for the next save. The port and negotiated
+generation stay in memory for that invocation; they are never written to
+`tsx-lvgl.json`, the framework lock, or other portable project files.
+`doctor --device` only validates local port syntax and does not open, reset,
+flash, or otherwise touch a board.
 
 ## Package managers
 
