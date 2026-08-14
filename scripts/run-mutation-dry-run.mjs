@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-export const MUTATION_DRY_RUN_BUDGET_MS = 10_000;
+// The previous six-package, 5,207-mutant allowlist took about 17.5s on the
+// pinned host; keep a bounded preparation budget with room for CI variance.
+export const MUTATION_DRY_RUN_BUDGET_MS = 30_000;
 
 export function assertMutationDryRunBudget(elapsedMs, budgetMs = MUTATION_DRY_RUN_BUDGET_MS) {
   if (elapsedMs > budgetMs) {

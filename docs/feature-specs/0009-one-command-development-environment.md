@@ -33,4 +33,4 @@ flowchart LR
 
 ## Test plan
 
-The blocking container job starts from a fresh GitHub checkout, invokes `./tools/dev test` and `./tools/dev mutation` without host Node/ESP-IDF installation, and records the image ID, tool versions and command output. The QEMU command remains gated on issue #8; Apple Silicon build evidence and physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.
+The blocking container job starts from a fresh GitHub checkout, invokes `./tools/dev test` without host Node/ESP-IDF installation, and records the image ID, tool versions and command output. The dedicated host mutation job owns the mutation gate once per CI run. The QEMU command remains gated on issue #8; Apple Silicon build evidence and physical USB/display/touch gates remain open. Do not claim USB or panel parity from the container alone.

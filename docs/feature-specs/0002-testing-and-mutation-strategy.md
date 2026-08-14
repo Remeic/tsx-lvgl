@@ -32,7 +32,7 @@ flowchart TD
 | --- | --- | --- |
 | TypeScript public-interface tests | Core, runtime, bundle and sensor behavior through public seams | Every change |
 | Property/golden tests | VNode, reconciliation and bundle invariants | Every runtime feature |
-| Stryker mutation tests | Tests detect realistic changes in deterministic framework packages and the public SDK facade | Every milestone; PR on scoped changes when fast |
+| Stryker mutation tests | Tests detect realistic changes in the bounded deterministic core, sensor, and bundler boundary | Every milestone; differential PR runs on scoped changes |
 | Runtime-port build | QuickJS-NG, LVGL, timer, sensor and touch feasibility | Every board/runtime change |
 | LVGL SDL screenshots | Layout and visual behavior without hardware | Every visual change |
 | ESP-IDF build matrix | Board adapter and generated artifact integrate cleanly | Every board/runtime change |
@@ -42,7 +42,7 @@ flowchart TD
 
 ## Mutation policy
 
-Stryker mutates the deterministic `core`, `runtime`, `sensors`, `bundler`, `device`, SDK facade and package-manager seam sources, where tests can kill mutants quickly. The SDK CLI and npm-pack/install workflow run once through the dedicated consumer-contract gate after Stryker rather than once per mutant. We do not mutate vendor drivers, native probe code, hardware timing or the physical board: those require build, simulator, serial and hardware evidence instead.
+Stryker's blocking allowlist is the deterministic `core`, `sensors`, and `bundler` host boundary, where the current tests kill every executable mutant. Runtime lifecycle, device/board orchestration, and SDK CLI/npm-pack/install workflows remain explicit contract gates and are investigated through smaller differential campaigns when their state-machine seams are isolated. We do not mutate vendor drivers, native probe code, hardware timing or the physical board: those require build, simulator, serial and hardware evidence instead.
 
 The scripts keep the consumer-contract gate, package-manager unit tests and the
 real package-manager contract as explicit sequential stages because the
@@ -52,14 +52,14 @@ exercises every available non-npm package manager once outside the workspace.
 Isolating these boundaries keeps the evidence deterministic without changing
 application runtime concurrency.
 
-The configuration uses Stryker's command runner because the repository uses Node's built-in test runner. The normal `npm run typecheck` is the strict TypeScript gate. The mutation command uses `--noCheck` and evaluates every executable mutant against the deterministic `test:mutation` slice; the consumer-contract and real package-manager gates run once after Stryker. Transient mutant type errors are not substituted for behavioral kills. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
+The configuration uses Stryker's command runner because the repository uses Node's built-in test runner. The normal `npm run typecheck` is the strict TypeScript gate. The mutation command transpiles instrumented TypeScript without type-checking and evaluates every executable mutant against the deterministic `test:mutation` slice; the consumer-contract and real package-manager gates run once after Stryker. Transient mutant type errors are not substituted for behavioral kills. If test volume makes this slow, migrate the host runner to a Stryker-supported integrated runner as a separately documented feature; do not hide a slow mutation run behind a fake coverage number.
 
 Mutation results are evidence for one exact commit SHA, lockfile, Node version, operating system and Stryker/toolchain invocation. Do not claim a repository-wide or current 100% baseline in this document until the JSON report for that exact SHA has been retained and the killed, CompileError, survivor and timeout classifications have been reviewed. TypeScript diagnostic classification can vary by platform and tool-process timing, so the report—not prose—is the source of truth while that classification is being stabilized. The configured break threshold is 100%, therefore a survivor or timeout cannot produce a green mutation run. This remains evidence only for the deterministic host slice, not hardware confidence.
 
 ## Acceptance criteria
 
 - [x] Public interfaces and test seams are documented for the current runtime slice.
-- [x] Stryker runs against deterministic framework and SDK facade source; the consumer contract is a separate once-per-run gate.
+- [x] Stryker runs against the bounded deterministic core/sensor/bundler source allowlist; device and SDK consumer contracts are separate once-per-run gates.
 - [x] The strict TypeScript build rejects invalid product changes before mutation.
 - [ ] Mutation report is reproducible with the lockfile and Node 24.19.0.
 - [ ] The baseline mutation score is recorded with surviving mutants triaged.

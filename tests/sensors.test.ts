@@ -267,6 +267,16 @@ test("isShake supports per-app thresholds and can disable rotation detection", (
   assert.equal(isShake(deliberateShake, pomodoroThresholds), true);
 });
 
+test("isShake accepts zero thresholds and disables both paths with null thresholds", () => {
+  const stationary = {
+    accelerationMps2: [0, 0, 9.80665] as const,
+    angularVelocityDps: [0, 0, 0] as const,
+  };
+
+  assert.equal(isShake(stationary, { accelerationDeltaMps2: 0, angularVelocityDps: null }), true);
+  assert.equal(isShake(stationary, { accelerationDeltaMps2: null, angularVelocityDps: null }), false);
+});
+
 test("isShake rejects invalid per-app thresholds", () => {
   const stationary = {
     accelerationMps2: [0, 0, 9.80665] as const,
