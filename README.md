@@ -71,13 +71,19 @@ third path — a runtime small enough to live beside LVGL on an ESP32:
 
 ## Quickstart
 
-Build the SDK artifact once from a framework checkout, then create an app:
+Install the public SDK/CLI, then create an app:
 
 ```bash
-npm run build
+npm install --global @tsx-lvgl/sdk
+tsx-lvgl create ./my-app
+cd my-app && npm run dev
+```
+
+Framework contributors can use the equivalent offline artifact workflow:
+
+```bash
 npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
 tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
-cd my-app && npm run dev
 ```
 
 With a development runtime already running on an attached board, one command
