@@ -1,8 +1,10 @@
 # `@tsx-lvgl/sdk`
 
-This private package is the supported application seam for TSX-LVGL. It is
-distributed through an npm-pack tarball during the local bootstrap workflow;
-it is intentionally not publishable.
+`@tsx-lvgl/sdk` is the supported application seam for TSX-LVGL. The framework
+workspace stays private; the release packer builds a self-contained, public
+registry artifact that vendors the framework implementation and records its
+source provenance. Contributors can also make the same portable artifact for
+an offline local bootstrap workflow.
 
 Applications import UI tags and hooks from `@tsx-lvgl/sdk` and use the
 `tsx-lvgl` command for `create`, `sync`, `update`, `dev`, `check`, `build` and
@@ -17,6 +19,16 @@ Discovery and base command construction use the pinned, zero-dependency
 `package-manager-detector` library. The SDK adds only TSX-LVGL policy: stable
 diagnostics, offline and lifecycle-script flags, lock conflict handling, and a
 fresh Bun cache for same-version local artifacts.
+
+For consumers, install the published package and use its CLI:
+
+```bash
+npm install --global @tsx-lvgl/sdk
+tsx-lvgl create my-app
+```
+
+For release commands and the required trusted-publishing setup, see
+[`RELEASING.md`](https://github.com/Remeic/tsx-lvgl/blob/main/RELEASING.md).
 
 `tsx-lvgl dev --device --port <serial-port> [--json]` watches the configured
 TSX entry and pushes each accepted build over the development-only transport.

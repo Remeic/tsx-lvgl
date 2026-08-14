@@ -14,15 +14,17 @@ const FULL_GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 function usage() {
   return `Usage:
-  node scripts/pack-sdk.mjs [--out <directory>] [--json]
+  node scripts/pack-sdk.mjs [--out <directory>] [--json] [--registry]
 
 The command builds a self-contained npm-pack artifact for @tsx-lvgl/sdk.
+--registry produces the public registry artifact and requires a clean source tree.
 `;
 }
 
 function parseArgs(argv) {
   let out = resolve(ROOT, "build/sdk-artifacts");
   let json = false;
+  let registry = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--help") {
@@ -33,6 +35,10 @@ function parseArgs(argv) {
       json = true;
       continue;
     }
+    if (argument === "--registry") {
+      registry = true;
+      continue;
+    }
     if (argument === "--out") {
       const value = argv[++index];
       if (value === undefined || value.startsWith("--")) throw new Error("--out requires a value");
@@ -41,7 +47,7 @@ function parseArgs(argv) {
     }
     throw new Error(`unknown option: ${argument}`);
   }
-  return { out, json };
+  return { out, json, registry };
 }
 
 function run(command, args, options = {}) {
@@ -105,10 +111,14 @@ function requiredEnvironmentValue(name, value) {
 function main() {
   const options = parseArgs(process.argv.slice(2));
   const sdkPackage = readPackage(SDK_ROOT);
-  if (sdkPackage.private !== true) throw new Error("@tsx-lvgl/sdk must remain private; npm pack is the only distribution path");
+  if (sdkPackage.private !== true) throw new Error("@tsx-lvgl/sdk must remain a private workspace package; release only its staged artifact");
   if (sdkPackage.name !== "@tsx-lvgl/sdk") throw new Error("unexpected SDK package name");
 
-  buildSdk();
+  const { sourceSha, sourceDirty } = collectSourceProvenance();
+  if (options.registry && sourceDirty) {
+    throw new Error("registry packs require a clean source tree");
+  }
+  buildSdk({ force: options.registry, clean: options.registry });
   const stagingRoot = mkdtempSync(join(tmpdir(), "tsx-lvgl-sdk-pack-"));
   try {
     const stagingDist = resolve(stagingRoot, "dist");
@@ -121,17 +131,14 @@ function main() {
     copyTypeScript(stagingDist);
     rewriteInternalImports(stagingDist);
 
-    const { sourceSha, sourceDirty: dirty } = collectSourceProvenance();
     const provenance = {
       formatVersion: 1,
       packageName: sdkPackage.name,
       version: sdkPackage.version,
       sourceSha,
-      sourceDirty: dirty,
+      sourceDirty,
     };
-    const portablePackage = { ...sdkPackage };
-    delete portablePackage.dependencies;
-    delete portablePackage.bundledDependencies;
+    const portablePackage = createPortablePackage(sdkPackage, options.registry);
     writeFileSync(resolve(stagingRoot, "package.json"), `${JSON.stringify(portablePackage, null, 2)}\n`, "utf8");
     writeFileSync(resolve(stagingRoot, "provenance.json"), `${JSON.stringify(provenance, null, 2)}\n`, "utf8");
 
@@ -147,7 +154,8 @@ function main() {
       packageName: sdkPackage.name,
       version: sdkPackage.version,
       sourceSha,
-      sourceDirty: dirty,
+      sourceDirty,
+      distribution: options.registry ? "registry" : "local",
       artifactPath,
       filename: npmMetadata.filename,
       sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -165,20 +173,47 @@ function main() {
   }
 }
 
-function buildSdk() {
+function createPortablePackage(sdkPackage, registry) {
+  const portablePackage = { ...sdkPackage };
+  delete portablePackage.dependencies;
+  delete portablePackage.bundleDependencies;
+  delete portablePackage.bundledDependencies;
+  if (registry) delete portablePackage.private;
+  else portablePackage.private = true;
+  return portablePackage;
+}
+
+function buildSdk({ force = false, clean = false } = {}) {
   // Stryker has just emitted instrumented JavaScript while preserving the
   // strict-build declaration snapshot. Rebuilding here would widen literal
   // public types solely because of instrumentation before consumer typechecks.
-  if (process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
+  if (!force && process.env.TSX_LVGL_MUTATION_BUILD === "1") return;
   // Consumer contracts pack concurrently. Reusing a current project build
   // avoids two `tsc --force` processes racing over shared declaration output.
-  if (!sdkBuildIsStale()) return;
+  if (!force && !sdkBuildIsStale()) return;
+  if (clean) cleanSdkBuildOutputs();
   const tscPath = resolve(ROOT, "node_modules/typescript/bin/tsc");
   if (!existsSync(tscPath)) throw new Error("missing root node_modules/typescript; run npm ci first");
-  run(process.execPath, [tscPath, "-b", resolve(SDK_ROOT, "tsconfig.json"), "--force", "--pretty", "false"], {
+  const buildTargets = clean
+    ? [
+        ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name, "tsconfig.json")),
+        resolve(SDK_ROOT, "tsconfig.json"),
+      ]
+    : [resolve(SDK_ROOT, "tsconfig.json")];
+  run(process.execPath, [tscPath, "-b", ...buildTargets, "--force", "--pretty", "false"], {
     cwd: ROOT,
     stdio: "pipe",
   });
+}
+
+function cleanSdkBuildOutputs() {
+  for (const packageRoot of [SDK_ROOT, ...PACKAGE_NAMES.map((name) => resolve(ROOT, "packages", name))]) {
+    // A local pack can be finishing its incremental build while a release pack
+    // starts. Node retries ENOTEMPTY for recursive removal with these options;
+    // once the concurrent writer exits, this release-only path still rebuilds
+    // from an empty output directory.
+    rmSync(resolve(packageRoot, "dist"), { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
 }
 
 function sdkBuildIsStale() {

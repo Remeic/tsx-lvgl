@@ -1,9 +1,25 @@
 # Consumer application workflow
 
-The supported local distribution boundary is a standard npm-pack artifact. A
-machine bootstrap builds one artifact from a framework checkout and installs it
-into an application; the application then works without a registry and without
-the framework checkout:
+`@tsx-lvgl/sdk` is the public npm package for application authors. It includes
+the `tsx-lvgl` CLI and the supported SDK facade; applications do not need a
+framework checkout:
+
+```bash
+npm install --global @tsx-lvgl/sdk
+tsx-lvgl create ./my-app
+cd my-app
+<package-manager> run doctor -- --json
+<package-manager> run dev
+<package-manager> run check
+<package-manager> run build
+```
+
+## Offline framework workflow
+
+Framework contributors can use the equivalent standard npm-pack artifact when
+working without registry access. The artifact is built from a framework
+checkout, then installed into the application; the application subsequently
+works without that checkout:
 
 ```bash
 npm run build
@@ -50,14 +66,14 @@ Yarn support is limited to Yarn Classic v1 because the consumer contract expects
 
 The generated `.tsx-lvgl/framework.lock.json` records the framework source SHA,
 artifact version, SHA-256 and byte length. `sync` installs that exact artifact;
-`update` is the explicit command that repackages a machine-configured source
-checkout. `dev` and `build` verify the lock and never upgrade it. A source path
-may be supplied through `TSX_LVGL_SOURCE` or the machine-only
+`update` is the explicit command for repackaging a machine-configured source
+checkout or selecting a new artifact. `dev` and `build` verify the lock and
+never upgrade it. A source path may be supplied through `TSX_LVGL_SOURCE` or the machine-only
 `~/.config/tsx-lvgl/config.json`; it is never written to application config.
 The generated `AGENTS.md` records the same ownership and safety rules.
 
 The CLI emits stable diagnostic codes and supports JSON output on all commands
-that produce a result. The public `@tsx-lvgl/sdk` package and its `tsx-lvgl`
-binary are private and protected from accidental publication; the package
-source seam can later be replaced by an npm-compatible registry without
-changing application imports or commands.
+that produce a result. The source workspace package remains private to prevent
+an incomplete direct publish; releases publish only the self-contained registry
+artifact. Both registry and offline artifacts provide the same
+`@tsx-lvgl/sdk` imports and `tsx-lvgl` binary.

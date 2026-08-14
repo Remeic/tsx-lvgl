@@ -3,12 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "description": "The supported application facade and local CLI for TSX-LVGL",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Remeic/tsx-lvgl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Remeic/tsx-lvgl/issues"
+  },
+  "homepage": "https://github.com/Remeic/tsx-lvgl#readme",
+  "keywords": [
+    "tsx",
+    "lvgl",
+    "embedded",
+    "esp32",
+    "ui"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24.19.0 <25"
   },
   "bin": {
-    "tsx-lvgl": "./dist/cli.js"
+    "tsx-lvgl": "dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "files": [
     "dist",

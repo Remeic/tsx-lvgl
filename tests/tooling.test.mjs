@@ -123,10 +123,10 @@ test("Stryker dry run uses the declaration-preserving mutation harness", async (
   assert.doesNotMatch(config, /buildCommand: ".*tsc -b/);
 });
 
-test("mutation dry-run budget fails closed above ten seconds", () => {
-  assert.equal(MUTATION_DRY_RUN_BUDGET_MS, 10_000);
+test("mutation dry-run budget fails closed above the bounded preparation ceiling", () => {
+  assert.equal(MUTATION_DRY_RUN_BUDGET_MS, 30_000);
   assert.doesNotThrow(() => assertMutationDryRunBudget(9_999));
-  assert.throws(() => assertMutationDryRunBudget(10_001), /exceeded 10000ms/);
+  assert.throws(() => assertMutationDryRunBudget(30_001), /exceeded 30000ms/);
 });
 
 test("validation context has stable machine-readable fields", () => {

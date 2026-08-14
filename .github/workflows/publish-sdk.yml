@@ -1,0 +1,45 @@
+name: Publish SDK
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      - run: npm run mutation
+      - name: Validate tag version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const version = JSON.parse(readFileSync("packages/sdk/package.json", "utf8")).version;
+            const expected = `sdk-v${version}`;
+            if (process.env.RELEASE_TAG !== expected) throw new Error(`tag ${process.env.RELEASE_TAG} must equal ${expected}`);
+          '
+      - name: Pack registry artifact
+        id: pack
+        run: |
+          metadata="$(node scripts/pack-sdk.mjs --registry --out release-artifacts --json)"
+          printf '%s\n' "$metadata"
+          node --input-type=module -e '
+            const metadata = JSON.parse(process.argv[1]);
+            process.stdout.write(`artifact=${metadata.artifactPath}\n`);
+          ' "$metadata" >> "$GITHUB_OUTPUT"
+      - name: Publish with npm trusted publishing
+        run: npm publish "${{ steps.pack.outputs.artifact }}" --access public --provenance

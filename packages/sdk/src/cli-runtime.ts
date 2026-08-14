@@ -49,6 +49,9 @@ const DEFAULT_CLI_RUNTIME: CliRuntime = { signal: new AbortController().signal }
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const command = argv[0] ?? "help";
+  if (command === "--help" || command === "-h") {
+    return { command: "help", positional: [], json: false };
+  }
   const positional: string[] = [];
   let json = false;
   let device = false;
