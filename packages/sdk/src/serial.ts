@@ -50,6 +50,8 @@ export function validateSerialPort(port: string | undefined): string {
 export const NODE_SERIAL_RUNTIME: SerialRuntime = {
   open(port: string): SerialLineChannel {
     configurePort(port);
+    // The POSIX input branch requires a platform-specific device fixture; its poll loop is covered separately where that fixture exists.
+    /* node:coverage ignore next */
     const input = POSIX_SERIAL_PORT.test(port) ? openPosixSerialInput(port) : createReadStream(port);
     const output = createWriteStream(port);
     const lines = createInterface({ input, crlfDelay: Infinity });
