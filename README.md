@@ -13,6 +13,12 @@
 </p>
 
 <p align="center">
+  <img src="assets/demo-tsx-lvgl.gif" alt="TSX-LVGL live reload demo running on a physical ESP32 board" width="960">
+</p>
+
+<p align="center"><strong>Edit TSX. Push over USB. See it change live on a real ESP32 — no reflash.</strong></p>
+
+<p align="center">
   <a href="#quickstart">Quickstart</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#roadmap">Roadmap</a> ·
@@ -40,8 +46,6 @@ export default function Counter(): VNode {
   );
 }
 ```
-
-<!-- TODO: board capture GIF of the live-reload loop goes here -->
 
 This loop is not aspirational: the runtime-probe golden loop — build on the
 host, push over USB Serial/JTAG, watch the app swap live, drive it with touch
