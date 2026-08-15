@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 
 import { asCliError, CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
-import type { BuildResult, CheckResult, DevResult, FrameworkLock } from "./project.js";
+import type { BuildResult, CheckResult, DevResult, FrameworkLock, ProjectDeviceWatchOptions } from "./project.js";
 import type { DoctorResult } from "./doctor.js";
 
 export const USAGE = `Usage:
@@ -32,6 +32,7 @@ export interface CliOperations {
   readonly checkProject: (root: string) => CheckResult;
   readonly buildProject: (root: string) => BuildResult;
   readonly devProject: (root: string, options?: { readonly device: boolean; readonly port?: string }) => Promise<DevResult>;
+  readonly watchDeviceProject: (root: string, options: ProjectDeviceWatchOptions) => Promise<void>;
   readonly doctorProject: (root: string, options?: { readonly device: boolean; readonly port?: string }) => DoctorResult;
 }
 
@@ -39,6 +40,12 @@ export interface CliWriter {
   readonly log: (message: string) => void;
   readonly error: (message: string) => void;
 }
+
+export interface CliRuntime {
+  readonly signal: AbortSignal;
+}
+
+const DEFAULT_CLI_RUNTIME: CliRuntime = { signal: new AbortController().signal };
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const command = argv[0] ?? "help";
@@ -94,6 +101,7 @@ export async function runCli(
   cwd: string,
   operations: CliOperations,
   writer: CliWriter,
+  runtime: CliRuntime = DEFAULT_CLI_RUNTIME,
 ): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -140,11 +148,16 @@ export async function runCli(
       case "dev": {
         if (parsed.device && parsed.port === undefined) throw usageError("dev --device requires --port");
         if (!parsed.device && parsed.port !== undefined) throw usageError("--port requires dev --device");
-        const result = await operations.devProject(cwd, { device: parsed.device === true, ...(parsed.port === undefined ? {} : { port: parsed.port }) });
-        if (result.device === undefined) {
-          emitSuccess(parsed.json, "DEV_OK", { bundleId: result.bundleId, generation: result.generation, texts: result.texts }, writer);
+        if (parsed.device) {
+          await operations.watchDeviceProject(cwd, {
+            port: parsed.port!,
+            signal: runtime.signal,
+            onAccepted: (result) => emitSuccess(parsed.json, "DEV_DEVICE_OK", { bundleId: result.bundleId, generation: result.generation, epoch: result.epoch, retryCount: result.retryCount }, writer),
+            onRejected: (error) => emitFailure(asCliError(error), parsed.json, writer),
+          });
         } else {
-          emitSuccess(parsed.json, "DEV_DEVICE_OK", { bundleId: result.bundleId, generation: result.generation, epoch: result.device.epoch, retryCount: result.device.retryCount }, writer);
+          const result = await operations.devProject(cwd, { device: false });
+          emitSuccess(parsed.json, "DEV_OK", { bundleId: result.bundleId, generation: result.generation, texts: result.texts }, writer);
         }
         return 0;
       }

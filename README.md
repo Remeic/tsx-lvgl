@@ -86,8 +86,9 @@ npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
 tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
 ```
 
-With a development runtime already running on an attached board, one command
-builds and pushes your app without reflashing:
+With a development runtime already running on an attached board, keep this
+command running. It pushes the initial bundle and then reloads the configured
+app entry after each accepted save, without reflashing:
 
 ```bash
 npm run dev -- --device --port /dev/cu.usbmodemXXX

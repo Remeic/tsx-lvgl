@@ -219,14 +219,17 @@ Rules:
 
 ### Consumer device development command
 
-`tsx-lvgl dev --device --port <serial-port> [--json]` compiles the same app
-bundle as headless `dev` and sends it through the line-channel adapter. The
-TSXB session remains pure and testable; Node serial streams are injected at the
-CLI edge. On an initial `RDY` whose `lastGeneration` is not below the configured
-generation, the host sends `ABORT` and retries exactly once with
+`tsx-lvgl dev --device --port <serial-port> [--json]` watches the app entry
+configured in `tsx-lvgl.json`. It builds the initial bundle immediately, then
+coalesces saves and sends each accepted bundle through the line-channel
+adapter. The TSXB session remains pure and testable; Node serial streams are
+injected at the CLI edge. On each `RDY` whose `lastGeneration` is not below the
+configured generation, the host sends `ABORT` and retries exactly once with
 `lastGeneration + 1`. It never persists that negotiated value or the local
-port. A second stale generation, bad protocol identity, device error or either
-timeout fails deterministically and closes the channel.
+port. A compile/transport failure reports the rejection and keeps the last
+accepted app running so the next save can recover. A second stale generation,
+bad protocol identity, device error or either timeout fails that push
+deterministically without terminating the watch session.
 
 `tsx-lvgl doctor --device --port <serial-port>` checks only serial-port syntax;
 it never opens a serial device. Neither command calls a flashing, reset, reload

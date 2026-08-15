@@ -19,6 +19,7 @@
     "board:build": "node scripts/board-build.mjs",
     "board:install": "node scripts/board-install.mjs",
     "board:reload": "tools/board-reload",
+    "dev:board": "tools/watch-push",
     "test": "npm run coverage",
     "test:prepare": "node scripts/prepare-test-output.mjs && npm run build",
     "test:compiled": "node --test 'test-dist/tests/**/*.test.js' && node --test --test-concurrency=1 tests/*.test.mjs",
