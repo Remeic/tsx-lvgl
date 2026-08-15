@@ -99,30 +99,38 @@ framework itself: see [the framework workflow](docs/framework-workflow.md).
 
 ## How it works
 
-The kernel, reconciler, native ABI and firmware are fixed; only the app bundle
-moves. QuickJS-NG is the first measured engine candidate, not a permanent
+The compiler boundary produces JavaScript, not UI C: the TypeScript Compiler
+API is used by the bundler to turn TSX into a deterministic app bundle. The
+historical generated-C compiler/emitter is not part of the active product path.
+QuickJS-NG is the first measured engine candidate, not a permanent
 engine-selection promise.
 
 ```mermaid
-flowchart LR
-    A[Developer writes TSX] --> B[Deterministic JS bundle]
-    B --> C[Manifest: version, board, size, SHA-256]
-    C --> D{Validate bundle}
-    D -->|invalid| R[Reject; keep current app live]
-    D -->|valid| E[Dev USB transport]
-    E --> F[Bounded staging in ESP32-S3 PSRAM]
-    F --> G[QuickJS-NG kernel]
-    G --> H[Runtime reconciliation]
-    H --> I[Typed sensors, timers and events]
-    I --> J[LVGL host]
-    J --> K[Display and touch]
-    G --> L{Evaluate or commit fails?}
-    L -->|yes| R
-    L -->|no| J
+flowchart TB
+    A["App authoring<br/>TypeScript + TSX<br/>@tsx-lvgl/sdk"]
+    B["Build boundary<br/>TypeScript Compiler API + @tsx-lvgl/bundler<br/>TSX → deterministic JavaScript + manifest"]
+    C["Dev transport<br/>USB Serial/JTAG<br/>RAM staging · no reflash"]
+
+    subgraph DEVICE["ESP32 firmware / board"]
+        D["App bundle<br/>reloadable JavaScript"]
+        F["Kernel.js<br/>fixed / baked into firmware<br/>core + runtime + sensors + device"]
+        E["QuickJS-NG<br/>device-owned JavaScript engine"]
+        G["Native ABI / ESP-IDF C host<br/>owner task + board adapters"]
+        H["LVGL host<br/>widgets, styles and events"]
+        I["Hardware<br/>display · touch · sensors"]
+
+        D --> E
+        F --> E
+        E --> G --> H --> I
+    end
+
+    A --> B --> C --> D
 ```
 
 A failed evaluation, mount or native root replacement restores the previous
-in-memory root; a rejected bundle does not advance the generation. Deep dive:
+in-memory root; a rejected bundle does not advance the generation. In short:
+QuickJS-NG executes both the fixed kernel and the reloadable app, while the
+kernel reaches hardware through the native ABI and LVGL host. Deep dive:
 [runtime architecture](docs/architecture.md) and
 [Feature 0010](docs/feature-specs/0010-runtime-tsx-hot-reload.md).
 
