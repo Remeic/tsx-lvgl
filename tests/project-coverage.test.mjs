@@ -17,6 +17,7 @@ import {
   synchronizePackageLock,
   updateProject,
   verifyProject,
+  watchDeviceProject,
 } from "../packages/sdk/dist/project.js";
 import { NODE_SERIAL_RUNTIME } from "../packages/sdk/dist/serial.js";
 
@@ -30,6 +31,14 @@ function assertCode(action, code) {
 
 async function assertAsyncCode(action, code) {
   await assert.rejects(action, { code });
+}
+
+async function waitFor(predicate, message) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
 }
 
 function packArtifact(sandbox) {
@@ -130,6 +139,45 @@ test("dev pushes through the device branch using an injected serial channel", as
   } finally {
     NODE_SERIAL_RUNTIME.open = originalOpen;
   }
+});
+
+test("watchDeviceProject binds the configured entry and reloads after a save", async (t) => {
+  const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-watch-project-"));
+  t.after(() => rmSync(sandbox, { recursive: true, force: true }));
+  const root = join(sandbox, "app");
+  await createProject(root, packArtifact(sandbox));
+
+  const originalOpen = NODE_SERIAL_RUNTIME.open;
+  NODE_SERIAL_RUNTIME.open = () => autoDeviceChannel();
+  const controller = new AbortController();
+  const accepted = [];
+  const rejected = [];
+  const running = watchDeviceProject(root, {
+    port: "/dev/cu.fake",
+    signal: controller.signal,
+    onAccepted: (result) => {
+      accepted.push(result.generation);
+      if (accepted.length === 2) controller.abort();
+    },
+    onRejected: (error) => rejected.push(error.message),
+  });
+
+  try {
+    await waitFor(() => accepted.length === 1, "initial device watch push was not accepted");
+    writeFileSync(join(root, "src", "ignored.txt"), "ignored\n");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const entryPath = join(root, "src", "App.tsx");
+    writeFileSync(entryPath, readFileSync(entryPath, "utf8").replace("Hello TSX-LVGL", "Reloaded TSX-LVGL"));
+    await waitFor(() => accepted.length === 2, `reload was not accepted: ${rejected.join(", ")}`);
+    await running;
+  } finally {
+    controller.abort();
+    await running.catch(() => {});
+    NODE_SERIAL_RUNTIME.open = originalOpen;
+  }
+
+  assert.deepEqual(accepted, [1, 2]);
+  assert.deepEqual(rejected, []);
 });
 
 test("dev device branch propagates an already-diagnostic device failure unwrapped", async (t) => {
