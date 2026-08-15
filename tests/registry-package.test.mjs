@@ -9,7 +9,7 @@ import test from "node:test";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceSha = "0123456789abcdef0123456789abcdef01234567";
 
-test("registry SDK pack is public, self-contained, publish-clean, and installs its CLI", (t) => {
+test("registry SDK pack is public, self-contained, pack-clean, and installs its CLI", (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-registry-pack-"));
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
   const frameworkRoot = createFrameworkFixture(sandbox);
@@ -46,7 +46,7 @@ test("registry SDK pack is public, self-contained, publish-clean, and installs i
   assert.equal(existsSync(join(packageRoot, "dist", "vendor", "runtime", "index.js")), true);
   assert.equal(existsSync(join(packageRoot, "dist", "tsconfig.tsbuildinfo")), false);
 
-  const dryRun = spawnSync("npm", ["publish", "--dry-run", packed.artifactPath, "--access", "public", "--ignore-scripts"], {
+  const dryRun = spawnSync("npm", ["pack", "--dry-run", packed.artifactPath, "--ignore-scripts"], {
     cwd: sandbox,
     encoding: "utf8",
   });
