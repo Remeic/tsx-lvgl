@@ -46,10 +46,16 @@ jobs:
       - name: Run public fresh-clone test command
         run: |
           set -o pipefail
+          log_path="${RUNNER_TEMP}/container-command-ladder.txt"
+          set +e
           {
             echo '$ ./tools/dev test'
             ./tools/dev test
-          } 2>&1 | tee container-command-ladder.txt
+          } 2>&1 | tee "${log_path}"
+          test_status="$?"
+          set -e
+          cp "${log_path}" container-command-ladder.txt
+          exit "${test_status}"
 
       - name: Record container identity and tool versions
         if: always()

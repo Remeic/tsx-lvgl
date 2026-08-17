@@ -128,6 +128,106 @@ test("device watch keeps the accepted app after a compile error and recovers on 
   assert.deepEqual(rejected, ["TSX does not compile"]);
 });
 
+test("device watch contains a rejection reporter that throws", async () => {
+  const controller = new AbortController();
+  let change;
+  let builds = 0;
+  const accepted = [];
+  const running = runDeviceWatch({
+    initialGeneration: 1,
+    debounceMs: 0,
+    signal: controller.signal,
+    watch: (listener) => {
+      change = listener;
+      return { close() {} };
+    },
+    build: async (generation) => {
+      builds += 1;
+      if (builds === 1) throw "initial compile failed";
+      return bundle(generation);
+    },
+    push: async (next) => ({ bundleId: "app", generation: next.manifest.generation, epoch: 1, retryCount: 0 }),
+    onAccepted: (result) => accepted.push(result.generation),
+    onRejected: () => { throw new Error("reporter failed"); },
+  });
+
+  await waitFor(() => builds === 1);
+  change();
+  await waitFor(() => accepted.length === 1);
+  controller.abort();
+  await running;
+
+  assert.deepEqual(accepted, [1]);
+});
+
+test("device watch abort cancels a pending default debounce", async () => {
+  const controller = new AbortController();
+  let change;
+  let builds = 0;
+  const accepted = [];
+  const running = runDeviceWatch({
+    initialGeneration: 1,
+    signal: controller.signal,
+    watch: (listener) => {
+      change = listener;
+      return { close() {} };
+    },
+    build: async (generation) => {
+      builds += 1;
+      return bundle(generation);
+    },
+    push: async (next) => ({ bundleId: "app", generation: next.manifest.generation, epoch: 1, retryCount: 0 }),
+    onAccepted: (result) => accepted.push(result.generation),
+    onRejected: (error) => assert.fail(error.message),
+  });
+
+  await waitFor(() => accepted.length === 1);
+  change();
+  controller.abort();
+  await running;
+
+  assert.equal(builds, 1);
+});
+
+test("device watch clears a pending debounce during finalization", async () => {
+  let aborted = false;
+  const signal = {
+    get aborted() { return aborted; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const running = runDeviceWatch({
+    initialGeneration: 1,
+    signal,
+    watch: (onChange) => {
+      onChange();
+      return { close() {} };
+    },
+    build: async (generation) => bundle(generation),
+    push: async (next) => ({ bundleId: "app", generation: next.manifest.generation, epoch: 1, retryCount: 0 }),
+    onAccepted: () => { aborted = true; },
+    onRejected: (error) => assert.fail(error.message),
+  });
+
+  await running;
+});
+
+test("device watch propagates a watch setup failure", async () => {
+  const controller = new AbortController();
+  await assert.rejects(
+    runDeviceWatch({
+      initialGeneration: 1,
+      signal: controller.signal,
+      watch: () => { throw new Error("watch setup failed"); },
+      build: async (generation) => bundle(generation),
+      push: async (next) => ({ bundleId: "app", generation: next.manifest.generation, epoch: 1, retryCount: 0 }),
+      onAccepted: () => {},
+      onRejected: () => {},
+    }),
+    /watch setup failed/,
+  );
+});
+
 test("device watch ignores duplicate notifications when compiled content is unchanged", async () => {
   const controller = new AbortController();
   let change;

@@ -35,6 +35,7 @@ function operations(overrides = {}) {
 test("CLI parser normalizes supported options and rejects malformed input", () => {
   assert.deepEqual(parseArgs(["create", "app", "--artifact", "sdk.tgz", "--json", "--"]), { command: "create", positional: ["app"], artifact: "sdk.tgz", json: true });
   assert.equal(parseArgs([]).command, "help");
+  assert.deepEqual(parseArgs(["--help"]), { command: "help", positional: [], json: false });
   assert.equal(parseArgs(["sync", "-h"]).command, "help");
   assert.deepEqual(parseArgs(["create", "--artifact", "sdk.tgz", "--source", "framework", "--help"]), { command: "help", positional: [], json: false, artifact: "sdk.tgz", source: "framework" });
   assert.throws(() => parseArgs(["create", "--artifact"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
@@ -85,6 +86,12 @@ test("CLI routes device dev and doctor through existing command names with deter
   });
   assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake", "--json"], "/cwd", failingOps, output.writer), 1);
   assert.deepEqual(JSON.parse(output.errors[0]), { ok: false, code: "DEVICE_PUSH_FAILED", message: "serial disconnected" });
+  output = recorder();
+  const rejectingOps = operations({
+    watchDeviceProject: async (_root, options) => options.onRejected("compile failed"),
+  });
+  assert.equal(await runCli(["dev", "--device", "--port", "/dev/cu.fake"], "/cwd", rejectingOps, output.writer), 0);
+  assert.match(output.errors[0], /compile failed/);
 });
 
 test("CLI runtime routes every command and preserves machine-readable outcomes", async () => {
