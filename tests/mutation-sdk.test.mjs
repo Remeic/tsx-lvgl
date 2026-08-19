@@ -14,10 +14,20 @@ import {
 import { InstallTransactionInterruptedError } from "../packages/sdk/dist/install-transaction.js";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import { createInstallExecutor } from "../packages/sdk/dist/install-executor.js";
-import { createProject, updateProject } from "../packages/sdk/dist/project.js";
+import { createProject as createProjectOperation, updateProject } from "../packages/sdk/dist/project.js";
 import { parseSourcePackResult } from "../packages/sdk/dist/source-pack.js";
 
 const sourceSha = "a".repeat(40);
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+
+function createProject(target, artifact, packArtifact, adapters) {
+  return createProjectOperation(
+    target,
+    { boardId: V1_BOARD_ID, ...(artifact === undefined ? {} : { artifact }) },
+    packArtifact,
+    adapters,
+  );
+}
 
 function lock(version = "0.1.0") {
   return {

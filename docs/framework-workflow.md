@@ -34,7 +34,8 @@ node scripts/bundle-app.mjs \
   --entry tests/fixtures/shakeface-a.tsx \
   --out build/bundles \
   --bundle-id shakeface \
-  --generation 2
+  --generation 2 \
+  --board-id tsx-lvgl.host-test
 ```
 
 If a development probe is already running and its serial port is available,
@@ -71,6 +72,7 @@ physical write to `board:reload`:
 ```bash
 npm run board:install -- \
   --app pomodoro \
+  --target waveshare-touch-amoled-1.8-v1 \
   --port /dev/cu.usbmodemXXX \
   --recovery-dir /path/to/board-recovery \
   --esptool-python /path/to/esptool-5.3.1-venv/bin/python \
@@ -88,12 +90,11 @@ accepts an explicit entry for direct examples and uses the same watcher.
 The committed runtime-port probe is the development runtime host for the
 target board: it boots the embedded kernel, mounts the persistent app selected
 by `board:install` (Pomodoro by default), and then accepts hot-reloaded bundles
-over the dev transport. Build it with
-the pinned toolchain:
+over the dev transport. Build it with the target-aware helper and pinned
+toolchain:
 
 ```bash
-./tools/dev qemu \
-  "cd examples/esp-idf/runtime_port_probe && idf.py build"
+npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 ```
 
 Do not flash directly. Flashing only happens through the guarded board

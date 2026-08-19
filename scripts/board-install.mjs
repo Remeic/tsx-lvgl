@@ -3,7 +3,6 @@ import { basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const defaultProfile = "runtime-probe";
 const defaultEntry = "examples/apps/pomodoro.tsx";
 
 function usage() {
@@ -14,7 +13,7 @@ Options:
   --entry PATH        TSX entry to embed; defaults to ${defaultEntry}.
   --app NAME          Shorthand for examples/apps/NAME.tsx.
   --bundle-id ID      Bundle identity; defaults to the entry basename.
-  --profile NAME      Board profile; default ${defaultProfile}.
+  --target KEY        Explicit repository board target (required).
   --port PATH         Board serial path.
   --recovery-dir PATH External same-board recovery directory.
   --esptool-python PATH
@@ -37,7 +36,7 @@ export function parseCli(argv, env = process.env) {
   const options = {
     entry: defaultEntry,
     bundleId: "",
-    profile: defaultProfile,
+    target: "",
     port: env.TSX_LVGL_BOARD_PORT ?? "",
     recoveryDir: env.TSX_LVGL_RECOVERY_DIR ?? "",
     esptoolPython: env.ESPTOOL_PYTHON ?? "",
@@ -81,8 +80,8 @@ export function parseCli(argv, env = process.env) {
       case "--bundle-id":
         options.bundleId = value;
         break;
-      case "--profile":
-        options.profile = value;
+      case "--target":
+        options.target = value;
         break;
       case "--port":
         options.port = value;
@@ -102,6 +101,7 @@ export function parseCli(argv, env = process.env) {
   }
 
   if (!options.bundleId) options.bundleId = defaultBundleId(options.entry);
+  if (!options.target) throw new Error("--target is required");
   return { help: false, options };
 }
 
@@ -110,8 +110,9 @@ function appendFlag(args, name, value) {
 }
 
 export function buildCommandPlan(options) {
-  const embedArgs = ["scripts/embed-runtime-app.mjs", "--entry", options.entry, "--profile", options.profile, "--bundle-id", options.bundleId];
-  const reloadArgs = ["run", "board:reload", "--", "--profile", options.profile, "--reset-mode", options.resetMode];
+  const embedArgs = ["scripts/embed-runtime-app.mjs", "--entry", options.entry, "--target", options.target, "--bundle-id", options.bundleId];
+  const buildArgs = ["run", "board:build", "--", "--target", options.target];
+  const reloadArgs = ["run", "board:reload", "--", "--target", options.target, "--reset-mode", options.resetMode];
   appendFlag(reloadArgs, "--port", options.port);
   appendFlag(reloadArgs, "--recovery-dir", options.recoveryDir);
   appendFlag(reloadArgs, "--esptool-python", options.esptoolPython);
@@ -121,7 +122,7 @@ export function buildCommandPlan(options) {
     { command: ["npm", "run", "build"], env: {} },
     { command: ["node", ...embedArgs], env: {} },
     { command: ["node", "scripts/build-kernel.mjs"], env: {} },
-    { command: ["npm", "run", "board:build"], env: {} },
+    { command: ["npm", ...buildArgs], env: {} },
     {
       command: ["npm", ...reloadArgs],
       env: options.execute ? { TSX_LVGL_SKIP_BUILD: "1" } : {},
@@ -169,4 +170,4 @@ async function run() {
 const isDirectExecution = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectExecution) await run();
 
-export { defaultEntry, defaultProfile, usage };
+export { defaultEntry, usage };

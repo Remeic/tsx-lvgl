@@ -16,12 +16,13 @@
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
-import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
+import { compileTsxBundle } from "@tsx-lvgl/bundler";
 import { MemoryBoardAdapter, createDefaultBoardDescriptors, createKernel, encodeBoardPayload } from "@tsx-lvgl/device";
 
 const STEP_PERIOD_MS = 80;
 const STEP_COUNT = 5;
 const SHAKE_STEP = 3;
+const HOST_TEST_BOARD_ID = "tsx-lvgl.host-test";
 
 const CALM_MOTION = { accelerationMps2: [0, 0, 9.80665], angularVelocityDps: [0, 0, 0] };
 const SHAKE_MOTION = { accelerationMps2: [30, 0, 0], angularVelocityDps: [0, 0, 0] };
@@ -173,7 +174,7 @@ function createConsoleNative() {
 
   let clickDispatch;
   const native = {
-    boardId: BOARD_ID,
+    boardId: HOST_TEST_BOARD_ID,
     lvgl,
     timers: timerNative,
     sensors,
@@ -262,7 +263,7 @@ function printTree(label, host) {
 function compileFile(path, bundleId, generation) {
   const fileName = basename(path);
   const source = readFileSync(resolve(path), "utf8");
-  return compileTsxBundle({ fileName, source, bundleId, boardId: BOARD_ID, generation });
+  return compileTsxBundle({ fileName, source, bundleId, boardId: HOST_TEST_BOARD_ID, generation });
 }
 
 function toRuntimeBundle(output) {
@@ -373,7 +374,7 @@ async function main() {
       fileName: "Boom.tsx",
       source: throwingSource,
       bundleId,
-      boardId: BOARD_ID,
+      boardId: HOST_TEST_BOARD_ID,
       generation: throwGeneration,
     });
     const throwResult = kernel.stageReload(JSON.stringify(throwingBundle.manifest), throwingBundle.code);

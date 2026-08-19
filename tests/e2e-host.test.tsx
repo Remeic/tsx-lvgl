@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { BOARD_ID, PROTOCOL_VERSION, compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
+import { PROTOCOL_VERSION, compileTsxBundle, type BundleOutput } from "@tsx-lvgl/bundler";
 import { NATIVE_STYLE_PROP, createKernel } from "@tsx-lvgl/device";
 import {
   RUNTIME_BUNDLE_MAX_BYTES,
@@ -18,6 +18,9 @@ import {
   type RuntimeBundle,
 } from "@tsx-lvgl/runtime";
 import { makeFakeNative } from "./support/fake-native.js";
+
+const TEST_BOARD_ID = "tsx-lvgl.host-test";
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
 
 // Compiled test files live at test-dist/tests/e2e-host.test.js; two hops up
 // from there is the repo root regardless of the cwd `node --test` runs from.
@@ -34,7 +37,7 @@ function compileShakeFace(generation: number): BundleOutput {
     fileName: "ShakeFace.tsx",
     source: shakeFaceSource,
     bundleId: "shakeface",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation,
   });
 }
@@ -45,7 +48,7 @@ function compileEmbeddedShakeFace(generation: number): BundleOutput {
     fileName: "ShakeFace.tsx",
     source: shakeFaceSource,
     bundleId: "shakeface",
-    boardId: BOARD_ID,
+    boardId: V1_BOARD_ID,
     generation,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
@@ -56,7 +59,7 @@ function compileShakeFaceB(generation: number): BundleOutput {
     fileName: "shakeface-b.tsx",
     source: shakeFaceBSource,
     bundleId: "shakeface",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation,
   });
 }
@@ -67,7 +70,7 @@ function toBundle(output: BundleOutput): RuntimeBundle {
 
 /** A fresh kernel over a fake board transport. */
 function startedKernel() {
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(compileShakeFace(1)));
   return { fake, kernel };
@@ -86,14 +89,14 @@ test("bundle A compiles, validates, and mounts: eyes, happy mouth, status, and b
     {
       protocolVersion: PROTOCOL_VERSION,
       engine: "quickjs-ng",
-      boardId: BOARD_ID,
+      boardId: TEST_BOARD_ID,
       maxBytes: RUNTIME_BUNDLE_MAX_BYTES,
       lastGeneration: 0,
     },
   );
   assert.equal(validation.ok, true);
 
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 
@@ -142,7 +145,7 @@ test("clicking the button flips the mood manually", () => {
 });
 
 test("an unavailable IMU reading reports the Italian unavailable status", async () => {
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(compileShakeFace(1)));
   fake.emitMotion({ status: "unavailable", sampledAtMs: 0 });
@@ -190,7 +193,7 @@ test("a throwing candidate rolls back and the previous app stays mounted and int
     fileName: "Boom.tsx",
     source: throwingSource,
     bundleId: "shakeface",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 2,
   });
   const result = kernel.stageReload(JSON.stringify(throwingBundle.manifest), throwingBundle.code);
@@ -241,11 +244,11 @@ test("a styled component render, changing one style key emits exactly one setSty
     fileName: "Styled.tsx",
     source: styledSource,
     bundleId: "styled",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 
@@ -291,11 +294,11 @@ test("a compiled styled render maps fontSize and removing it emits one resetStyl
     fileName: "FontSized.tsx",
     source: fontSizeSource,
     bundleId: "font-sized",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 
@@ -335,11 +338,11 @@ test("a width style re-rendered from percent to px emits a single setStyle per c
     fileName: "Sized.tsx",
     source: sizedSource,
     bundleId: "sized",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 
@@ -379,11 +382,11 @@ test("a flex row with gap, re-rendered to column, emits a single setStyle(flexDi
     fileName: "Flex.tsx",
     source: flexSource,
     bundleId: "flex",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 
@@ -420,11 +423,11 @@ test("re-rendering with only rotate changed emits exactly one setStyle(rotate, .
     fileName: "Animated.tsx",
     source: animatedSource,
     bundleId: "animated",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toBundle(output));
 

@@ -21,7 +21,7 @@ after a successful build so later images use the same dependency set.
 From the repository root:
 
 ```bash
-npm run board:build
+npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 ```
 
 This builds the committed firmware inside the pinned development container.
@@ -43,10 +43,10 @@ only on the RTS reset path:
 ```bash
 export ESPTOOL_PYTHON="/absolute/path/to/esptool-5.3.1-venv/bin/python"
 export TSX_LVGL_RECOVERY_DIR="/absolute/path/to/arrival-backup-YYYYMMDD"
-npm run board:reload -- --port /dev/cu.ACTUAL_DEVICE --execute
+npm run board:reload -- --target waveshare-touch-amoled-1.8-v1 --port /dev/cu.ACTUAL_DEVICE --execute
 ```
 
-Use `npm run board:reload -- --dry-run` to inspect the command plan without
+Use `npm run board:reload -- --target waveshare-touch-amoled-1.8-v1 --dry-run` to inspect the command plan without
 touching hardware. The wrapper never authorizes bootloader/partition writes,
 global erase, eFuse operations or paths under `/Volumes`. The watchdog-reset
 mode is a transport candidate and still needs one logged physical validation;

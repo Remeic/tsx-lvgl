@@ -1,11 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
+import { compileTsxBundle } from "@tsx-lvgl/bundler";
 
 import { readFlagValue } from "./lib/cli.mjs";
 
-function usage() {
+export function usage() {
   return `Usage:
   node scripts/bundle-app.mjs --entry <path.tsx> --out <dir> [options]
 
@@ -14,18 +15,18 @@ Options:
   --out DIR           Output directory for the bundle and manifest (required).
   --bundle-id ID       Defaults to the entry file basename, lowercased.
   --generation N       Defaults to 1.
-  --board-id ID        Defaults to ${BOARD_ID}.
+  --board-id ID        Explicit bundle compatibility target (required).
   --help                Show this help.
 `;
 }
 
-function parseCli(argv) {
+export function parseCli(argv) {
   const options = {
     entry: "",
     out: "",
     bundleId: "",
     generation: 1,
-    boardId: BOARD_ID,
+    boardId: "",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -61,13 +62,16 @@ function parseCli(argv) {
   if (!options.entry || !options.out) {
     throw new Error("--entry and --out are required");
   }
+  if (!options.boardId) {
+    throw new Error("--board-id is required");
+  }
   if (!options.bundleId) {
     options.bundleId = basename(options.entry, extname(options.entry)).toLowerCase();
   }
   return { help: false, options };
 }
 
-async function run() {
+export async function run() {
   let parsed;
   try {
     parsed = parseCli(process.argv.slice(2));
@@ -118,4 +122,5 @@ async function run() {
   console.log(`bundle-app: wrote ${manifestPath}`);
 }
 
-run();
+const isDirectExecution = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectExecution) run();

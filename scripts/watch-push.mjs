@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
+import { compileTsxBundle } from "@tsx-lvgl/bundler";
 import { runDevicePush } from "../packages/sdk/dist/device-dev.js";
 import { runDeviceWatch } from "../packages/sdk/dist/device-watch.js";
 
@@ -22,13 +22,13 @@ Options:
   --port PATH         Local serial device (required).
   --bundle-id ID      Defaults to the entry file basename, lowercased.
   --generation N      Initial generation; defaults to 1 and is negotiated.
-  --board-id ID       Defaults to ${BOARD_ID}.
+  --board-id ID       Explicit bundle compatibility target (required).
   --help              Show this help.
 `;
 }
 
 function parseCli(argv) {
-  const options = { entry: "", port: "", bundleId: "", generation: 1, boardId: BOARD_ID };
+  const options = { entry: "", port: "", bundleId: "", generation: 1, boardId: "" };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--help") return { help: true, options };
@@ -49,6 +49,7 @@ function parseCli(argv) {
     }
   }
   if (!options.entry) throw new UsageError("--entry is required");
+  if (!options.boardId) throw new UsageError("--board-id is required");
   if (!SERIAL_PORT_PATTERN.test(options.port)) {
     throw new UsageError("--port must be a local /dev/cu.*, /dev/tty.* or COM<n> serial device");
   }

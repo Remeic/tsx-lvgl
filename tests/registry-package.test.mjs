@@ -44,6 +44,8 @@ test("registry SDK pack is public, self-contained, pack-clean, and installs its 
     sourceDirty: false,
   });
   assert.equal(existsSync(join(packageRoot, "dist", "vendor", "runtime", "index.js")), true);
+  assert.equal(existsSync(join(packageRoot, "dist", "board-catalog.json")), true);
+  assert.equal(existsSync(join(packageRoot, "dist", "board-profile.mjs")), false);
   assert.equal(existsSync(join(packageRoot, "dist", "tsconfig.tsbuildinfo")), false);
 
   const dryRun = spawnSync("npm", ["pack", "--dry-run", packed.artifactPath, "--ignore-scripts"], {

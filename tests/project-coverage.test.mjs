@@ -10,7 +10,7 @@ import test from "node:test";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import {
   checkProject,
-  createProject,
+  createProject as createProjectOperation,
   devProject,
   doctorProject,
   packInstalledSdk,
@@ -22,6 +22,16 @@ import {
 import { NODE_SERIAL_RUNTIME } from "../packages/sdk/dist/serial.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+
+function createProject(target, artifact, packArtifact, adapters) {
+  return createProjectOperation(
+    target,
+    { boardId: V1_BOARD_ID, ...(artifact === undefined ? {} : { artifact }) },
+    packArtifact,
+    adapters,
+  );
+}
 const SHA = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }).stdout.trim()
   || process.env.TSX_LVGL_VALIDATION_GIT_SHA;
 
@@ -243,7 +253,7 @@ test("consumer project validation reaches all portable persisted-state alternati
 
   writeFileSync(packagePath, '{"name":"app"}\n');
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.PACKAGE_INVALID);
-  writeFileSync(configPath, JSON.stringify({ version: 1, entry: join(root, "src", "App.tsx"), bundleId: "app" }));
+  writeFileSync(configPath, JSON.stringify({ version: 1, entry: join(root, "src", "App.tsx"), bundleId: "app", boardId: V1_BOARD_ID }));
   assertCode(() => verifyProject(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
   writeFileSync(packagePath, packageJson);
   writeFileSync(configPath, config);

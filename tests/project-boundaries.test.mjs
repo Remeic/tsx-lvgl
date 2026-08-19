@@ -11,7 +11,7 @@ import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 import {
   buildProject,
   checkProject,
-  createProject,
+  createProject as createProjectOperation,
   devProject,
   readProjectFiles,
   syncProject,
@@ -20,6 +20,16 @@ import {
 } from "../packages/sdk/dist/project.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+
+function createProject(target, artifact, packArtifact, adapters) {
+  return createProjectOperation(
+    target,
+    { boardId: V1_BOARD_ID, ...(artifact === undefined ? {} : { artifact }) },
+    packArtifact,
+    adapters,
+  );
+}
 
 function assertCode(action, code) {
   assert.throws(action, { code });
@@ -49,6 +59,8 @@ test("SDK pack vendors and rewrites capability and connectivity runtime imports"
   assert.equal(extracted.status, 0, extracted.stderr);
   assert.equal(existsSync(join(extract, "package", "dist", "vendor", "capabilities", "index.js")), true);
   assert.equal(existsSync(join(extract, "package", "dist", "vendor", "connectivity", "index.js")), true);
+  assert.equal(existsSync(join(extract, "package", "dist", "board-catalog.json")), true);
+  assert.equal(existsSync(join(extract, "package", "dist", "board-profile.mjs")), false);
   const kernel = readFileSync(join(extract, "package", "dist", "vendor", "device", "kernel.js"), "utf8");
   const connectivity = readFileSync(join(extract, "package", "dist", "vendor", "connectivity", "index.js"), "utf8");
   assert.doesNotMatch(kernel, /from "@tsx-lvgl\/capabilities"/);
@@ -107,18 +119,22 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, '{ not json');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
-  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"bad space","generation":0}\n');
+  writeFileSync(configPath, `{"version":1,"entry":"src/App.tsx","bundleId":"bad space","generation":0,"boardId":"${V1_BOARD_ID}"}\n`);
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"bad space"}\n');
-  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
-  writeFileSync(configPath, '{"version":1,"entry":"../outside.tsx","bundleId":"app"}\n');
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.BOARD_SELECTION_REQUIRED);
+  writeFileSync(configPath, `{"version":1,"entry":"../outside.tsx","bundleId":"app","boardId":"${V1_BOARD_ID}"}\n`);
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.SOURCE_PATH_LEAK);
-  writeFileSync(configPath, '{"version":1,"entry":"src/missing.tsx","bundleId":"app"}\n');
+  writeFileSync(configPath, `{"version":1,"entry":"src/missing.tsx","bundleId":"app","boardId":"${V1_BOARD_ID}"}\n`);
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, config);
-  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"app"}\n');
-  assert.equal(readProjectFiles(root).config.boardId, "waveshare.esp32s3.touch-amoled-1.8");
+  writeFileSync(configPath, `{"version":1,"entry":"src/App.tsx","bundleId":"app","boardId":"${V1_BOARD_ID}"}\n`);
+  assert.equal(readProjectFiles(root).config.boardId, V1_BOARD_ID);
   assert.equal(readProjectFiles(root).config.generation, 1);
+  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"app","boardId":"waveshare.esp32s3.touch-amoled-1.8"}\n');
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.BOARD_TARGET_UNSUPPORTED);
+  writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"app","boardId":"waveshare.esp32s3.touch-amoled-1.8.v2"}\n');
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.BOARD_TARGET_UNSUPPORTED);
   writeFileSync(configPath, config);
 
   rmSync(lockPath);

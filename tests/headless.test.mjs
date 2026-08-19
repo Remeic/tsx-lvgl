@@ -9,12 +9,12 @@ test("headless SDK host renders a portable application bundle", async () => {
     fileName: "App.tsx",
     source: 'import { Screen, Text } from "@tsx-lvgl/sdk"; export default function App() { return <Screen><Text text="headless" /></Screen>; }',
     bundleId: "headless",
-    boardId: "waveshare.esp32s3.touch-amoled-1.8",
+    boardId: "tsx-lvgl.host-test",
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
   assert.deepEqual(
-    await runHeadless({ manifest: bundle.manifest, source: bundle.bytes }, "waveshare.esp32s3.touch-amoled-1.8"),
+    await runHeadless({ manifest: bundle.manifest, source: bundle.bytes }, "tsx-lvgl.host-test"),
     { texts: ["headless"], logs: [], generation: 1 },
   );
 });

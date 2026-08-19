@@ -1,0 +1,10 @@
+{
+  "formatVersion": 1,
+  "boards": [
+    {
+      "id": "waveshare.esp32s3.touch-amoled-1.8.v1",
+      "displayName": "Waveshare ESP32-S3 Touch AMOLED 1.8 (V1)",
+      "legacyIds": ["waveshare.esp32s3.touch-amoled-1.8"]
+    }
+  ]
+}

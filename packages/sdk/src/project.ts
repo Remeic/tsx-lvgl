@@ -17,11 +17,11 @@ import { runHeadless, type HeadlessResult } from "./headless.js";
 import { doctorDevicePort, runDeviceDev, type DeviceDevResult } from "./device-dev.js";
 import { runDeviceWatch } from "./device-watch.js";
 import {
-  DEFAULT_BOARD_ID,
   LOCK_FORMAT_VERSION,
   SDK_PACKAGE_NAME,
 } from "./metadata.js";
 import { CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
+import { resolveCanonicalBoardId } from "./boards.js";
 import { runDoctor, type DoctorResult } from "./doctor.js";
 import { NODE_ENGINE_RANGE, validateNodeEngine } from "./node-engine.js";
 import { recoverInterruptedInstall, withInstallTransaction } from "./install-transaction.js";
@@ -77,6 +77,11 @@ export interface ProjectDeviceWatchOptions {
   readonly onRejected: (error: Error) => void;
 }
 
+export interface CreateProjectOptions {
+  readonly boardId: string;
+  readonly artifact?: string;
+}
+
 export interface InstalledSdkPackRuntime {
   exists(path: string): boolean;
   makeTemporaryDirectory(prefix: string): string;
@@ -113,10 +118,11 @@ export const DEFAULT_INSTALLED_SDK_PACK_RUNTIME: InstalledSdkPackRuntime = {
 
 export async function createProject(
   target: string,
-  artifactArgument?: string,
+  options: CreateProjectOptions,
   packArtifact: () => string = packInstalledSdk,
   adapters: ProjectLifecycleAdapters = DEFAULT_PROJECT_LIFECYCLE_ADAPTERS,
-): Promise<{ readonly root: string; readonly lock: FrameworkLock }> {
+): Promise<{ readonly root: string; readonly lock: FrameworkLock; readonly boardId: string }> {
+  const boardId = resolveCanonicalBoardId(options.boardId);
   const root = resolve(target);
   const targetExisted = existsSync(root);
   if (targetExisted) recoverConsumerProjectState(root);
@@ -126,18 +132,18 @@ export async function createProject(
 
   let cleanupGeneratedArtifact: () => void = () => {};
   try {
-    scaffoldProject(root);
-    const artifactPath = artifactArgument === undefined
+    scaffoldProject(root, boardId);
+    const artifactPath = options.artifact === undefined
       ? packArtifact()
-      : resolve(artifactArgument);
-    if (artifactArgument === undefined) {
+      : resolve(options.artifact);
+    if (options.artifact === undefined) {
       cleanupGeneratedArtifact = () => rmSync(dirname(artifactPath), { recursive: true, force: true });
     }
     const installArtifact = artifactPath;
     return await withInstallTransaction(root, async () => {
       const lock = adapters.artifactStore.install(root, installArtifact);
       await installLockedArtifact(root, lock, adapters);
-      return { root, lock };
+      return { root, lock, boardId };
     });
   /* node:coverage disable */
   // V8 records a phantom untaken branch for this rethrowing catch (including its closing
@@ -340,7 +346,7 @@ function readProjectConfig(root: string): ProjectConfig {
   if (value.version !== 1 || typeof value.entry !== "string" || typeof value.bundleId !== "string") {
     throw new CliError(DIAGNOSTIC_CODES.CONFIG_INVALID, "tsx-lvgl.json must declare version, entry and bundleId");
   }
-  const boardId = typeof value.boardId === "string" ? value.boardId : DEFAULT_BOARD_ID;
+  const boardId = resolveCanonicalBoardId(value.boardId);
   const generation = value.generation === undefined ? 1 : value.generation;
   if (!Number.isSafeInteger(generation) || generation <= 0) {
     throw new CliError(DIAGNOSTIC_CODES.CONFIG_INVALID, "generation must be a positive safe integer");
@@ -540,14 +546,14 @@ function writeText(root: string, path: string, content: string): void {
   writeFileSync(destination, content, "utf8");
 }
 
-function scaffoldProject(root: string): void {
+function scaffoldProject(root: string, boardId: string): void {
   mkdirSync(root, { recursive: true });
   const appName = appNameFromRoot(root);
   writeText(root, "tsx-lvgl.json", `${JSON.stringify({
     version: 1,
     entry: "src/App.tsx",
     bundleId: "app",
-    boardId: DEFAULT_BOARD_ID,
+    boardId,
     generation: 1,
   }, null, 2)}\n`);
   writeText(root, "src/App.tsx", `import { Screen, Text, type VNode } from "@tsx-lvgl/sdk";\n\nexport default function App(): VNode {\n  return (\n    <Screen>\n      <Text text="Hello TSX-LVGL" />\n    </Screen>\n  );\n}\n`);
@@ -615,7 +621,7 @@ function consumerAgentsTemplate(): string {
     "",
     "## Commands",
     "",
-    `- ${tick}tsx-lvgl create <directory> --artifact <sdk.tgz>${tick} — scaffold a new app during bootstrap.`,
+    `- ${tick}tsx-lvgl create <directory> --board <canonical-id> --artifact <sdk.tgz>${tick} — scaffold a new app during bootstrap.`,
     `Use the package manager declared in ${tick}package.json${tick} or selected by the lockfile (npm, pnpm, Yarn Classic v1 or bun) to run these scripts. Yarn Berry/PnP is not supported by this CLI. For example: ${tick}<package-manager> run sync${tick}.`,
     `- ${tick}<package-manager> run sync${tick} — install the exact artifact already pinned by ${tick}.tsx-lvgl/framework.lock.json${tick}.`,
     `- ${tick}<package-manager> run update${tick} — explicitly package a configured framework checkout and update the pin.`,

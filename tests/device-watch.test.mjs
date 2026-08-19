@@ -30,9 +30,9 @@ const waitFor = async (predicate) => {
   assert.fail("condition was not reached");
 };
 
-test("watch-push CLI requires a TSX entry and local serial port", () => {
+test("watch-push CLI requires a TSX entry, local serial port and board ID", () => {
   assert.deepEqual(
-    parseWatchCli(["--entry", "src/App.tsx", "--port", "/dev/cu.usbmodem1101"]),
+    parseWatchCli(["--entry", "src/App.tsx", "--port", "/dev/cu.usbmodem1101", "--board-id", "tsx-lvgl.host-test"]),
     {
       help: false,
       options: {
@@ -40,11 +40,12 @@ test("watch-push CLI requires a TSX entry and local serial port", () => {
         port: "/dev/cu.usbmodem1101",
         bundleId: "app",
         generation: 1,
-        boardId: "waveshare.esp32s3.touch-amoled-1.8",
+        boardId: "tsx-lvgl.host-test",
       },
     },
   );
-  assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "remote:1234"]), /local/);
+  assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "/dev/cu.usbmodem1101"]), /board-id/);
+  assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "remote:1234", "--board-id", "tsx-lvgl.host-test"]), /local/);
 });
 
 test("device watch coalesces saves and serializes monotonic pushes", async () => {
