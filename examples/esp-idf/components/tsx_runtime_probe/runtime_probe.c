@@ -107,8 +107,22 @@ struct runtime_probe {
 
 /** One probe is ever live; recovers the instance for callbacks LVGL/esp_timer invoke with a narrow signature. */
 static runtime_probe_t *s_active_probe;
-/** A failed lock reacquisition retains the inactive probe for owner-task retry. */
-static runtime_probe_t *s_pending_cleanup_probe;
+
+typedef enum {
+    /* The failed pre-boot attempt was fully cleaned; start a fresh attempt. */
+    RUNTIME_PROBE_CLEANUP_RETRY_RESTART,
+    /* Preserve the result from the completed boot attempt after cleanup. */
+    RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT,
+} runtime_probe_cleanup_retry_t;
+
+typedef struct {
+    /** A failed lock reacquisition retains the complete inactive probe. */
+    runtime_probe_t *probe;
+    runtime_probe_cleanup_retry_t retry;
+    esp_err_t result;
+} runtime_probe_pending_cleanup_t;
+
+static runtime_probe_pending_cleanup_t s_pending_cleanup;
 
 /* Start failures happen before the host is created, so they release only
  * non-LVGL state. The full definition stays with the teardown implementation
@@ -1587,7 +1601,9 @@ static void runtime_probe_release_resources(runtime_probe_t *probe)
     free(probe);
 }
 
-static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe)
+static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe,
+                                       runtime_probe_cleanup_retry_t retry,
+                                       esp_err_t result)
 {
     if (probe == NULL) return ESP_ERR_INVALID_ARG;
 
@@ -1597,7 +1613,11 @@ static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe)
         /* Retain the complete inactive probe. A mounted host owns native
          * objects, so neither the host wrapper nor any provider/runtime state
          * may be freed until a later owner-task retry obtains the lock. */
-        s_pending_cleanup_probe = probe;
+        s_pending_cleanup = (runtime_probe_pending_cleanup_t) {
+            .probe = probe,
+            .retry = retry,
+            .result = result,
+        };
         ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail cleanup=retained");
         return ESP_ERR_TIMEOUT;
     }
@@ -1609,7 +1629,7 @@ static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe)
 
     /* Phase 3: providers, timers, queues and QuickJS are freed only after the
      * display lock is released, preserving their existing teardown order. */
-    s_pending_cleanup_probe = NULL;
+    memset(&s_pending_cleanup, 0, sizeof(s_pending_cleanup));
     runtime_probe_release_resources(probe);
     return ESP_OK;
 }
@@ -1617,37 +1637,53 @@ static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe)
 esp_err_t runtime_probe_run(const tsx_board_adapter_t *board,
                             const runtime_probe_assets_t *assets)
 {
-    if (s_pending_cleanup_probe != NULL) return runtime_probe_cleanup(s_pending_cleanup_probe);
+    for (;;) {
+        if (s_pending_cleanup.probe != NULL) {
+            const runtime_probe_pending_cleanup_t pending = s_pending_cleanup;
+            const esp_err_t cleanup_result = runtime_probe_cleanup(pending.probe, pending.retry, pending.result);
+            if (cleanup_result != ESP_OK) return cleanup_result;
+            if (pending.retry == RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT) return pending.result;
+        }
 
-    runtime_probe_t *probe = NULL;
-    esp_err_t result = runtime_probe_start(board, assets, &probe);
-    if (result != ESP_OK) return result;
+        runtime_probe_t *probe = NULL;
+        esp_err_t result = runtime_probe_start(board, assets, &probe);
+        if (result != ESP_OK) return result;
 
-    const esp_err_t transport_result = bundle_transport_start(probe);
-    ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
-             transport_result == ESP_OK ? "pass" : "fail");
+        const esp_err_t transport_result = bundle_transport_start(probe);
+        ESP_LOGI(TAG, "PROBE checkpoint=bundle_transport_start status=%s",
+                 transport_result == ESP_OK ? "pass" : "fail");
 
-    /* Providers remain optional. Their unavailable state never prevents the
-     * display, kernel, or app from continuing. */
-    const esp_err_t sensors_result = runtime_probe_start_sensors(probe);
-    if (sensors_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=imu_init status=unavailable");
-    const esp_err_t connectivity_result = runtime_probe_start_connectivity(probe);
-    if (connectivity_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=wifi_init status=unavailable");
+        /* Providers remain optional. Their unavailable state never prevents the
+         * display, kernel, or app from continuing. */
+        const esp_err_t sensors_result = runtime_probe_start_sensors(probe);
+        if (sensors_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=imu_init status=unavailable");
+        const esp_err_t connectivity_result = runtime_probe_start_connectivity(probe);
+        if (connectivity_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=wifi_init status=unavailable");
 
-    if (!tsx_board_adapter_display_lock(board, 0)) {
-        ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
-        (void)runtime_probe_cleanup(probe);
-        return ESP_ERR_TIMEOUT;
+        if (!tsx_board_adapter_display_lock(board, 0)) {
+            ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
+            const esp_err_t cleanup_result = runtime_probe_cleanup(
+                probe, RUNTIME_PROBE_CLEANUP_RETRY_RESTART, ESP_OK);
+            if (cleanup_result != ESP_OK) return cleanup_result;
+            /* The failed pre-boot attempt was completely released. Start and
+             * boot a fresh probe in this same owner entry invocation. */
+            continue;
+        }
+        result = runtime_probe_boot(probe);
+        tsx_board_adapter_display_unlock(board);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "PROBE checkpoint=kernel_boot status=fail err=%s", esp_err_to_name(result));
+            /* A lock failure during this cleanup is a retry result. The
+             * original boot error remains attached to the retained probe and
+             * is returned after the later cleanup succeeds. */
+            const esp_err_t cleanup_result = runtime_probe_cleanup(
+                probe, RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT, result);
+            if (cleanup_result != ESP_OK) return cleanup_result;
+            return result;
+        }
+
+        /* This is the one QuickJS/LVGL owner loop for the selected target. */
+        runtime_probe_task(probe);
+        return runtime_probe_cleanup(probe, RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT, ESP_OK);
     }
-    result = runtime_probe_boot(probe);
-    tsx_board_adapter_display_unlock(board);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "PROBE checkpoint=kernel_boot status=fail err=%s", esp_err_to_name(result));
-        (void)runtime_probe_cleanup(probe);
-        return result;
-    }
-
-    /* This is the one QuickJS/LVGL owner loop for the selected target. */
-    runtime_probe_task(probe);
-    return runtime_probe_cleanup(probe);
 }
