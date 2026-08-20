@@ -35,11 +35,15 @@ for argument in "$@"; do
   argument_index=$((argument_index + 1))
 done
 
-if [[ "${TSX_LVGL_SKIP_BUILD:-0}" != "1" && "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
+if [[ "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
   if [[ -z "${board_target}" ]]; then
     echo "board-reload: --target is required" >&2
     exit 2
   fi
+  node "${repo_root}/scripts/board-support-gate.mjs" --target "${board_target}"
+fi
+
+if [[ "${TSX_LVGL_SKIP_BUILD:-0}" != "1" && "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
   npm run board:build -- --target "${board_target}"
 fi
 
