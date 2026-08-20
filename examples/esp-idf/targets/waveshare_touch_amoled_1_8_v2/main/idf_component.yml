@@ -1,0 +1,12 @@
+version: "1.0.0"
+
+dependencies:
+  idf: ">=5.5,<6.0"
+  espressif/quickjs-ng: "0.14.0"
+  lvgl/lvgl: "9.5.0"
+  espressif/esp_lcd_co5300: "2.1.0"
+  espressif/esp_lcd_touch_cst816s: "1.1.2"
+  espressif/esp_io_expander_tca9554: "2.0.3"
+  waveshare/esp32_s3_touch_amoled_1_8:
+    version: "2.0.3"
+    public: true

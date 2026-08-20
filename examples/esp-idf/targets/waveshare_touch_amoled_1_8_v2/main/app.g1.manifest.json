@@ -1,0 +1,10 @@
+{
+  "bundleId": "pomodoro",
+  "format": "js",
+  "engine": "quickjs-ng",
+  "protocolVersion": 1,
+  "boardId": "waveshare.esp32s3.touch-amoled-1.8.v2",
+  "generation": 1,
+  "sha256": "1f8e612329691992e9c58923f1e2a82d5694a23c0a0b6fc9fa02e76afe5850bf",
+  "byteLength": 2997
+}
