@@ -72,7 +72,8 @@ static volatile bool s_stopping;
 static bool is_reject_reason(const char *reason)
 {
     return reason != NULL && (strcmp(reason, "hardware-mismatch") == 0 ||
-                              strcmp(reason, "hardware-unknown") == 0);
+                              strcmp(reason, "hardware-unknown") == 0 ||
+                              strcmp(reason, "hardware-startup-failure") == 0);
 }
 
 static void write_response(const char *line)

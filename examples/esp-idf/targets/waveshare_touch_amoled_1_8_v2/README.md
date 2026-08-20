@@ -78,8 +78,10 @@ during the probe.
 
 Only `matched` reaches V2 display startup, runtime startup and ready
 transport. Mismatch and unknown states stay in rejected diagnostic mode.
-This policy is host-tested by `tests/firmware-target-matrix.test.mjs` and is
-not physical identity proof.
+If the matched board cannot complete display or touch startup, it stays in
+rejected diagnostic mode with `hardware-startup-failure`; this does not change
+the matched identity evidence. This policy is host-tested by
+`tests/firmware-target-matrix.test.mjs` and is not physical identity proof.
 
 ## Evidence boundary
 

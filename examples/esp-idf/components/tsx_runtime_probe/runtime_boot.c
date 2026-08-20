@@ -107,8 +107,8 @@ void runtime_probe_app_main(const tsx_board_adapter_t *board,
     }
 
     if (tsx_board_adapter_display_start(board) != ESP_OK) {
-        ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail action=reject reason=hardware-unknown");
-        enter_rejected_diagnostic_mode("hardware-unknown");
+        ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail action=reject reason=hardware-startup-failure");
+        enter_rejected_diagnostic_mode("hardware-startup-failure");
         return;
     }
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");

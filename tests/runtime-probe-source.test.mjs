@@ -23,6 +23,7 @@ const adapterContract = readFileSync(new URL("../examples/esp-idf/components/tsx
 const identityHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/include/tsx_board_identity.h", import.meta.url), "utf8");
 const identitySource = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/tsx_board_identity.c", import.meta.url), "utf8");
 const targetReadme = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/README.md", import.meta.url), "utf8");
+const v2TargetReadme = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/README.md", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
 const targetIdGenerator = readFileSync(new URL("../scripts/generate-board-target-id.mjs", import.meta.url), "utf8");
@@ -129,6 +130,10 @@ test("shared runtime component has no target BSP or provider dependency", () => 
   assert.match(targetReadme, /TSXB ERR hardware-mismatch/);
 });
 
+test("V2 startup failure keeps matched identity distinct from hardware unknown", () => {
+  assert.match(v2TargetReadme, /hardware-startup-failure/);
+});
+
 test("V1 identity evidence is read-only and gates display/runtime startup", () => {
   assert.match(adapterCmake, /tsx_board_adapter waveshare_v1_sensors/);
   assert.match(displayStartup, /probe_address\(bus, WAVESHARE_V1_FT3168_ADDRESS/);
@@ -161,8 +166,8 @@ test("rejected transport startup retries and resets instead of sleeping silently
 });
 
 test("display startup failure enters rejected recovery instead of returning with partial resources", () => {
-  assert.match(runtimeBoot, /PROBE checkpoint=board_start status=fail action=reject reason=hardware-unknown/);
-  assert.match(runtimeBoot, /if \(tsx_board_adapter_display_start\(board\) != ESP_OK\) \{[\s\S]*enter_rejected_diagnostic_mode\("hardware-unknown"\)/);
+  assert.match(runtimeBoot, /PROBE checkpoint=board_start status=fail action=reject reason=hardware-startup-failure/);
+  assert.match(runtimeBoot, /if \(tsx_board_adapter_display_start\(board\) != ESP_OK\) \{[\s\S]*enter_rejected_diagnostic_mode\("hardware-startup-failure"\)/);
   assert.match(runtimeBoot, /static void enter_rejected_diagnostic_mode\(const char \*reason\)/);
 });
 
@@ -175,6 +180,7 @@ test("reject-mode answers BEGIN before staging or runtime generation access", ()
   assert.match(transport, /bundle_transport_start_task\(NULL, reason, false\)/);
   assert.match(transport, /strcmp\(reason, "hardware-mismatch"\)/);
   assert.match(transport, /strcmp\(reason, "hardware-unknown"\)/);
+  assert.match(transport, /strcmp\(reason, "hardware-startup-failure"\)/);
 });
 
 test("ready and rejected transport startup share one ownership helper", () => {

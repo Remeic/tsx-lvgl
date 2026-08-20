@@ -102,7 +102,11 @@ test("V2 adapter owns CO5300/CST identity and does not import the V1 driver comp
   const cmake = await readTargetFile(V2_TARGET, "components/tsx_board_adapter_v2/CMakeLists.txt");
   const appMain = await readTargetFile(V2_TARGET, "main/app_main.c");
   assert.doesNotMatch(adapter, /bsp_display_start\(\)/);
+  assert.doesNotMatch(adapter, /bsp_display_new\(/);
+  assert.doesNotMatch(adapter, /ESP_ERROR_CHECK/);
   assert.match(adapter, /bsp_io_expander_init\(\)/);
+  assert.match(adapter, /v2_display_new\(/);
+  assert.match(adapter, /spi_bus_initialize\(/);
   assert.match(adapter, /lvgl_port_add_disp\(/);
   assert.doesNotMatch(adapter, /lvgl_port_add_disp_rgb\(/);
   assert.match(adapter, /esp_lcd_touch_new_i2c_cst816s/);
@@ -119,7 +123,9 @@ test("V2 adapter owns CO5300/CST identity and does not import the V1 driver comp
     "lvgl_port_remove_disp",
     "lvgl_port_deinit",
     "esp_lcd_panel_del",
+    "spi_bus_free",
     "esp_io_expander_del",
+    "bsp_i2c_deinit",
   ]) assert.match(adapter, new RegExp(api), `${api} must be in the V2 cleanup path`);
   const cleanup = adapter.slice(adapter.indexOf("static void v2_cleanup_display"));
   const cleanupOrder = [
@@ -129,10 +135,14 @@ test("V2 adapter owns CO5300/CST identity and does not import the V1 driver comp
     "lvgl_port_remove_disp",
     "lvgl_port_deinit",
     "esp_lcd_panel_del",
+    "spi_bus_free",
     "esp_io_expander_del",
+    "bsp_i2c_deinit",
   ].map((api) => cleanup.indexOf(api));
   assert.ok(cleanupOrder.every((index) => index >= 0), "cleanup APIs must remain in the cleanup function");
   assert.ok(cleanupOrder.every((index, position) => position === 0 || index > cleanupOrder[position - 1]), "cleanup must follow reverse ownership order");
+  assert.ok(cleanup.indexOf("spi_bus_free") > cleanup.lastIndexOf("esp_lcd_panel_io_del"), "SPI bus must be freed after panel IO");
+  assert.ok(cleanup.indexOf("bsp_i2c_deinit") > cleanup.indexOf("esp_io_expander_del"), "I2C bus must be freed after expander");
   assert.match(adapter, /s_display_failed = true;[\s\S]*v2_cleanup_display\(&resources\)/);
   assert.doesNotMatch(adapter, /ESP_LOG[IEWD][^(]*\([^;]*cst816s/i, "runtime logs must identify neutral touch/CST820 evidence");
   assert.match(appMain, /runtime_probe_app_main/);

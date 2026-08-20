@@ -2,7 +2,9 @@
 
 #include "bsp/esp-bsp.h"
 #include "driver/i2c_master.h"
+#include "driver/spi_master.h"
 #include "esp_io_expander.h"
+#include "esp_lcd_co5300.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_touch.h"
@@ -27,10 +29,30 @@ static const char *TAG = "tsx_board_v2";
 
 static bool s_display_started;
 static bool s_display_failed;
+static bool s_i2c_owned;
+
+/* Keep the exact CO5300 sequence from Waveshare BSP 2.0.3 in this V2
+ * composition root. The BSP helper aborts on several failures; this adapter
+ * must return an error so the shared runtime can reject cleanly. */
+static const co5300_lcd_init_cmd_t V2_CO5300_INIT_CMDS[] = {
+    {0xFE, (uint8_t[]){0x00}, 1, 0},
+    {0xC4, (uint8_t[]){0x80}, 1, 0},
+    {0x3A, (uint8_t[]){0x55}, 1, 0},
+    {0x35, (uint8_t[]){0x00}, 1, 0},
+    {0x53, (uint8_t[]){0x20}, 1, 0},
+    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x63, (uint8_t[]){0xFF}, 1, 0},
+    {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0x6F}, 4, 0},
+    {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xBF}, 4, 0},
+    {0x11, (uint8_t[]){0x00}, 0, 100},
+    {0x29, (uint8_t[]){0x00}, 0, 0},
+};
 
 typedef struct {
     esp_io_expander_handle_t expander;
+    bool i2c_bus_initialized;
     bool lvgl_port_initialized;
+    bool spi_bus_initialized;
     esp_lcd_panel_io_handle_t panel_io;
     esp_lcd_panel_handle_t panel;
     lv_display_t *display;
@@ -65,11 +87,20 @@ static esp_err_t v2_probe_identity(void *context, tsx_board_identity_t *out_iden
     /* The managed BSP owns this shared bus. This read-only probe runs before
      * display startup and never writes a controller register. */
     if (bsp_i2c_init() != ESP_OK) return ESP_OK;
+    s_i2c_owned = true;
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
-    if (bus == NULL) return ESP_OK;
+    if (bus == NULL) {
+        (void)bsp_i2c_deinit();
+        s_i2c_owned = false;
+        return ESP_OK;
+    }
     const esp_err_t reset_result = i2c_master_bus_reset(bus);
     vTaskDelay(pdMS_TO_TICKS(WAVESHARE_V2_I2C_SETTLE_MS));
-    if (reset_result != ESP_OK) return ESP_OK;
+    if (reset_result != ESP_OK) {
+        (void)bsp_i2c_deinit();
+        s_i2c_owned = false;
+        return ESP_OK;
+    }
 
     const tsx_board_probe_result_t ft5x06 = probe_address(bus, WAVESHARE_V2_FT5X06_ADDRESS);
     const tsx_board_probe_result_t cst816s = probe_address(bus, WAVESHARE_V2_CST816S_ADDRESS);
@@ -78,6 +109,10 @@ static esp_err_t v2_probe_identity(void *context, tsx_board_identity_t *out_iden
              out_identity->state == TSX_BOARD_IDENTITY_MATCHED ? "pass" :
              out_identity->state == TSX_BOARD_IDENTITY_MISMATCH ? "mismatch" : "unknown",
              out_identity->evidence_code);
+    if (out_identity->state != TSX_BOARD_IDENTITY_MATCHED) {
+        (void)bsp_i2c_deinit();
+        s_i2c_owned = false;
+    }
     return ESP_OK;
 }
 
@@ -131,11 +166,63 @@ static void v2_cleanup_display(v2_display_resources_t *resources)
         (void)esp_lcd_panel_io_del(resources->panel_io);
         resources->panel_io = NULL;
     }
+    if (resources->spi_bus_initialized) {
+        (void)spi_bus_free(BSP_LCD_SPI_NUM);
+        resources->spi_bus_initialized = false;
+    }
     v2_restore_expander_safe_state(resources->expander);
     if (resources->expander != NULL) {
         (void)esp_io_expander_del(resources->expander);
         resources->expander = NULL;
     }
+    if (resources->i2c_bus_initialized) {
+        (void)bsp_i2c_deinit();
+        resources->i2c_bus_initialized = false;
+        s_i2c_owned = false;
+    }
+}
+
+static esp_err_t v2_display_new(v2_display_resources_t *resources)
+{
+    if (resources == NULL) return ESP_ERR_INVALID_ARG;
+
+    const spi_bus_config_t bus_config = CO5300_PANEL_BUS_QSPI_CONFIG(
+        BSP_LCD_PCLK, BSP_LCD_DATA0, BSP_LCD_DATA1, BSP_LCD_DATA2, BSP_LCD_DATA3,
+        BSP_LCD_H_RES * BSP_LCD_V_RES * BSP_LCD_BITS_PER_PIXEL / 8);
+    esp_err_t result = spi_bus_initialize(BSP_LCD_SPI_NUM, &bus_config, SPI_DMA_CH_AUTO);
+    if (result != ESP_OK) return result;
+    resources->spi_bus_initialized = true;
+
+    const esp_lcd_panel_io_spi_config_t io_config =
+        CO5300_PANEL_IO_QSPI_CONFIG(BSP_LCD_CS, NULL, NULL);
+    co5300_vendor_config_t vendor_config = {
+        .init_cmds = V2_CO5300_INIT_CMDS,
+        .init_cmds_size = sizeof(V2_CO5300_INIT_CMDS) / sizeof(V2_CO5300_INIT_CMDS[0]),
+        .flags = {
+            .use_qspi_interface = 1,
+        },
+    };
+    result = esp_lcd_new_panel_io_spi(
+        (esp_lcd_spi_bus_handle_t)BSP_LCD_SPI_NUM, &io_config, &resources->panel_io);
+    if (result != ESP_OK) return result;
+    if (resources->panel_io == NULL) return ESP_FAIL;
+
+    const esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = BSP_LCD_RST,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = BSP_LCD_BITS_PER_PIXEL,
+        .vendor_config = &vendor_config,
+    };
+    result = esp_lcd_new_panel_co5300(resources->panel_io, &panel_config, &resources->panel);
+    if (result != ESP_OK) return result;
+    if (resources->panel == NULL) return ESP_FAIL;
+    result = esp_lcd_panel_reset(resources->panel);
+    if (result != ESP_OK) return result;
+    result = esp_lcd_panel_init(resources->panel);
+    if (result != ESP_OK) return result;
+    result = esp_lcd_panel_set_gap(resources->panel, 0, 0);
+    if (result != ESP_OK) return result;
+    return esp_lcd_panel_disp_on_off(resources->panel, true);
 }
 
 static esp_err_t v2_display_start(void *context)
@@ -146,6 +233,13 @@ static esp_err_t v2_display_start(void *context)
 
     v2_display_resources_t resources = {0};
     esp_err_t result = ESP_OK;
+
+    if (!s_i2c_owned) {
+        result = bsp_i2c_init();
+        if (result != ESP_OK) goto fail;
+        s_i2c_owned = true;
+    }
+    resources.i2c_bus_initialized = true;
 
     /* The Waveshare V2 composition uses the sequence in its official Arduino
      * V2 example: TCA9554 pins 0, 1 and 2 hold the panel/touch rails in reset,
@@ -183,8 +277,7 @@ static esp_err_t v2_display_start(void *context)
     }
     resources.lvgl_port_initialized = true;
 
-    const bsp_display_config_t panel_config = {0};
-    result = bsp_display_new(&panel_config, &resources.panel, &resources.panel_io);
+    result = v2_display_new(&resources);
     if (result != ESP_OK || resources.panel == NULL || resources.panel_io == NULL) {
         ESP_LOGE(TAG, "co5300_qspi_init status=fail");
         if (result == ESP_OK) result = ESP_FAIL;
@@ -270,7 +363,7 @@ static esp_err_t v2_display_start(void *context)
     }
 
     ESP_LOGI(TAG, "display_init status=pass panel=co5300 touch=cst820");
-    const esp_err_t brightness_result = bsp_display_brightness_set(85);
+    const esp_err_t brightness_result = esp_lcd_panel_co5300_set_brightness(resources.panel, 85);
     ESP_LOGI(TAG, "brightness_set status=%s", brightness_result == ESP_OK ? "pass" : "unavailable");
     s_display_started = true;
     return ESP_OK;

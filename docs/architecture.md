@@ -113,7 +113,10 @@ bounded evidence code. Only `matched` enters display, providers, QuickJS, app,
 and ready transport startup. A mismatch or unknown state keeps the diagnostic
 transport alive and returns a terminal `TSXB ERR hardware-mismatch` or
 `TSXB ERR hardware-unknown`; it does not construct LVGL or QuickJS state. This
-composition has no universal runtime board detector or registry switch.
+composition has no universal runtime board detector or registry switch. A
+matched identity whose display or touch startup fails returns the distinct
+`TSXB ERR hardware-startup-failure` reason without changing the observed
+identity.
 
 Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
 only; the SDK facade adapts the app bundle's public module specifiers to the

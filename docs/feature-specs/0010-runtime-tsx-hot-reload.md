@@ -211,7 +211,7 @@ Device to host:
   nine `RuntimeBundleRejection` values or `frame`, `base64`, `sequence`,
   `overflow`, `sha256`, `timeout`, `busy`, `malformed-manifest`,
   `non-ascii`, `evaluate-rolled-back`, `hardware-mismatch`, or
-  `hardware-unknown`.
+  `hardware-unknown`, or `hardware-startup-failure`.
 
 Before the V1 display/runtime composition starts, the adapter performs a
 bounded, read-only identity check through the existing BSP I2C owner. An ACK
