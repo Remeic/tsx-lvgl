@@ -91,6 +91,11 @@ export function resolveCatalogBoard(target, catalog = boardCatalog) {
   if (board === undefined || typeof board.id !== "string") {
     throw new Error(`board target ${target.targetKey} does not resolve to a catalog board`);
   }
+  for (const field of ["displayName", "supportStatus"]) {
+    if (target[field] !== undefined && target[field] !== board[field]) {
+      throw new Error(`board target ${target.targetKey} ${field} disagrees with catalog`);
+    }
+  }
   return board;
 }
 
@@ -108,8 +113,8 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
   return Object.freeze({
     targetKey: target.targetKey,
     boardId: board.id,
-    displayName: target.displayName,
-    supportStatus: target.supportStatus,
+    displayName: board.displayName,
+    supportStatus: board.supportStatus,
     adapterDirectory: resolve(repoRoot, target.adapterPath),
     bsp: target.bsp,
     projectDirectory: resolve(repoRoot, target.projectPath),
@@ -129,11 +134,13 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
 export function listFirmwareTargets() {
   return Object.freeze([...targets.values()]
     .sort((left, right) => left.targetKey.localeCompare(right.targetKey))
-    .map((target) => Object.freeze({
-      targetKey: target.targetKey,
-      boardId: target.boardId,
-      displayName: target.displayName,
-      supportStatus: target.supportStatus,
+    .map((target) => {
+      const board = resolveCatalogBoard(target);
+      return Object.freeze({
+        targetKey: target.targetKey,
+        boardId: target.boardId,
+        displayName: board.displayName,
+        supportStatus: board.supportStatus,
       projectPath: target.projectPath,
       adapterPath: target.adapterPath,
       artifactPath: target.artifactPath,
@@ -141,8 +148,9 @@ export function listFirmwareTargets() {
       buildMetadataPath: target.buildMetadataPath,
       partitionTablePath: target.partitionTablePath,
       targetIdHeaderPath: target.targetIdHeaderPath,
-      bsp: target.bsp,
-    })));
+        bsp: target.bsp,
+      });
+    }));
 }
 
 export { V1_TARGET, V2_TARGET };

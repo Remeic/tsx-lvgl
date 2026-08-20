@@ -8,6 +8,7 @@ import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
 import { resolveBoardProfile } from "../scripts/board-profile.mjs";
 
 const source = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/runtime_probe.c", import.meta.url), "utf8");
+const runtimeBoot = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/runtime_boot.c", import.meta.url), "utf8");
 const runtimeHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/include/runtime_probe.h", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/bundle_transport.c", import.meta.url), "utf8");
 const transportHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/include/bundle_transport.h", import.meta.url), "utf8");
@@ -107,7 +108,7 @@ test("selected V1 target and committed embedded manifest share the canonical ide
 });
 
 test("shared runtime component has no target BSP or provider dependency", () => {
-  const sharedSources = [runtimeHeader, source, transportHeader, transport, lvglHost, lvglHostHeader, runtimeCmake].join("\n");
+  const sharedSources = [runtimeHeader, runtimeBoot, source, transportHeader, transport, lvglHost, lvglHostHeader, runtimeCmake].join("\n");
   assert.doesNotMatch(sharedSources, /waveshare_v1|WAVESHARE_V1|bsp\//);
   assert.doesNotMatch(runtimeCmake, /waveshare|bsp|provider/i);
   assert.match(adapterSource, /bsp\/esp32_s3_touch_amoled_1_8\.h/);
@@ -133,14 +134,14 @@ test("V1 identity evidence is read-only and gates display/runtime startup", () =
   assert.match(displayStartup, /probe_address\(bus, WAVESHARE_V1_FT3168_ADDRESS/);
   assert.match(displayStartup, /probe_address\(bus, WAVESHARE_V1_CST816S_ADDRESS/);
   assert.match(displayStartup, /tsx_board_classify_identity\(ft3168, cst816s\)/);
-  const probe = appMain.indexOf("tsx_board_adapter_probe_identity");
-  const display = appMain.indexOf("tsx_board_adapter_display_start");
-  const owner = appMain.indexOf("xTaskCreate(runtime_probe_owner_task");
+  const probe = runtimeBoot.indexOf("tsx_board_adapter_probe_identity");
+  const display = runtimeBoot.indexOf("tsx_board_adapter_display_start");
+  const owner = runtimeBoot.indexOf("xTaskCreate(runtime_probe_owner_task");
   assert.ok(probe >= 0 && probe < display, "identity probe must precede display startup");
   assert.ok(display < owner, "display startup must precede runtime owner creation");
-  assert.match(appMain, /PROBE checkpoint=board_identity status=%s target=%s evidence=%s/);
-  assert.match(appMain, /bundle_transport_start_rejected\(reason\)/);
-  assert.doesNotMatch(appMain, /runtime_probe_start\(|runtime_probe_start_sensors|runtime_probe_start_connectivity/);
+  assert.match(runtimeBoot, /PROBE checkpoint=board_identity status=%s target=%s evidence=%s/);
+  assert.match(runtimeBoot, /bundle_transport_start_rejected\(reason\)/);
+  assert.doesNotMatch(runtimeBoot, /runtime_probe_start\(|runtime_probe_start_sensors|runtime_probe_start_connectivity/);
   assert.doesNotMatch(displayStartup, /i2c_master_(transmit|receive|write|read)|i2c_master_bus_add_device/);
 });
 
@@ -151,12 +152,12 @@ test("V1 identity keeps positive CST evidence authoritative over an FT probe err
 });
 
 test("rejected transport startup retries and resets instead of sleeping silently", () => {
-  assert.match(appMain, /REJECT_TRANSPORT_START_ATTEMPTS \(3U\)/);
-  assert.match(appMain, /REJECT_TRANSPORT_RETRY_BACKOFF_MS/);
-  assert.match(appMain, /for \(uint32_t attempt = 1; attempt <= REJECT_TRANSPORT_START_ATTEMPTS; attempt\+\+\)/);
-  assert.match(appMain, /if \(!run_rejected_diagnostic_transport\(reason\)\)/);
-  assert.match(appMain, /esp_restart\(\)/);
-  assert.match(appMain, /remain_in_rejected_diagnostic_mode\(\)/);
+  assert.match(runtimeBoot, /REJECT_TRANSPORT_START_ATTEMPTS \(3U\)/);
+  assert.match(runtimeBoot, /REJECT_TRANSPORT_RETRY_BACKOFF_MS/);
+  assert.match(runtimeBoot, /for \(uint32_t attempt = 1; attempt <= REJECT_TRANSPORT_START_ATTEMPTS; attempt\+\+\)/);
+  assert.match(runtimeBoot, /if \(!run_rejected_diagnostic_transport\(reason\)\)/);
+  assert.match(runtimeBoot, /esp_restart\(\)/);
+  assert.match(runtimeBoot, /remain_in_rejected_diagnostic_mode\(\)/);
 });
 
 test("reject-mode answers BEGIN before staging or runtime generation access", () => {
@@ -186,8 +187,8 @@ test("ready and rejected transport startup share one ownership helper", () => {
 test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () => {
   assert.match(runtimeHeader, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
   assert.match(source, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
-  assert.match(appMain, /runtime_probe_run\(board, &RUNTIME_ASSETS\)/);
-  assert.doesNotMatch(appMain, /bundle_transport_start\(probe|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
+  assert.match(runtimeBoot, /runtime_probe_run\(boot->board, boot->assets\)/);
+  assert.doesNotMatch(runtimeBoot, /bundle_transport_start\(probe|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
   assert.doesNotMatch(runtimeHeader, /runtime_probe_destroy/);
   assert.doesNotMatch(source, /runtime_probe_destroy_impl|lvgl_host_discard_without_lvgl/);
   assert.match(source, /RUNTIME_PROBE_CLEANUP_RETRY_RESTART/);
@@ -242,8 +243,8 @@ test("display startup owns one bounded FT3168 recovery path and keeps SH8601 ali
   assert.doesNotMatch(displayStartup, /lvgl_port_add_disp_rgb/);
   assert.doesNotMatch(displayStartup, /bsp_display_start\(/);
   assert.doesNotMatch(displayStartup, /i2c_new_master_bus\(/);
-  assert.match(appMain, /tsx_board_adapter_display_start\(board\)/);
-  assert.doesNotMatch(appMain, /ESP_ERROR_CHECK\(bsp_display_brightness_set/);
+  assert.match(runtimeBoot, /tsx_board_adapter_display_start\(board\)/);
+  assert.doesNotMatch(runtimeBoot, /ESP_ERROR_CHECK\(bsp_display_brightness_set/);
 });
 
 test("native root replacement forces the first LVGL frame while the owner lock is held", () => {
@@ -272,9 +273,9 @@ test("optional providers report unavailable state without aborting application b
   assert.match(source, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
   assert.match(source, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
   assert.match(source, /status=unavailable/);
-  assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(32768U\)/);
-  assert.doesNotMatch(appMain, /xTaskCreate\(runtime_probe_task/);
-  assert.doesNotMatch(appMain, /runtime_probe_task\(probe\)/);
+  assert.match(runtimeBoot, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(32768U\)/);
+  assert.doesNotMatch(runtimeBoot, /xTaskCreate\(runtime_probe_task/);
+  assert.doesNotMatch(runtimeBoot, /runtime_probe_task\(probe\)/);
   assert.ok(source.indexOf("bundle_transport_start(probe)") < source.indexOf("runtime_probe_start_sensors(probe)"));
   assert.ok(source.indexOf("runtime_probe_start_connectivity(probe)") < source.indexOf("runtime_probe_boot(probe)"));
   assert.doesNotMatch(source, /if \(runtime_probe_start_sensors\(probe\)/);

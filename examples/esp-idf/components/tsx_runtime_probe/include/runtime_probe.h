@@ -31,6 +31,11 @@ typedef struct {
     const char *app_manifest;
 } runtime_probe_assets_t;
 
+typedef struct {
+    const tsx_board_adapter_t *board;
+    const runtime_probe_assets_t *assets;
+} runtime_probe_context_t;
+
 esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
                               const runtime_probe_assets_t *assets,
                               runtime_probe_t **out_probe);
@@ -52,6 +57,14 @@ esp_err_t runtime_probe_start_connectivity(runtime_probe_t *probe);
 /** Evaluates kernel/app only after providers are configured; caller owns LVGL lock. */
 esp_err_t runtime_probe_boot(runtime_probe_t *probe);
 void runtime_probe_task(void *arg);
+
+/**
+ * Shared target boot sequence. Each firmware composition root supplies only
+ * its adapter, embedded assets, and a target description for the boot log.
+ */
+void runtime_probe_app_main(const tsx_board_adapter_t *board,
+                            const runtime_probe_assets_t *assets,
+                            const char *target_description);
 
 typedef enum {
     RUNTIME_PROBE_RELOAD_COMMITTED,

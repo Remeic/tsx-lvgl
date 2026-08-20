@@ -101,16 +101,25 @@ test("V2 adapter owns CO5300/CST identity and does not import the V1 driver comp
   const identity = await readTargetFile(V2_TARGET, "components/tsx_board_adapter_v2/tsx_board_identity_v2.c");
   const cmake = await readTargetFile(V2_TARGET, "components/tsx_board_adapter_v2/CMakeLists.txt");
   const appMain = await readTargetFile(V2_TARGET, "main/app_main.c");
-  assert.match(adapter, /bsp_display_start\(\)/);
+  assert.doesNotMatch(adapter, /bsp_display_start\(\)/);
+  assert.match(adapter, /bsp_io_expander_init\(\)/);
+  assert.match(adapter, /lvgl_port_add_disp\(/);
+  assert.doesNotMatch(adapter, /lvgl_port_add_disp_rgb\(/);
+  assert.match(adapter, /esp_lcd_touch_new_i2c_cst816s/);
   assert.match(adapter, /0x38U/);
   assert.match(adapter, /0x15U/);
   assert.match(adapter, /tsx_board_classify_v2_identity/);
   assert.match(adapter, /panel=co5300/);
-  assert.match(appMain, /tsx_board_adapter_probe_identity/);
-  assert.match(appMain, /tsx_board_identity_is_matched/);
+  assert.match(appMain, /runtime_probe_app_main/);
   assert.doesNotMatch(cmake, /tsx_board_adapter_v1|waveshare_v1|esp_lcd_touch_ft5x06|esp_lcd_sh8601/i);
   assert.doesNotMatch(adapter, /tsx_board_adapter_v1|waveshare_v1|esp_lcd_touch_ft5x06|esp_lcd_sh8601/i);
   assert.doesNotMatch(identity, /esp_|i2c_|bsp_|freertos/i);
+});
+
+test("V2 boot evidence declares motion unavailable", async () => {
+  const appMain = await readTargetFile(V2_TARGET, "main/app_main.c");
+  assert.match(appMain, /motion=unavailable/);
+  assert.doesNotMatch(appMain, /CO5300 \/ CST820 \/ QMI8658/);
 });
 
 test("generated V1/V2 target IDs, embedded manifests and transport handshakes form a cross-target matrix", async () => {

@@ -55,6 +55,13 @@ Primary source references:
 The schematic and BSP are source references for the composition. They are not
 an observation of the unavailable unit in this checkout.
 
+The V2 adapter owns the display bring-up boundary. It initializes the BSP
+TCA9554 handle, drives expander pins 0, 1 and 2 low, waits 20 ms, and releases
+them high before the BSP CO5300 QSPI constructor runs. It then registers that
+panel with the generic `lvgl_port_add_disp()` path and binds the explicit
+CST816S-compatible touch driver to the same LVGL display. The RGB helper in
+the BSP is not used by this target.
+
 ## Identity and runtime gate
 
 The V2 adapter probes the BSP-owned I2C bus before display startup. It does
@@ -68,7 +75,7 @@ during the probe.
 | ACK | ACK | `unknown` (`ambiguous-dual-ack`) |
 | no ACK | no ACK, error, or other unresolved result | `unknown` |
 
-Only `matched` reaches BSP display startup, runtime startup and ready
+Only `matched` reaches V2 display startup, runtime startup and ready
 transport. Mismatch and unknown states stay in rejected diagnostic mode.
 This policy is host-tested by `tests/firmware-target-matrix.test.mjs` and is
 not physical identity proof.
