@@ -62,7 +62,8 @@ function boardSelectionError(code: typeof DIAGNOSTIC_CODES.BOARD_SELECTION_REQUI
   });
 }
 
-function freezeCatalog(value: BoardCatalog): BoardCatalog {
+/** Validates and freezes catalog data before it crosses the SDK boundary. */
+export function freezeCatalog(value: BoardCatalog): BoardCatalog {
   if (value.formatVersion !== 1 || !Array.isArray(value.boards) || value.boards.length === 0) {
     throw new Error("board catalog must declare formatVersion 1 and at least one board");
   }

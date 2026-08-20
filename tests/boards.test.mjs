@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listSupportedBoards, resolveCanonicalBoardId } from "../packages/sdk/dist/boards.js";
+import { freezeCatalog, listSupportedBoards, resolveCanonicalBoardId } from "../packages/sdk/dist/boards.js";
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 
 const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
@@ -46,4 +46,11 @@ test("legacy, malformed and unsupported IDs fail without migration", () => {
       return true;
     });
   }
+});
+
+test("board catalog rejects an invalid format before exposing records", () => {
+  assert.throws(
+    () => freezeCatalog({ formatVersion: 2, boards: [] }),
+    /board catalog must declare formatVersion 1 and at least one board/,
+  );
 });

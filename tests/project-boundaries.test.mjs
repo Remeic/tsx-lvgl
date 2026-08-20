@@ -121,6 +121,8 @@ test("project facade rejects invalid persisted boundaries before lifecycle work"
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, `{"version":1,"entry":"src/App.tsx","bundleId":"bad space","generation":0,"boardId":"${V1_BOARD_ID}"}\n`);
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
+  writeFileSync(configPath, `{"version":1,"entry":"src/App.tsx","bundleId":"bad space","generation":1,"boardId":"${V1_BOARD_ID}"}\n`);
+  assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.CONFIG_INVALID);
   writeFileSync(configPath, '{"version":1,"entry":"src/App.tsx","bundleId":"bad space"}\n');
   assertCode(() => readProjectFiles(root), DIAGNOSTIC_CODES.BOARD_SELECTION_REQUIRED);
   writeFileSync(configPath, `{"version":1,"entry":"../outside.tsx","bundleId":"app","boardId":"${V1_BOARD_ID}"}\n`);

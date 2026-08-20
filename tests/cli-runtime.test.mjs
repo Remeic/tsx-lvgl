@@ -39,6 +39,9 @@ test("CLI parser normalizes supported options and rejects malformed input", () =
   assert.equal(parseArgs(["sync", "-h"]).command, "help");
   assert.deepEqual(parseArgs(["create", "--artifact", "sdk.tgz", "--source", "framework", "--help"]), { command: "help", positional: [], json: false, artifact: "sdk.tgz", source: "framework" });
   assert.throws(() => parseArgs(["create", "--artifact"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["create", "--board"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["create", "--board", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.deepEqual(parseArgs(["create", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--help"]), { command: "help", positional: [], json: false, boardId: "waveshare.esp32s3.touch-amoled-1.8.v1" });
   assert.throws(() => parseArgs(["update", "--source", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--wat"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
@@ -106,6 +109,9 @@ test("CLI runtime routes every command and preserves machine-readable outcomes",
     devProject: async (root) => { calls.push(["dev", root]); return operations().devProject(); },
     doctorProject: (root) => { calls.push(["doctor", root]); return { ok: true, resultCode: "DOCTOR_OK", checks: [] }; },
   });
+  const createWithoutArtifact = recorder();
+  assert.equal(await runCli(["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--json"], "/cwd", operations(), createWithoutArtifact.writer), 0);
+  assert.equal(JSON.parse(createWithoutArtifact.logs[0]).artifact, lock.artifact.file);
   for (const argv of [["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--artifact", "sdk.tgz", "--json"], ["sync"], ["update", "--source", "/framework"], ["check"], ["build"], ["dev", "--json"], ["doctor", "--json"]]) {
     const output = recorder();
     assert.equal(await runCli(argv, "/cwd", ops, output.writer), 0);
