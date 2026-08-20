@@ -105,7 +105,9 @@ selects its pinned BSP/LVGL dependencies, embedded files and generated
 `tsx_board_target_id.h`, then links one adapter implementing the opaque board,
 display, motion and Wi-Fi ports. The V1 target keeps the existing
 SH8601/FT3168 startup and optional-provider behavior behind that adapter. This
-composition has no runtime board detection or registry switch.
+composition has no runtime board detection or registry switch. The generated
+ID is compile-time migration metadata, not observed physical identity; Plan
+004 owns matched, mismatched and unknown identity states.
 
 Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
 only; the SDK facade adapts the app bundle's public module specifiers to the

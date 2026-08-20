@@ -25,6 +25,10 @@ typedef struct lvgl_host lvgl_host_t;
 typedef void (*lvgl_host_click_cb_t)(void *user_data, int handle);
 
 lvgl_host_t *lvgl_host_create(lvgl_host_click_cb_t click_cb, void *click_user_data);
+/** Frees an unmounted host without calling LVGL; use only when no display lock
+ * could be acquired and therefore no native objects may be deleted. */
+void lvgl_host_discard_without_lvgl(lvgl_host_t *host);
+/** Destroys native objects; caller must be the owner task and hold the display lock. */
 void lvgl_host_destroy(lvgl_host_t *host);
 
 /** kind: 0=screen, 1=view, 2=text, 3=button. Mirrors NativeWidgetKind order below. */

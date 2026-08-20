@@ -8,7 +8,7 @@ over a dev-only USB Serial/JTAG transport — no reflash required to try a new a
 bundle. It is not a product path or release artifact; this committed source
 and build harness proves the runtime-first architecture on the physical
 target, while board captures remain transient evidence. See
-[feature spec 0010](../../../docs/feature-specs/0010-runtime-tsx-hot-reload.md)
+[feature spec 0010](../../../../docs/feature-specs/0010-runtime-tsx-hot-reload.md)
 for the normative contracts (native ABI, bundle format, transport wire
 protocol).
 
@@ -48,6 +48,9 @@ npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 The target composition resolves `espressif/quickjs-ng` 0.14.0, LVGL 9.5 and
 the Waveshare V1 BSP 1.1.4. The board ID header is generated from the selected
 profile at `main/generated/tsx_board_target_id.h`; it is not hand-maintained.
+The V1 adapter accepts the compile-time target only; it does not observe or
+prove physical identity. Plan 004 owns matched, mismatched and unknown
+identity states.
 Generated dependency/build output (`build/`,
 `managed_components/`, `sdkconfig`) is local and gitignored;
 `dependencies.lock` is tracked for this target.

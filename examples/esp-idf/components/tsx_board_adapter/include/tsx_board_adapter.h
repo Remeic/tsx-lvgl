@@ -67,7 +67,8 @@ typedef struct {
     bool (*display_lock)(void *context, uint32_t timeout_ms);
     /** Releases the target display/LVGL lock. */
     void (*display_unlock)(void *context);
-    /* Reserved for Plan 004 probe_identity without exposing BSP state here. */
+    /* Plan 004 seam only: Plan 003 targets return ESP_ERR_NOT_SUPPORTED here.
+     * This is never an observed-match or readiness result. */
     esp_err_t (*probe_identity)(void *context);
 } tsx_board_boot_port_t;
 

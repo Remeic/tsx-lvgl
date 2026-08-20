@@ -41,11 +41,13 @@ static void v1_display_unlock(void *context)
     bsp_display_unlock();
 }
 
-/* Plan 004 owns physical identity probing. V1 remains compile-time accepted. */
+/* Plan 003 has no observed identity probe. This explicit unsupported result
+ * means compile-time migration acceptance only; it is never a readiness or
+ * matched-identity signal. Plan 004 will add matched/mismatched/unknown state. */
 static esp_err_t v1_probe_identity(void *context)
 {
     (void)context;
-    return ESP_OK;
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 static esp_err_t v1_motion_create(void *context, tsx_motion_provider_t **out_provider)

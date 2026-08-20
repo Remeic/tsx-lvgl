@@ -63,6 +63,13 @@ lvgl_host_t *lvgl_host_create(lvgl_host_click_cb_t click_cb, void *click_user_da
     return host;
 }
 
+void lvgl_host_discard_without_lvgl(lvgl_host_t *host)
+{
+    if (host == NULL) return;
+    if (s_active_host == host) s_active_host = NULL;
+    free(host);
+}
+
 void lvgl_host_destroy(lvgl_host_t *host)
 {
     if (host == NULL) return;

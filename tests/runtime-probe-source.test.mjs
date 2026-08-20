@@ -19,6 +19,7 @@ const runtimeCmake = readFileSync(new URL("../examples/esp-idf/components/tsx_ru
 const adapterCmake = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/CMakeLists.txt", import.meta.url), "utf8");
 const adapterSource = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/tsx_board_adapter_v1.c", import.meta.url), "utf8");
 const adapterContract = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/include/tsx_board_adapter.h", import.meta.url), "utf8");
+const targetReadme = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/README.md", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
 const targetIdGenerator = readFileSync(new URL("../scripts/generate-board-target-id.mjs", import.meta.url), "utf8");
@@ -113,6 +114,25 @@ test("shared runtime component has no target BSP or provider dependency", () => 
   assert.match(adapterCmake, /if\(NOT EXISTS[\s\S]*tsx_board_target_id\.h/);
   assert.match(adapterCmake, /message\(FATAL_ERROR/);
   assert.match(adapterSource, /static const tsx_board_adapter_t adapter/);
+  assert.match(adapterSource, /return ESP_ERR_NOT_SUPPORTED;/);
+  assert.doesNotMatch(adapterSource, /static esp_err_t v1_probe_identity\(void \*context\)\s*\{[^}]*return ESP_OK/);
+  assert.match(targetReadme, /compile-time target only/);
+  assert.match(targetReadme, /does not observe or\s+prove physical identity/);
+});
+
+test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () => {
+  assert.match(runtimeHeader, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
+  assert.match(source, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
+  assert.match(appMain, /runtime_probe_run\(board, &RUNTIME_ASSETS\)/);
+  assert.doesNotMatch(appMain, /bundle_transport_start|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
+  assert.match(source, /const esp_err_t transport_result = bundle_transport_start\(probe\);[\s\S]*const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);[\s\S]*const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
+  assert.match(source, /runtime_probe_task\(probe\);\s*return runtime_probe_cleanup\(probe\);/);
+  assert.match(source, /bundle_transport_stop\(\);\s*const bool display_locked = tsx_board_adapter_display_lock\(probe->board, 0\);/);
+  assert.match(source, /runtime_probe_destroy_impl\(probe, true, true\);\s*tsx_board_adapter_display_unlock\(board\);/);
+  assert.match(source, /runtime_probe_destroy_impl\(probe, false, true\);/);
+  assert.match(lvglHostHeader, /lvgl_host_discard_without_lvgl/);
+  assert.match(lvglHost, /void lvgl_host_discard_without_lvgl\(lvgl_host_t \*host\)/);
+  assert.match(source, /if \(destroy_lvgl\) lvgl_host_destroy\(probe->lvgl_host\);\s*else lvgl_host_discard_without_lvgl/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {
@@ -177,16 +197,16 @@ test("native host gives Screen and View a centered vertical layout", () => {
 });
 
 test("optional providers report unavailable state without aborting application boot", () => {
-  assert.match(appMain, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
-  assert.match(appMain, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
-  assert.match(appMain, /status=unavailable/);
+  assert.match(source, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
+  assert.match(source, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
+  assert.match(source, /status=unavailable/);
   assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(32768U\)/);
   assert.doesNotMatch(appMain, /xTaskCreate\(runtime_probe_task/);
-  assert.match(appMain, /runtime_probe_task\(probe\);/);
-  assert.ok(appMain.indexOf("bundle_transport_start(probe)") < appMain.indexOf("runtime_probe_start_sensors(probe)"));
-  assert.ok(appMain.indexOf("runtime_probe_start_connectivity(probe)") < appMain.indexOf("runtime_probe_boot(probe)"));
-  assert.doesNotMatch(appMain, /if \(runtime_probe_start_sensors\(probe\)/);
-  assert.doesNotMatch(appMain, /if \(runtime_probe_start_connectivity\(probe\)/);
+  assert.doesNotMatch(appMain, /runtime_probe_task\(probe\)/);
+  assert.ok(source.indexOf("bundle_transport_start(probe)") < source.indexOf("runtime_probe_start_sensors(probe)"));
+  assert.ok(source.indexOf("runtime_probe_start_connectivity(probe)") < source.indexOf("runtime_probe_boot(probe)"));
+  assert.doesNotMatch(source, /if \(runtime_probe_start_sensors\(probe\)/);
+  assert.doesNotMatch(source, /if \(runtime_probe_start_connectivity\(probe\)/);
   assert.doesNotMatch(source, /probe == NULL \|\| probe->sensors == NULL \|\| probe->wifi == NULL/);
   assert.match(source, /if \(probe->sensors == NULL\) \{/);
   assert.match(source, /static void log_sensor_checkpoint\(runtime_probe_t \*probe, bool available\)/);
@@ -244,7 +264,7 @@ test("runtime probe installs Wi-Fi through the existing board owner queue before
   assert.match(source, /emit_wifi_events\(probe\);/);
   assert.match(source, /"instanceId", JS_NewString\(context, "wifi\.station"\)/);
   assert.match(source, /"correlationId"/);
-  assert.ok(appMain.indexOf("runtime_probe_start_connectivity(probe)") < appMain.indexOf("runtime_probe_boot(probe)"));
+  assert.ok(source.indexOf("runtime_probe_start_connectivity(probe)") < source.indexOf("runtime_probe_boot(probe)"));
 });
 
 test("Wi-Fi provider keeps build-local credentials redacted and joins its worker before teardown", () => {
