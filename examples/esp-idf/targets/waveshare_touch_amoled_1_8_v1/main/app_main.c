@@ -1,14 +1,25 @@
-#include "bsp/esp32_s3_touch_amoled_1_8.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bundle_transport.h"
-#include "display_startup.h"
 #include "runtime_probe.h"
+#include "tsx_board_adapter_v1.h"
 
 #include <stdint.h>
+
+extern const uint8_t _binary_kernel_js_start[] asm("_binary_kernel_js_start");
+extern const uint8_t _binary_kernel_js_end[] asm("_binary_kernel_js_end");
+extern const uint8_t _binary_app_g1_js_start[] asm("_binary_app_g1_js_start");
+extern const uint8_t _binary_app_g1_manifest_json_start[] asm("_binary_app_g1_manifest_json_start");
+
+static const runtime_probe_assets_t RUNTIME_ASSETS = {
+    .kernel_start = _binary_kernel_js_start,
+    .kernel_end = _binary_kernel_js_end,
+    .app_source = (const char *)_binary_app_g1_js_start,
+    .app_manifest = (const char *)_binary_app_g1_manifest_json_start,
+};
 
 static const char *TAG = "tsx_runtime_probe";
 static RTC_DATA_ATTR uint32_t probe_boot_count;
@@ -26,10 +37,10 @@ static RTC_DATA_ATTR uint32_t probe_boot_count;
 
 static void runtime_probe_boot_task(void *arg)
 {
-    (void)arg;
+    const tsx_board_adapter_t *board = arg;
 
     runtime_probe_t *probe = NULL;
-    const esp_err_t result = runtime_probe_start(&probe);
+    const esp_err_t result = runtime_probe_start(board, &RUNTIME_ASSETS, &probe);
     if (result != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=runtime_start status=fail err=%s",
                  esp_err_to_name(result));
@@ -54,14 +65,14 @@ static void runtime_probe_boot_task(void *arg)
     const esp_err_t connectivity_result = runtime_probe_start_connectivity(probe);
     if (connectivity_result != ESP_OK) ESP_LOGW(TAG, "PROBE checkpoint=wifi_init status=unavailable");
 
-    if (!bsp_display_lock(0)) {
+    if (!tsx_board_adapter_display_lock(board, 0)) {
         ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail");
         runtime_probe_destroy(probe);
         vTaskDelete(NULL);
         return;
     }
     const esp_err_t boot_result = runtime_probe_boot(probe);
-    bsp_display_unlock();
+    tsx_board_adapter_display_unlock(board);
     if (boot_result != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=kernel_boot status=fail err=%s", esp_err_to_name(boot_result));
         runtime_probe_destroy(probe);
@@ -77,6 +88,7 @@ static void runtime_probe_boot_task(void *arg)
 
 void app_main(void)
 {
+    const tsx_board_adapter_t *board = tsx_board_adapter_v1();
     const esp_reset_reason_t reset_reason = esp_reset_reason();
     probe_boot_count++;
 
@@ -84,14 +96,15 @@ void app_main(void)
              (unsigned)probe_boot_count);
     ESP_LOGI(TAG, "Target: ESP32-S3 / SH8601 / FT3168 / QMI8658 / LVGL 9.5");
 
-    if (waveshare_v1_display_start() != ESP_OK) {
+    if (tsx_board_adapter_display_start(board) != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail");
         return;
     }
 
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");
 
-    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", RUNTIME_PROBE_BOOT_STACK_WORDS, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(runtime_probe_boot_task, "runtime_probe_boot", RUNTIME_PROBE_BOOT_STACK_WORDS,
+                    (void *)board, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "PROBE checkpoint=boot_task status=fail");
         return;
     }

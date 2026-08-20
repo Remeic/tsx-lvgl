@@ -2,6 +2,9 @@
 
 #include "esp_err.h"
 
+#include "tsx_board_adapter.h"
+
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct runtime_probe runtime_probe_t;
@@ -12,15 +15,25 @@ typedef struct runtime_probe runtime_probe_t;
 /**
  * Identity constants the kernel's bundle policy checks against (see
  * `packages/device/src/kernel.ts` `policy()` and
- * `packages/bundler/src/index.ts` `PROTOCOL_VERSION`). Centralized
- * here so `runtime_probe.c` (which installs `__native.boardId`) and
- * `bundle_transport.c` (which reports both in the `TSXB RDY` reply) share one
- * definition.
+ * `packages/bundler/src/index.ts` `PROTOCOL_VERSION`). The board identity is
+ * supplied by the linked target adapter; the protocol version is shared by
+ * the runtime and transport.
  */
-#define RUNTIME_PROBE_BOARD_ID "waveshare.esp32s3.touch-amoled-1.8.v1"
 #define RUNTIME_PROBE_PROTOCOL_VERSION 1
 
-esp_err_t runtime_probe_start(runtime_probe_t **out_probe);
+/** Target-owned embedded runtime files. The shared component only consumes the
+ * opaque byte/string views; the target composition owns the filenames and
+ * ESP-IDF embedding declarations. */
+typedef struct {
+    const uint8_t *kernel_start;
+    const uint8_t *kernel_end;
+    const char *app_source;
+    const char *app_manifest;
+} runtime_probe_assets_t;
+
+esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
+                              const runtime_probe_assets_t *assets,
+                              runtime_probe_t **out_probe);
 /** Starts the cached QMI provider outside the display/QuickJS owner lock. */
 esp_err_t runtime_probe_start_sensors(runtime_probe_t *probe);
 /** Starts the station provider before the kernel can expose `useWifi`. */
@@ -67,3 +80,4 @@ runtime_probe_reload_result_t runtime_probe_stage_reload(runtime_probe_t *probe,
 
 /** Cached `__tsxKernelLastGeneration()`, refreshed after boot and after each processed reload. Safe from any task. */
 uint32_t runtime_probe_last_generation(runtime_probe_t *probe);
+const char *runtime_probe_target_id(runtime_probe_t *probe);

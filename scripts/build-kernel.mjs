@@ -14,7 +14,7 @@ const ROOT = resolve(__dirname, "..");
 /** Fixed emit order: byte-deterministic, not a dependency requirement (requires resolve lazily). */
 const PACKAGES = ["core", "capabilities", "connectivity", "sensors", "runtime", "device"];
 
-const DEFAULT_OUT = resolve(ROOT, "examples/esp-idf/runtime_port_probe/main/kernel.js");
+const DEFAULT_OUT = resolve(ROOT, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/kernel.js");
 const KERNEL_BUDGET_BYTES = 128 * 1024;
 
 const ALIASES = [

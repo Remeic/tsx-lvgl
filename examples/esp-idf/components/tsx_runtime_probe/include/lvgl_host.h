@@ -3,7 +3,7 @@
 /**
  * Native mirror of the `NativeLvgl` ABI (packages/device/src/native.ts).
  * Every function here is one binding `__native.lvgl` exposes into QuickJS.
- * All calls must run on the LVGL owner task, under `bsp_display_lock`: the
+ * All calls must run on the LVGL owner task, under the board display lock: the
  * host never re-locks internally and never calls back into JS.
  */
 
