@@ -65,6 +65,15 @@ static void remain_in_rejected_diagnostic_mode(void)
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+static void enter_rejected_diagnostic_mode(const char *reason)
+{
+    if (!run_rejected_diagnostic_transport(reason)) {
+        esp_restart();
+        return;
+    }
+    remain_in_rejected_diagnostic_mode();
+}
+
 void runtime_probe_app_main(const tsx_board_adapter_t *board,
                             const runtime_probe_assets_t *assets,
                             const char *target_description)
@@ -94,15 +103,12 @@ void runtime_probe_app_main(const tsx_board_adapter_t *board,
         const char *reason = identity.state == TSX_BOARD_IDENTITY_MISMATCH
                                  ? "hardware-mismatch"
                                  : "hardware-unknown";
-        if (!run_rejected_diagnostic_transport(reason)) {
-            esp_restart();
-            return;
-        }
-        remain_in_rejected_diagnostic_mode();
+        enter_rejected_diagnostic_mode(reason);
     }
 
     if (tsx_board_adapter_display_start(board) != ESP_OK) {
-        ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail");
+        ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail action=reject reason=hardware-unknown");
+        enter_rejected_diagnostic_mode("hardware-unknown");
         return;
     }
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");

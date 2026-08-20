@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCommandPlan, parseCli } from "../scripts/board-install.mjs";
+import { buildCommandPlan, parseCli, runCommandPlan } from "../scripts/board-install.mjs";
 
 test("board install requires an explicit target while keeping the Pomodoro entry default", () => {
   assert.throws(() => parseCli([], {}), /--target is required/);
@@ -45,4 +45,14 @@ test("persistent install rebuilds the embedded app before delegating to guarded 
   assert.ok(reload.command.includes("--target"));
   assert.ok(reload.command.includes("waveshare-touch-amoled-1.8-v1"));
   assert.ok(!reload.command.includes("idf.py"), "install must delegate writes to board:reload");
+});
+
+test("experimental build-only targets are rejected before install planning or execution", () => {
+  const parsed = parseCli(["--target", "waveshare-touch-amoled-1.8-v2", "--execute"], {});
+  let runnerCalls = 0;
+  assert.throws(
+    () => runCommandPlan(buildCommandPlan(parsed.options), ".", () => { runnerCalls++; return { status: 0 }; }),
+    /experimental-build-only.*board install.*supported/,
+  );
+  assert.equal(runnerCalls, 0, "unsupported install must not invoke build or reload runners");
 });

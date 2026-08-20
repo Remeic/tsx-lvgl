@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertSupportedBoardProfile, resolveBoardProfile } from "./board-profile.mjs";
+
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultEntry = "examples/apps/pomodoro.tsx";
 
@@ -110,6 +112,7 @@ function appendFlag(args, name, value) {
 }
 
 export function buildCommandPlan(options) {
+  assertSupportedBoardProfile(resolveBoardProfile(options.target, repoRoot), "board install");
   const embedArgs = ["scripts/embed-runtime-app.mjs", "--entry", options.entry, "--target", options.target, "--bundle-id", options.bundleId];
   const buildArgs = ["run", "board:build", "--", "--target", options.target];
   const reloadArgs = ["run", "board:reload", "--", "--target", options.target, "--reset-mode", options.resetMode];

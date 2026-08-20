@@ -8,7 +8,7 @@ import { partitionTableFixture, V1_PARTITION_TABLE_ENTRIES } from "./helpers/par
 import { compareLivePartitionTable, createArtifactDescriptor, readArtifactDescriptor } from "../scripts/board-artifact-descriptor.mjs";
 import { resolveBoardProfile } from "../scripts/board-profile.mjs";
 import { buildReloadMutationPlan } from "../scripts/board-reload-plan.mjs";
-import { runReload } from "../scripts/board-reload.mjs";
+import { parseCli, runReload } from "../scripts/board-reload.mjs";
 
 const TARGET = "waveshare-touch-amoled-1.8-v1";
 const MAC = "1c:db:d4:7a:06:60";
@@ -274,4 +274,30 @@ test("operation-log setup failure logs terminal failure and removes its temporar
   assert.equal((await readdir(testFixture.recoveryDir)).some((name) => name.startsWith(".tsx-lvgl-live-partition-")), false);
   const log = await readFile(join(testFixture.recoveryDir, "operation-app-install-injected.md"), "utf8");
   assert.match(log, /FAIL\/UNKNOWN — injected operation-log setup failure/);
+});
+
+test("experimental build-only targets are rejected before serial, preflight, or mutation hooks", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tsx-lvgl-reload-unsupported-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.throws(
+    () => parseCli(["--target", "waveshare-touch-amoled-1.8-v2", "--execute"], {}),
+    /experimental-build-only.*board reload.*supported/,
+  );
+  let captureCalls = 0;
+  let recoveryCalls = 0;
+  await assert.rejects(
+    runReload({
+      target: "waveshare-touch-amoled-1.8-v2",
+      execute: true,
+      dryRun: false,
+      preflightOnly: false,
+    }, {
+      root,
+      capture: async () => { captureCalls++; return { code: 0, output: "" }; },
+      recoveryContextLoader: async () => { recoveryCalls++; return {}; },
+    }),
+    /experimental-build-only.*board reload.*supported/,
+  );
+  assert.equal(captureCalls, 0, "unsupported reload must not invoke serial commands");
+  assert.equal(recoveryCalls, 0, "unsupported reload must not load recovery state");
 });

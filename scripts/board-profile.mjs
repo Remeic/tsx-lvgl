@@ -130,6 +130,20 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
   });
 }
 
+/**
+ * Device install/reload is reserved for catalog profiles that are explicitly
+ * supported. Build-only profiles remain available through board:build.
+ */
+export function assertSupportedBoardProfile(profile, operation) {
+  if (profile.supportStatus !== "supported") {
+    throw new Error(
+      `board target ${profile.targetKey} has support status ${profile.supportStatus}; ` +
+      `${operation} requires supportStatus supported (use the explicit firmware build command)`,
+    );
+  }
+  return profile;
+}
+
 /** Return all firmware targets in stable target-key order for CI/tooling. */
 export function listFirmwareTargets() {
   return Object.freeze([...targets.values()]

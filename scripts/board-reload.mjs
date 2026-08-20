@@ -19,7 +19,7 @@ import {
   readArtifactDescriptor,
   validateArtifactDescriptor,
 } from "./board-artifact-descriptor.mjs";
-import { resolveBoardProfile } from "./board-profile.mjs";
+import { assertSupportedBoardProfile, resolveBoardProfile } from "./board-profile.mjs";
 import {
   buildReloadMutationPlan,
   buildReloadPreflightPlan,
@@ -133,6 +133,7 @@ export function parseCli(argv, env = process.env) {
   if (options.recoveryDir) options.recoveryDir = resolve(options.recoveryDir);
   if (!options.target) throw new Error("--target is required");
   const profile = resolveBoardProfile(options.target, repoRoot);
+  assertSupportedBoardProfile(profile, "board reload");
   if (!artifactSpecified) options.artifact = profile.artifact;
   if (!descriptorSpecified) {
     if (artifactSpecified) throw new Error("--artifact requires an explicit --descriptor");
@@ -485,6 +486,7 @@ export async function runReload(options, {
   operationLogFactory = createOperationLog,
 } = {}) {
   const profile = resolveBoardProfile(options.target, root);
+  assertSupportedBoardProfile(profile, "board reload");
   if (options.dryRun) {
     printDryRun(options, profile);
     return { status: "DRY_RUN" };

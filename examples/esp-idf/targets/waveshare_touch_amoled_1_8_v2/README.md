@@ -58,9 +58,10 @@ an observation of the unavailable unit in this checkout.
 The V2 adapter owns the display bring-up boundary. It initializes the BSP
 TCA9554 handle, drives expander pins 0, 1 and 2 low, waits 20 ms, and releases
 them high before the BSP CO5300 QSPI constructor runs. It then registers that
-panel with the generic `lvgl_port_add_disp()` path and binds the explicit
-CST816S-compatible touch driver to the same LVGL display. The RGB helper in
-the BSP is not used by this target.
+panel with the generic `lvgl_port_add_disp()` path and binds the fitted CST820
+touch controller to the same LVGL display. The `cst816s` names in the manifest
+and adapter are API/component names only; they are not a claim that the fitted
+chip is CST816S. The RGB helper in the BSP is not used by this target.
 
 ## Identity and runtime gate
 

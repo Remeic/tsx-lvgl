@@ -155,9 +155,15 @@ test("rejected transport startup retries and resets instead of sleeping silently
   assert.match(runtimeBoot, /REJECT_TRANSPORT_START_ATTEMPTS \(3U\)/);
   assert.match(runtimeBoot, /REJECT_TRANSPORT_RETRY_BACKOFF_MS/);
   assert.match(runtimeBoot, /for \(uint32_t attempt = 1; attempt <= REJECT_TRANSPORT_START_ATTEMPTS; attempt\+\+\)/);
-  assert.match(runtimeBoot, /if \(!run_rejected_diagnostic_transport\(reason\)\)/);
+  assert.match(runtimeBoot, /enter_rejected_diagnostic_mode\(reason\)/);
   assert.match(runtimeBoot, /esp_restart\(\)/);
   assert.match(runtimeBoot, /remain_in_rejected_diagnostic_mode\(\)/);
+});
+
+test("display startup failure enters rejected recovery instead of returning with partial resources", () => {
+  assert.match(runtimeBoot, /PROBE checkpoint=board_start status=fail action=reject reason=hardware-unknown/);
+  assert.match(runtimeBoot, /if \(tsx_board_adapter_display_start\(board\) != ESP_OK\) \{[\s\S]*enter_rejected_diagnostic_mode\("hardware-unknown"\)/);
+  assert.match(runtimeBoot, /static void enter_rejected_diagnostic_mode\(const char \*reason\)/);
 });
 
 test("reject-mode answers BEGIN before staging or runtime generation access", () => {

@@ -110,6 +110,31 @@ test("V2 adapter owns CO5300/CST identity and does not import the V1 driver comp
   assert.match(adapter, /0x15U/);
   assert.match(adapter, /tsx_board_classify_v2_identity/);
   assert.match(adapter, /panel=co5300/);
+  assert.match(adapter, /v2_cleanup_display/);
+  assert.match(adapter, /v2_restore_expander_safe_state/);
+  for (const api of [
+    "lvgl_port_remove_touch",
+    "esp_lcd_touch_del",
+    "esp_lcd_panel_io_del",
+    "lvgl_port_remove_disp",
+    "lvgl_port_deinit",
+    "esp_lcd_panel_del",
+    "esp_io_expander_del",
+  ]) assert.match(adapter, new RegExp(api), `${api} must be in the V2 cleanup path`);
+  const cleanup = adapter.slice(adapter.indexOf("static void v2_cleanup_display"));
+  const cleanupOrder = [
+    "lvgl_port_remove_touch",
+    "esp_lcd_touch_del",
+    "esp_lcd_panel_io_del",
+    "lvgl_port_remove_disp",
+    "lvgl_port_deinit",
+    "esp_lcd_panel_del",
+    "esp_io_expander_del",
+  ].map((api) => cleanup.indexOf(api));
+  assert.ok(cleanupOrder.every((index) => index >= 0), "cleanup APIs must remain in the cleanup function");
+  assert.ok(cleanupOrder.every((index, position) => position === 0 || index > cleanupOrder[position - 1]), "cleanup must follow reverse ownership order");
+  assert.match(adapter, /s_display_failed = true;[\s\S]*v2_cleanup_display\(&resources\)/);
+  assert.doesNotMatch(adapter, /ESP_LOG[IEWD][^(]*\([^;]*cst816s/i, "runtime logs must identify neutral touch/CST820 evidence");
   assert.match(appMain, /runtime_probe_app_main/);
   assert.doesNotMatch(cmake, /tsx_board_adapter_v1|waveshare_v1|esp_lcd_touch_ft5x06|esp_lcd_sh8601/i);
   assert.doesNotMatch(adapter, /tsx_board_adapter_v1|waveshare_v1|esp_lcd_touch_ft5x06|esp_lcd_sh8601/i);

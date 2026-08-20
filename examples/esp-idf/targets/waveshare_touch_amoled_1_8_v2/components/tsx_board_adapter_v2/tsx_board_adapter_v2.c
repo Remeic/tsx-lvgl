@@ -26,6 +26,18 @@ static const char *TAG = "tsx_board_v2";
 #define WAVESHARE_V2_CST816S_X_GAP (0x10U)
 
 static bool s_display_started;
+static bool s_display_failed;
+
+typedef struct {
+    esp_io_expander_handle_t expander;
+    bool lvgl_port_initialized;
+    esp_lcd_panel_io_handle_t panel_io;
+    esp_lcd_panel_handle_t panel;
+    lv_display_t *display;
+    esp_lcd_panel_io_handle_t touch_io;
+    esp_lcd_touch_handle_t touch;
+    lv_indev_t *touch_indev;
+} v2_display_resources_t;
 
 static const char *v2_target_id(void *context)
 {
@@ -69,58 +81,124 @@ static esp_err_t v2_probe_identity(void *context, tsx_board_identity_t *out_iden
     return ESP_OK;
 }
 
+static void v2_restore_expander_safe_state(esp_io_expander_handle_t expander)
+{
+    if (expander == NULL) return;
+    /* Keep the panel, touch controller and their rails in reset during every
+     * failed bring-up. Each write is attempted so a partial earlier sequence
+     * cannot leave one rail asserted by accident. */
+    for (uint32_t pin = IO_EXPANDER_PIN_NUM_0; pin <= IO_EXPANDER_PIN_NUM_2; pin <<= 1) {
+        const esp_err_t result = esp_io_expander_set_level(expander, pin, 0);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "io_expander_safe_state pin=%u status=fail err=%s",
+                     (unsigned)pin, esp_err_to_name(result));
+        }
+    }
+}
+
+static void v2_cleanup_display(v2_display_resources_t *resources)
+{
+    if (resources == NULL) return;
+
+    /* Reverse the LVGL ownership graph before deleting the controller handles
+     * that the LVGL callbacks reference. Every field is cleared after its
+     * delete call, making repeated cleanup safe for this lifecycle boundary. */
+    if (resources->touch_indev != NULL) {
+        (void)lvgl_port_remove_touch(resources->touch_indev);
+        resources->touch_indev = NULL;
+    }
+    if (resources->touch != NULL) {
+        (void)esp_lcd_touch_del(resources->touch);
+        resources->touch = NULL;
+    }
+    if (resources->touch_io != NULL) {
+        (void)esp_lcd_panel_io_del(resources->touch_io);
+        resources->touch_io = NULL;
+    }
+    if (resources->display != NULL) {
+        (void)lvgl_port_remove_disp(resources->display);
+        resources->display = NULL;
+    }
+    if (resources->lvgl_port_initialized) {
+        (void)lvgl_port_deinit();
+        resources->lvgl_port_initialized = false;
+    }
+    if (resources->panel != NULL) {
+        (void)esp_lcd_panel_del(resources->panel);
+        resources->panel = NULL;
+    }
+    if (resources->panel_io != NULL) {
+        (void)esp_lcd_panel_io_del(resources->panel_io);
+        resources->panel_io = NULL;
+    }
+    v2_restore_expander_safe_state(resources->expander);
+    if (resources->expander != NULL) {
+        (void)esp_io_expander_del(resources->expander);
+        resources->expander = NULL;
+    }
+}
+
 static esp_err_t v2_display_start(void *context)
 {
     (void)context;
     if (s_display_started) return ESP_OK;
+    if (s_display_failed) return ESP_ERR_INVALID_STATE;
+
+    v2_display_resources_t resources = {0};
+    esp_err_t result = ESP_OK;
 
     /* The Waveshare V2 composition uses the sequence in its official Arduino
      * V2 example: TCA9554 pins 0, 1 and 2 hold the panel/touch rails in reset,
      * then release them after the required 20 ms settle. This must happen
      * before the BSP's CO5300 constructor touches QSPI. */
-    esp_io_expander_handle_t expander = bsp_io_expander_init();
-    if (expander == NULL) {
+    resources.expander = bsp_io_expander_init();
+    if (resources.expander == NULL) {
         ESP_LOGE(TAG, "io_expander_init status=fail");
-        return ESP_FAIL;
+        result = ESP_FAIL;
+        goto fail;
     }
-    const esp_err_t direction_result = esp_io_expander_set_dir(
-        expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1 | IO_EXPANDER_PIN_NUM_2,
+    result = esp_io_expander_set_dir(
+        resources.expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1 | IO_EXPANDER_PIN_NUM_2,
         IO_EXPANDER_OUTPUT);
-    if (direction_result != ESP_OK) return direction_result;
-    if (esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_0, 0) != ESP_OK ||
-        esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_1, 0) != ESP_OK ||
-        esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_2, 0) != ESP_OK) {
-        return ESP_FAIL;
+    if (result != ESP_OK) goto fail;
+    if (esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_0, 0) != ESP_OK ||
+        esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_1, 0) != ESP_OK ||
+        esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_2, 0) != ESP_OK) {
+        result = ESP_FAIL;
+        goto fail;
     }
     vTaskDelay(pdMS_TO_TICKS(WAVESHARE_V2_I2C_SETTLE_MS));
-    if (esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_0, 1) != ESP_OK ||
-        esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_1, 1) != ESP_OK ||
-        esp_io_expander_set_level(expander, IO_EXPANDER_PIN_NUM_2, 1) != ESP_OK) {
-        return ESP_FAIL;
+    if (esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_0, 1) != ESP_OK ||
+        esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_1, 1) != ESP_OK ||
+        esp_io_expander_set_level(resources.expander, IO_EXPANDER_PIN_NUM_2, 1) != ESP_OK) {
+        result = ESP_FAIL;
+        goto fail;
     }
 
     const lvgl_port_cfg_t lvgl_port_config = ESP_LVGL_PORT_INIT_CONFIG();
-    if (lvgl_port_init(&lvgl_port_config) != ESP_OK) {
+    result = lvgl_port_init(&lvgl_port_config);
+    if (result != ESP_OK) {
         ESP_LOGE(TAG, "lvgl_port_init status=fail");
-        return ESP_FAIL;
+        goto fail;
     }
+    resources.lvgl_port_initialized = true;
 
-    esp_lcd_panel_handle_t panel = NULL;
-    esp_lcd_panel_io_handle_t panel_io = NULL;
     const bsp_display_config_t panel_config = {0};
-    const esp_err_t panel_result = bsp_display_new(&panel_config, &panel, &panel_io);
-    if (panel_result != ESP_OK || panel == NULL || panel_io == NULL) {
+    result = bsp_display_new(&panel_config, &resources.panel, &resources.panel_io);
+    if (result != ESP_OK || resources.panel == NULL || resources.panel_io == NULL) {
         ESP_LOGE(TAG, "co5300_qspi_init status=fail");
-        return panel_result == ESP_OK ? ESP_FAIL : panel_result;
+        if (result == ESP_OK) result = ESP_FAIL;
+        goto fail;
     }
-    if (esp_lcd_panel_set_gap(panel, WAVESHARE_V2_CST816S_X_GAP, 0) != ESP_OK) {
+    result = esp_lcd_panel_set_gap(resources.panel, WAVESHARE_V2_CST816S_X_GAP, 0);
+    if (result != ESP_OK) {
         ESP_LOGE(TAG, "co5300_x_gap status=fail");
-        return ESP_FAIL;
+        goto fail;
     }
 
     const lvgl_port_display_cfg_t display_config = {
-        .io_handle = panel_io,
-        .panel_handle = panel,
+        .io_handle = resources.panel_io,
+        .panel_handle = resources.panel,
         .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
         .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
         .hres = BSP_LCD_H_RES,
@@ -142,10 +220,11 @@ static esp_err_t v2_display_start(void *context)
         .color_format = LV_COLOR_FORMAT_RGB565,
 #endif
     };
-    lv_display_t *display = lvgl_port_add_disp(&display_config);
-    if (display == NULL) {
+    resources.display = lvgl_port_add_disp(&display_config);
+    if (resources.display == NULL) {
         ESP_LOGE(TAG, "display_init status=fail panel=co5300");
-        return ESP_FAIL;
+        result = ESP_FAIL;
+        goto fail;
     }
 
     /* Keep the CST-compatible API explicit. Identity gating has already
@@ -153,10 +232,10 @@ static esp_err_t v2_display_start(void *context)
      * the V1 FT driver. */
     esp_lcd_panel_io_i2c_config_t touch_io_config = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
     touch_io_config.scl_speed_hz = CONFIG_BSP_I2C_CLK_SPEED_HZ;
-    esp_lcd_panel_io_handle_t touch_io = NULL;
-    if (esp_lcd_new_panel_io_i2c(bsp_i2c_get_handle(), &touch_io_config, &touch_io) != ESP_OK) {
-        ESP_LOGE(TAG, "cst816s_io_init status=fail");
-        return ESP_FAIL;
+    result = esp_lcd_new_panel_io_i2c(bsp_i2c_get_handle(), &touch_io_config, &resources.touch_io);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "touch_io_init status=fail");
+        goto fail;
     }
     const esp_lcd_touch_config_t touch_config = {
         .x_max = BSP_LCD_H_RES,
@@ -173,18 +252,21 @@ static esp_err_t v2_display_start(void *context)
             .mirror_y = 0,
         },
     };
-    esp_lcd_touch_handle_t touch = NULL;
-    if (esp_lcd_touch_new_i2c_cst816s(touch_io, &touch_config, &touch) != ESP_OK || touch == NULL) {
-        ESP_LOGE(TAG, "cst816s_init status=fail");
-        return ESP_FAIL;
+    result = esp_lcd_touch_new_i2c_cst816s(resources.touch_io, &touch_config, &resources.touch);
+    if (result != ESP_OK || resources.touch == NULL) {
+        ESP_LOGE(TAG, "touch_init status=fail");
+        if (result == ESP_OK) result = ESP_FAIL;
+        goto fail;
     }
     const lvgl_port_touch_cfg_t touch_config_lvgl = {
-        .disp = display,
-        .handle = touch,
+        .disp = resources.display,
+        .handle = resources.touch,
     };
-    if (lvgl_port_add_touch(&touch_config_lvgl) == NULL) {
-        ESP_LOGE(TAG, "cst816s_lvgl_bind status=fail");
-        return ESP_FAIL;
+    resources.touch_indev = lvgl_port_add_touch(&touch_config_lvgl);
+    if (resources.touch_indev == NULL) {
+        ESP_LOGE(TAG, "touch_lvgl_bind status=fail");
+        result = ESP_FAIL;
+        goto fail;
     }
 
     ESP_LOGI(TAG, "display_init status=pass panel=co5300 touch=cst820");
@@ -192,6 +274,11 @@ static esp_err_t v2_display_start(void *context)
     ESP_LOGI(TAG, "brightness_set status=%s", brightness_result == ESP_OK ? "pass" : "unavailable");
     s_display_started = true;
     return ESP_OK;
+
+fail:
+    s_display_failed = true;
+    v2_cleanup_display(&resources);
+    return result;
 }
 
 static bool v2_display_lock(void *context, uint32_t timeout_ms)
