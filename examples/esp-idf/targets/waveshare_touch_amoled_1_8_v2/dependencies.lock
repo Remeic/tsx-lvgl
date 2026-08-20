@@ -40,7 +40,7 @@ dependencies:
       require: private
       version: '>=5.2'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 2.0.3
   espressif/esp_lcd_co5300:
@@ -54,7 +54,7 @@ dependencies:
       require: private
       version: '>=5.4'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 2.1.0
   espressif/esp_lcd_panel_io_additions:
@@ -96,7 +96,7 @@ dependencies:
       require: private
       version: '>=5.2'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.1.2
   espressif/esp_lcd_touch_ft5x06:
@@ -199,10 +199,13 @@ dependencies:
     - esp32s3
     version: 2.0.3
 direct_dependencies:
+- espressif/esp_io_expander_tca9554
+- espressif/esp_lcd_co5300
+- espressif/esp_lcd_touch_cst816s
 - espressif/quickjs-ng
 - idf
 - lvgl/lvgl
 - waveshare/esp32_s3_touch_amoled_1_8
-manifest_hash: 9715283efbb7be3cc24c0ebef710aeded10a417379ca893c4607146b932f2653
+manifest_hash: 56d43893f4ad676ce60aafbef9e0fe2b8d9929f884a7be8dbd91e16aeae46e7d
 target: esp32s3
 version: 2.0.0
