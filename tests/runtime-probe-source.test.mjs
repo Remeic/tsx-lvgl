@@ -19,6 +19,8 @@ const runtimeCmake = readFileSync(new URL("../examples/esp-idf/components/tsx_ru
 const adapterCmake = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/CMakeLists.txt", import.meta.url), "utf8");
 const adapterSource = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/tsx_board_adapter_v1.c", import.meta.url), "utf8");
 const adapterContract = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/include/tsx_board_adapter.h", import.meta.url), "utf8");
+const identityHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/include/tsx_board_identity.h", import.meta.url), "utf8");
+const identitySource = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/tsx_board_identity.c", import.meta.url), "utf8");
 const targetReadme = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/README.md", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
@@ -114,20 +116,78 @@ test("shared runtime component has no target BSP or provider dependency", () => 
   assert.match(adapterCmake, /if\(NOT EXISTS[\s\S]*tsx_board_target_id\.h/);
   assert.match(adapterCmake, /message\(FATAL_ERROR/);
   assert.match(adapterSource, /static const tsx_board_adapter_t adapter/);
-  assert.match(adapterSource, /static esp_err_t v1_probe_identity\(void \*context, tsx_board_identity_result_t \*out_result\)/);
-  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;/);
-  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;[\s\S]*return ESP_OK;/);
-  assert.match(adapterContract, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
-  assert.match(adapterContract, /probe_identity\)\(void \*context, tsx_board_identity_result_t \*out_result\)/);
-  assert.match(targetReadme, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
-  assert.match(targetReadme, /does not observe physical identity or\s+gate readiness/);
+  assert.match(adapterSource, /static esp_err_t v1_probe_identity\(void \*context, tsx_board_identity_t \*out_identity\)/);
+  assert.match(adapterSource, /tsx_board_adapter_v1_probe_identity\(out_identity\)/);
+  assert.match(identityHeader, /TSX_BOARD_IDENTITY_MATCHED/);
+  assert.match(adapterContract, /probe_identity\)\(void \*context, tsx_board_identity_t \*out_identity\)/);
+  assert.match(identityHeader, /TSX_BOARD_IDENTITY_MISMATCH/);
+  assert.match(identityHeader, /TSX_BOARD_EVIDENCE_V1_FT_ACK/);
+  assert.match(identitySource, /tsx_board_classify_identity/);
+  assert.doesNotMatch(identitySource, /esp_|i2c_|bsp_|freertos/i);
+  assert.match(targetReadme, /TSX_BOARD_IDENTITY_MATCHED/);
+  assert.match(targetReadme, /TSXB ERR hardware-mismatch/);
+});
+
+test("V1 identity evidence is read-only and gates display/runtime startup", () => {
+  assert.match(adapterCmake, /tsx_board_adapter waveshare_v1_sensors/);
+  assert.match(displayStartup, /probe_address\(bus, WAVESHARE_V1_FT3168_ADDRESS/);
+  assert.match(displayStartup, /probe_address\(bus, WAVESHARE_V1_CST816S_ADDRESS/);
+  assert.match(displayStartup, /tsx_board_classify_identity\(ft3168, cst816s\)/);
+  const probe = appMain.indexOf("tsx_board_adapter_probe_identity");
+  const display = appMain.indexOf("tsx_board_adapter_display_start");
+  const owner = appMain.indexOf("xTaskCreate(runtime_probe_owner_task");
+  assert.ok(probe >= 0 && probe < display, "identity probe must precede display startup");
+  assert.ok(display < owner, "display startup must precede runtime owner creation");
+  assert.match(appMain, /PROBE checkpoint=board_identity status=%s target=%s evidence=%s/);
+  assert.match(appMain, /bundle_transport_start_rejected\(reason\)/);
+  assert.doesNotMatch(appMain, /runtime_probe_start\(|runtime_probe_start_sensors|runtime_probe_start_connectivity/);
+  assert.doesNotMatch(displayStartup, /i2c_master_(transmit|receive|write|read)|i2c_master_bus_add_device/);
+});
+
+test("V1 identity keeps positive CST evidence authoritative over an FT probe error", () => {
+  assert.match(identitySource, /if \(cst816s == TSX_BOARD_PROBE_ACK\)/);
+  assert.match(identitySource, /TSX_BOARD_EVIDENCE_V2_CST_ACK/);
+  assert.match(targetReadme, /FT ERROR, CST[\s\S]*ACK.*TSX_BOARD_IDENTITY_MISMATCH/);
+});
+
+test("rejected transport startup retries and resets instead of sleeping silently", () => {
+  assert.match(appMain, /REJECT_TRANSPORT_START_ATTEMPTS \(3U\)/);
+  assert.match(appMain, /REJECT_TRANSPORT_RETRY_BACKOFF_MS/);
+  assert.match(appMain, /for \(uint32_t attempt = 1; attempt <= REJECT_TRANSPORT_START_ATTEMPTS; attempt\+\+\)/);
+  assert.match(appMain, /if \(!run_rejected_diagnostic_transport\(reason\)\)/);
+  assert.match(appMain, /esp_restart\(\)/);
+  assert.match(appMain, /remain_in_rejected_diagnostic_mode\(\)/);
+});
+
+test("reject-mode answers BEGIN before staging or runtime generation access", () => {
+  assert.match(transportHeader, /bundle_transport_start_rejected\(const char \*reason\)/);
+  const rejectBranch = transport.match(/if \(state->reject_reason != NULL\) \{[\s\S]*?\n    \}/);
+  assert.ok(rejectBranch, "transport must have an explicit reject branch");
+  assert.match(rejectBranch[0], /TSXB ERR %s/);
+  assert.doesNotMatch(rejectBranch[0], /heap_caps_malloc|runtime_probe_last_generation|TSXB RDY|TSXB ACK/);
+  assert.match(transport, /bundle_transport_start_task\(NULL, reason, false\)/);
+  assert.match(transport, /strcmp\(reason, "hardware-mismatch"\)/);
+  assert.match(transport, /strcmp\(reason, "hardware-unknown"\)/);
+});
+
+test("ready and rejected transport startup share one ownership helper", () => {
+  assert.match(transport, /static esp_err_t bundle_transport_start_task\(runtime_probe_t \*probe,[\s\S]*bool ready_mode\)/);
+  assert.match(transport, /return bundle_transport_start_task\(probe, NULL, true\)/);
+  assert.match(transport, /return bundle_transport_start_task\(NULL, reason, false\)/);
+  assert.equal((transport.match(/usb_serial_jtag_driver_install\(/g) ?? []).length, 1);
+  assert.equal((transport.match(/xTaskCreate\(bundle_transport_task/g) ?? []).length, 1);
+  const warmup = transport.match(/if \(ready_mode\) \{[\s\S]*?mbedtls_sha256\([\s\S]*?\n    \}/);
+  assert.ok(warmup, "ready mode must own the mbedTLS warmup");
+  const rejectedWrapper = transport.match(/esp_err_t bundle_transport_start_rejected\(const char \*reason\)[\s\S]*?\n}\n/);
+  assert.ok(rejectedWrapper, "rejected startup wrapper must remain explicit");
+  assert.doesNotMatch(rejectedWrapper[0], /mbedtls_sha256|usb_serial_jtag_driver_install|xTaskCreate/);
 });
 
 test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () => {
   assert.match(runtimeHeader, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
   assert.match(source, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
   assert.match(appMain, /runtime_probe_run\(board, &RUNTIME_ASSETS\)/);
-  assert.doesNotMatch(appMain, /bundle_transport_start|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
+  assert.doesNotMatch(appMain, /bundle_transport_start\(probe|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
   assert.doesNotMatch(runtimeHeader, /runtime_probe_destroy/);
   assert.doesNotMatch(source, /runtime_probe_destroy_impl|lvgl_host_discard_without_lvgl/);
   assert.match(source, /RUNTIME_PROBE_CLEANUP_RETRY_RESTART/);
@@ -226,6 +286,19 @@ test("optional providers report unavailable state without aborting application b
 });
 
 test("UART acceptance keeps optional touch and motion capability checks fail-soft", () => {
+  assert.match(checker, /"board_identity"/);
+  assert.match(checker, /--target <board-id>/);
+  assert.match(checker, /observedTarget !== target/);
+  assert.match(checker, /latestIdentityStatus/);
+  assert.match(checker, /identityOrderFailures/);
+  assert.match(checker, /CANONICAL_TARGET_PATTERN/);
+  assert.match(checker, /IDENTITY_EVIDENCE_BY_STATUS = new Map/);
+  assert.match(checker, /\["pass", new Set\(\["v1-ft-ack"\]\)\]/);
+  assert.match(checker, /\["mismatch", new Set\(\["v2-cst-ack"\]\)\]/);
+  assert.match(checker, /\["unknown", new Set\(\["ambiguous-dual-ack", "no-unique-ack", "probe-error"\]\)\]/);
+  assert.match(checker, /IDENTITY_EVIDENCE_CODES = new Set/);
+  assert.match(checker, /status !== "pass"/);
+  assert.match(checker, /evidenceCode/);
   assert.match(checker, /const optionalCapabilities = new Map\(\[/);
   const required = checker.match(/const required = \[[\s\S]*?\n\];/);
   assert.ok(required, "checker must declare its required checkpoints");
@@ -239,11 +312,22 @@ test("UART acceptance keeps optional touch and motion capability checks fail-sof
   assert.match(transport, /xTaskCreate\(bundle_transport_task, \"bundle_transport\", BUNDLE_TRANSPORT_STACK_WORDS/);
 });
 
-test("transport teardown joins the USB task before runtime probe ownership is released", () => {
-  assert.match(transportHeader, /void bundle_transport_stop\(void\);/);
+test("transport teardown retains ownership through an in-flight reload timeout", () => {
+  assert.match(transportHeader, /esp_err_t bundle_transport_stop\(void\);/);
   assert.match(transport, /static SemaphoreHandle_t s_stopped;/);
-  assert.match(transport, /xSemaphoreTake\(s_stopped, portMAX_DELAY\)/);
-  assert.match(source, /s_active_probe = NULL;[\s\S]*bundle_transport_stop\(\);/);
+  assert.match(transport, /BUNDLE_TRANSPORT_STOP_TIMEOUT_MS/);
+  assert.match(transport, /RELOAD_TIMEOUT_MS \+ 1000U/);
+  assert.match(transport, /xSemaphoreTake\(s_stopped, pdMS_TO_TICKS\(BUNDLE_TRANSPORT_STOP_TIMEOUT_MS\)\)/);
+  assert.doesNotMatch(transport, /xSemaphoreTake\(s_stopped, portMAX_DELAY\)/);
+  assert.doesNotMatch(transport, /vTaskDelete\(s_task\)/);
+  assert.match(transport, /runtime_probe_stage_reload\([\s\S]*RELOAD_TIMEOUT_MS/);
+  assert.match(transport, /if \(!s_stopping\) write_response\(response\)/);
+  assert.match(transport, /transport_stop timeout task_retained=true/);
+  assert.match(source, /s_active_probe = NULL;[\s\S]*return bundle_transport_stop\(\);/);
+  assert.match(source, /transport_result = runtime_probe_stop_transport\(probe\)/);
+  assert.match(source, /transport_stop status=fail cleanup=retained/);
+  assert.match(source, /atomic_store\(&probe->reload_in_flight, false\)/);
+  assert.match(source, /release_reload_request\(pending\)/);
 });
 
 test("lvgl host stages widget creation for reparenting", () => {

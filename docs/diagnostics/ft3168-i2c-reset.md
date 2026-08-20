@@ -4,6 +4,24 @@ Status: open hardware gate; no local UART reproduction was available in this
 checkout. This note records the diagnosis boundary and the next falsifiable
 experiment. It is not a board-ready result.
 
+## Plan 004 identity gate
+
+The V1 adapter now uses the existing BSP I2C bus after one bounded reset and
+settle delay. It sends no register writes and does not construct a display or
+touch driver during identity probing. `i2c_master_probe()` is interpreted as
+follows: `ESP_OK` is an ACK, `ESP_ERR_NOT_FOUND` is a NACK, and timeout or any
+other result is a probe error. The classifier accepts V1 only for FT5x06-family
+address `0x38` ACK plus CST816S-compatible address `0x15` NACK. A V2 ACK at
+`0x15` is always a mismatch, including when the `0x38` probe is an error,
+because any positive CST evidence conflicts with V1. Both ACKs are ambiguous
+unknown, and error combinations without a unique positive address are unknown.
+A warm-reset failure therefore stays safe: the target keeps only the
+diagnostic transport and reports `hardware-unknown`.
+
+The address probe is software evidence, not physical-unit acceptance. A cold
+boot, 20 warm resets, visible display/touch checks, and a host push after
+`matched` still require an operator-provided UART and board record.
+
 ## Observed symptom
 
 The handoff reports that some software resets produce a transient FT3168/I2C

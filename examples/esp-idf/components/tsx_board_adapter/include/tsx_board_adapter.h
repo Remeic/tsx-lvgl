@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "tsx_board_identity.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -44,16 +45,6 @@ typedef enum {
     TSX_WIFI_EVENT_FAILED,
 } tsx_wifi_event_kind_t;
 
-/**
- * Plan 003 migration-only result. This records that the linked target was
- * accepted from compile-time composition; it is not an observed hardware
- * identity. Plan 004 will extend this seam with matched, mismatched and
- * unknown results.
- */
-typedef enum {
-    TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED,
-} tsx_board_identity_result_t;
-
 /** Sanitised owner-queue event. It contains no network identity or address. */
 typedef struct {
     tsx_wifi_event_kind_t kind;
@@ -77,11 +68,8 @@ typedef struct {
     bool (*display_lock)(void *context, uint32_t timeout_ms);
     /** Releases the target display/LVGL lock. */
     void (*display_unlock)(void *context);
-    /**
-     * Returns a typed migration result. ESP_OK means the result was retrieved;
-     * the result itself is never an observed-match or readiness signal.
-     */
-    esp_err_t (*probe_identity)(void *context, tsx_board_identity_result_t *out_result);
+    /** Returns read-only observed identity evidence from the target bus. */
+    esp_err_t (*probe_identity)(void *context, tsx_board_identity_t *out_identity);
 } tsx_board_boot_port_t;
 
 typedef struct {
@@ -143,13 +131,13 @@ static inline void tsx_board_adapter_display_unlock(const tsx_board_adapter_t *a
 }
 
 static inline esp_err_t tsx_board_adapter_probe_identity(const tsx_board_adapter_t *adapter,
-                                                          tsx_board_identity_result_t *out_result)
+                                                          tsx_board_identity_t *out_identity)
 {
-    if (out_result == NULL) return ESP_ERR_INVALID_ARG;
+    if (out_identity == NULL) return ESP_ERR_INVALID_ARG;
     if (adapter == NULL || adapter->boot == NULL || adapter->boot->probe_identity == NULL) {
         return ESP_ERR_NOT_SUPPORTED;
     }
-    return adapter->boot->probe_identity(adapter->boot->context, out_result);
+    return adapter->boot->probe_identity(adapter->boot->context, out_identity);
 }
 
 static inline bool tsx_board_adapter_motion_read(const tsx_board_adapter_t *adapter,
