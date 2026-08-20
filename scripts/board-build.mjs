@@ -2,13 +2,14 @@ import { spawnSync } from "node:child_process";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createArtifactDescriptor } from "./board-artifact-descriptor.mjs";
 import { resolveBoardProfile } from "./board-profile.mjs";
 import { readFlagValue } from "./lib/cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function usage() {
-  return "Usage:\n  npm run board:build -- --target <target-key>\n";
+  return "Usage:\n  npm run board:build -- --target <target-key>\n\nA successful build also writes the target-bound artifact descriptor.\n";
 }
 
 export function parseCli(argv) {
@@ -26,7 +27,7 @@ export function parseCli(argv) {
   return { help: false, target };
 }
 
-export function run(argv = process.argv.slice(2), runner = spawnSync) {
+export async function run(argv = process.argv.slice(2), runner = spawnSync) {
   const parsed = parseCli(argv);
   if (parsed.help) {
     console.log(usage());
@@ -39,18 +40,39 @@ export function run(argv = process.argv.slice(2), runner = spawnSync) {
     cwd: repoRoot,
     stdio: "inherit",
   });
-  return result.status ?? 1;
+  if ((result.status ?? 1) !== 0) return result.status ?? 1;
+
+  const sourceShaResult = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const sourceSha = (process.env.TSX_LVGL_VALIDATION_GIT_SHA ?? sourceShaResult.stdout ?? "").trim();
+  if (sourceShaResult.status !== 0 && !process.env.TSX_LVGL_VALIDATION_GIT_SHA) {
+    throw new Error(`cannot resolve source SHA: ${(sourceShaResult.stderr ?? "").trim() || "git failed"}`);
+  }
+  await createArtifactDescriptor({
+    repositoryRoot: repoRoot,
+    profile,
+    sourceSha,
+    artifactPath: profile.artifact,
+    partitionTablePath: profile.partitionTableBinary,
+    buildMetadataPath: profile.buildMetadataPath,
+    outputPath: profile.descriptorPath,
+  });
+  console.log(`board-build: wrote ${profile.descriptorPath}`);
+  return 0;
 }
 
 const isDirectExecution = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectExecution) {
-  try {
-    process.exitCode = run();
-  } catch (error) {
+  run().catch((error) => {
     console.error(`board-build: ${error instanceof Error ? error.message : String(error)}`);
     console.error(usage());
     process.exitCode = 2;
-  }
+  }).then((status) => {
+    if (status !== undefined) process.exitCode = status;
+  });
 }
 
 export { usage };

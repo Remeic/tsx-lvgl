@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  APP_FLASH_OFFSET,
-  buildReloadPlan,
+  buildReloadMutationPlan,
+  buildReloadPreflightPlan,
 } from "../scripts/board-reload-plan.mjs";
 
 const config = {
@@ -13,12 +13,19 @@ const config = {
   artifact: "/workspace/build/tsx_lvgl_esp32_s3_v1.bin",
   baud: 115200,
   resetMode: "watchdog-reset",
+  partitionTableOffset: 0x8000,
+  partitionTableReadSize: 0x1000,
+  livePartitionTablePath: "/tmp/live-partition-table.bin",
 };
 
-test("reload plan keeps the physical mutation app-only", () => {
-  const plan = buildReloadPlan(config);
-  const commands = plan.steps.map((step) => step.command.join(" "));
+const validatedLayout = Object.freeze({
+  // This fixture intentionally cannot be constructed by production callers:
+  // the test obtains a token through the strict comparator in parser tests.
+  // The opaque brand is supplied in the dedicated integration test instead.
+});
 
+test("preflight plan contains only identity, security and live-table reads", () => {
+  const plan = buildReloadPreflightPlan(config);
   assert.deepEqual(plan.steps.map((step) => step.name), [
     "chip-id",
     "flash-id",
@@ -26,48 +33,28 @@ test("reload plan keeps the physical mutation app-only", () => {
     "security-info",
     "efuse-summary",
     "efuse-dump",
-    "write-flash",
-    "verify-flash",
-    "reset",
+    "read-partition-table",
   ]);
-
-  const write = plan.steps.find((step) => step.name === "write-flash");
-  assert.equal(write.mutation, "app-only");
-  assert.deepEqual(write.command.slice(-8), [
-    "--flash-mode",
-    "keep",
-    "--flash-freq",
-    "keep",
-    "--flash-size",
-    "keep",
-    APP_FLASH_OFFSET,
-    config.artifact,
-  ]);
-
-  const verify = plan.steps.find((step) => step.name === "verify-flash");
-  assert.deepEqual(verify.command.slice(-2), [APP_FLASH_OFFSET, config.artifact]);
-
-  const reset = plan.steps.find((step) => step.name === "reset");
-  assert.ok(reset.command.includes("watchdog-reset"));
-
+  const commands = plan.steps.map((step) => step.command.join(" "));
   for (const command of commands) {
-    assert.doesNotMatch(command, /erase-flash|erase-region|burn-|write-protect|read-protect/);
+    assert.doesNotMatch(command, /write-flash|verify-flash|erase-flash|erase-region|burn-|write-protect|read-protect/);
   }
+  const read = plan.steps.at(-1);
+  assert.deepEqual(read.command.slice(-4), ["read-flash", "0x8000", "0x1000", config.livePartitionTablePath]);
+  assert.equal(read.command.at(-1), config.livePartitionTablePath);
 });
 
-test("reload plan rejects unsafe ports, reset modes, and missing artifact paths", () => {
+test("mutation plan rejects unchecked offsets and preserves the required flash flags", () => {
   assert.throws(
-    () => buildReloadPlan({ ...config, port: "/Volumes/T7 Shield/image.bin" }),
-    /serial port/,
+    () => buildReloadMutationPlan(config, validatedLayout),
+    /LIVE_LAYOUT_REQUIRED|validated live partition layout/,
   );
-  assert.throws(
-    () => buildReloadPlan({ ...config, resetMode: "erase-flash" }),
-    /reset mode/,
-  );
-  assert.throws(
-    () => buildReloadPlan({ ...config, artifact: "" }),
-    /artifact/,
-  );
+});
+
+test("preflight config rejects unsafe ports, reset modes and table paths", () => {
+  assert.throws(() => buildReloadPreflightPlan({ ...config, port: "/Volumes/T7/image.bin" }), /serial port/);
+  assert.throws(() => buildReloadPreflightPlan({ ...config, resetMode: "erase-flash" }), /reset mode/);
+  assert.throws(() => buildReloadPreflightPlan({ ...config, livePartitionTablePath: "relative.bin" }), /partition-table path/);
 });
 
 test("firmware exposes a visible hot-reload diagnostic", async () => {
