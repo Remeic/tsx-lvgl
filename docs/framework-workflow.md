@@ -62,7 +62,7 @@ OTA or production update channel.
 App-only changes use this bundle path. Changes to the kernel, native bindings,
 board host or baked-in application require regenerating the embedded artifacts
 and rebuilding firmware; see the
-[runtime-port probe guide](../examples/esp-idf/runtime_port_probe/README.md).
+[V1 target runtime probe guide](../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/README.md).
 
 For the persistent example-app workflow, use the single guarded command below.
 It defaults to Pomodoro, keeps `--execute` explicit, regenerates the stable
