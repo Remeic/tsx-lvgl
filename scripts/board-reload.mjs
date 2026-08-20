@@ -72,6 +72,7 @@ export function parseCli(argv, env = process.env) {
   };
   let artifactSpecified = false;
   let descriptorSpecified = false;
+  let targetSpecified = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -116,6 +117,8 @@ export function parseCli(argv, env = process.env) {
         descriptorSpecified = true;
         break;
       case "--target":
+        if (targetSpecified) throw new Error("--target may be supplied only once");
+        targetSpecified = true;
         options.target = value;
         break;
       case "--baud":

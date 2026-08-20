@@ -102,3 +102,39 @@ test("board-reload rejects malformed and unknown targets before build", async (t
   );
   assert.equal(existsSync(npmCapture), false, "invalid targets must not build");
 });
+
+test("board-reload rejects duplicate targets before build or reload in every spelling", async (t) => {
+  const sandbox = await mkdtemp(join(tmpdir(), "tsx-lvgl-board-reload-wrapper-duplicates-"));
+  t.after(() => rm(sandbox, { recursive: true, force: true }));
+
+  const fakeBin = join(sandbox, "bin");
+  const npmCapture = join(sandbox, "npm.args");
+  const nodeCapture = join(sandbox, "node.args");
+  await mkdir(fakeBin, { recursive: true });
+  await writeFile(join(fakeBin, "npm"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > \"$CAPTURE_NPM\"\n", { mode: 0o755 });
+  await writeFile(join(fakeBin, "node"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > \"$CAPTURE_NODE\"\n", { mode: 0o755 });
+  await chmod(join(fakeBin, "npm"), 0o755);
+  await chmod(join(fakeBin, "node"), 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    CAPTURE_NPM: npmCapture,
+    CAPTURE_NODE: nodeCapture,
+  };
+  const duplicateCases = [
+    ["--target", "waveshare-touch-amoled-1.8-v2", "--target", "waveshare-touch-amoled-1.8-v1", "--execute"],
+    ["--target", "waveshare-touch-amoled-1.8-v1", "--target", "waveshare-touch-amoled-1.8-v2", "--execute"],
+    ["--target", TARGET, "--target", TARGET, "--execute"],
+    ["--target", "waveshare-touch-amoled-1.8-v2", "--target=waveshare-touch-amoled-1.8-v1", "--execute"],
+    ["--target=waveshare-touch-amoled-1.8-v2", "--target", "waveshare-touch-amoled-1.8-v1", "--execute"],
+    ["--target=waveshare-touch-amoled-1.8-v2", "--target=waveshare-touch-amoled-1.8-v1", "--execute"],
+  ];
+  for (const argv of duplicateCases) {
+    await assert.rejects(
+      execFile(join(repositoryRoot, "tools/board-reload"), argv, { cwd: repositoryRoot, env }),
+      (error) => error.code === 2 && /--target may be supplied only once/.test(error.stderr),
+    );
+  }
+  assert.equal(existsSync(npmCapture), false, "duplicate targets must not build");
+  assert.equal(existsSync(nodeCapture), false, "duplicate targets must not enter Node reload");
+});
