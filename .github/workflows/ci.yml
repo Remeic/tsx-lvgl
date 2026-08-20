@@ -20,6 +20,73 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  firmware-targets:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - run: npm ci
+      - id: targets
+        name: Derive firmware matrix from the target registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node --input-type=module <<'NODE'
+          import { listFirmwareTargets } from './scripts/board-profile.mjs';
+          process.stdout.write(JSON.stringify({ target: listFirmwareTargets().map(({ targetKey }) => targetKey) }));
+          NODE
+          )"
+          test -n "${matrix}"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
+  firmware:
+    needs: firmware-targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.firmware-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - run: npm ci
+      - name: Build target with the pinned ESP-IDF container
+        env:
+          TSX_LVGL_VALIDATION_GIT_SHA: ${{ github.sha }}
+        run: npm run board:build -- --target "${{ matrix.target }}"
+      - name: Record target, lock, toolchain and artifact evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          project="$(node --input-type=module -e 'import { resolveBoardProfile } from "./scripts/board-profile.mjs"; console.log(resolveBoardProfile(process.argv[1]).projectDirectory)' "${target}")"
+          artifact="$(node --input-type=module -e 'import { resolveBoardProfile } from "./scripts/board-profile.mjs"; console.log(resolveBoardProfile(process.argv[1]).artifact)' "${target}")"
+          descriptor="$(node --input-type=module -e 'import { resolveBoardProfile } from "./scripts/board-profile.mjs"; console.log(resolveBoardProfile(process.argv[1]).descriptorPath)' "${target}")"
+          {
+            echo "targetKey=${target}"
+            node --input-type=module -e 'import { resolveBoardProfile } from "./scripts/board-profile.mjs"; const p=resolveBoardProfile(process.argv[1]); console.log(`boardId=${p.boardId}`); console.log(`supportStatus=${p.supportStatus}`); console.log(`bsp=${p.bsp.name}@${p.bsp.version}`)' "${target}"
+            echo "node=$(node --version)"
+            echo "idf=5.5.5 (tools/dev pinned image)"
+            echo "artifactSha256=$(sha256sum "${artifact}" | cut -d " " -f 1)"
+            echo "descriptorSha256=$(sha256sum "${descriptor}" | cut -d " " -f 1)"
+            echo "lockSha256=$(sha256sum "${project}/dependencies.lock" | cut -d " " -f 1)"
+          } | tee "firmware-${target}.txt"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: firmware-evidence-${{ matrix.target }}-${{ github.sha }}
+          path: firmware-${{ matrix.target }}.txt
+          if-no-files-found: error
+
   mutation:
     runs-on: ubuntu-24.04
     steps:

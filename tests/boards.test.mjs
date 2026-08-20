@@ -5,14 +5,21 @@ import { freezeCatalog, listSupportedBoards, resolveCanonicalBoardId } from "../
 import { DIAGNOSTIC_CODES } from "../packages/sdk/dist/diagnostics.js";
 
 const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+const V2_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v2";
 const LEGACY_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8";
 
-test("board catalog exposes immutable data-only V1 records", () => {
+test("board catalog exposes immutable V1 and build-only V2 records", () => {
   const boards = listSupportedBoards();
   assert.deepEqual(boards, [{
     id: V1_BOARD_ID,
     displayName: "Waveshare ESP32-S3 Touch AMOLED 1.8 (V1)",
+    supportStatus: "supported",
     legacyIds: [LEGACY_BOARD_ID],
+  }, {
+    id: V2_BOARD_ID,
+    displayName: "Waveshare ESP32-S3 Touch AMOLED 1.8 (V2)",
+    supportStatus: "experimental-build-only",
+    legacyIds: [],
   }]);
   assert.equal(Object.isFrozen(boards), true);
   assert.equal(Object.isFrozen(boards[0]), true);
@@ -37,12 +44,13 @@ test("missing board selection is a typed actionable diagnostic", () => {
   }
 });
 
-test("legacy, malformed and unsupported IDs fail without migration", () => {
-  for (const value of [LEGACY_BOARD_ID, "waveshare.esp32s3.touch-amoled-1.8.v2", 42]) {
+test("legacy, experimental and malformed IDs fail without migration", () => {
+  for (const value of [LEGACY_BOARD_ID, V2_BOARD_ID, 42]) {
     assert.throws(() => resolveCanonicalBoardId(value), (error) => {
       assert.equal(error.code, DIAGNOSTIC_CODES.BOARD_TARGET_UNSUPPORTED);
       assert.deepEqual(error.details.supportedBoardIds, [V1_BOARD_ID]);
       assert.match(error.message, /Supported canonical IDs/);
+      if (value === V2_BOARD_ID) assert.equal(error.details.supportStatus, "experimental-build-only");
       return true;
     });
   }
