@@ -114,10 +114,13 @@ test("shared runtime component has no target BSP or provider dependency", () => 
   assert.match(adapterCmake, /if\(NOT EXISTS[\s\S]*tsx_board_target_id\.h/);
   assert.match(adapterCmake, /message\(FATAL_ERROR/);
   assert.match(adapterSource, /static const tsx_board_adapter_t adapter/);
-  assert.match(adapterSource, /return ESP_ERR_NOT_SUPPORTED;/);
-  assert.doesNotMatch(adapterSource, /static esp_err_t v1_probe_identity\(void \*context\)\s*\{[^}]*return ESP_OK/);
-  assert.match(targetReadme, /compile-time target only/);
-  assert.match(targetReadme, /does not observe or\s+prove physical identity/);
+  assert.match(adapterSource, /static esp_err_t v1_probe_identity\(void \*context, tsx_board_identity_result_t \*out_result\)/);
+  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;/);
+  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;[\s\S]*return ESP_OK;/);
+  assert.match(adapterContract, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
+  assert.match(adapterContract, /probe_identity\)\(void \*context, tsx_board_identity_result_t \*out_result\)/);
+  assert.match(targetReadme, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
+  assert.match(targetReadme, /does not observe physical identity or\s+gate readiness/);
 });
 
 test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () => {
@@ -125,14 +128,16 @@ test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () 
   assert.match(source, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
   assert.match(appMain, /runtime_probe_run\(board, &RUNTIME_ASSETS\)/);
   assert.doesNotMatch(appMain, /bundle_transport_start|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
+  assert.doesNotMatch(runtimeHeader, /runtime_probe_destroy/);
+  assert.doesNotMatch(source, /runtime_probe_destroy_impl|lvgl_host_discard_without_lvgl/);
   assert.match(source, /const esp_err_t transport_result = bundle_transport_start\(probe\);[\s\S]*const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);[\s\S]*const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
   assert.match(source, /runtime_probe_task\(probe\);\s*return runtime_probe_cleanup\(probe\);/);
-  assert.match(source, /bundle_transport_stop\(\);\s*const bool display_locked = tsx_board_adapter_display_lock\(probe->board, 0\);/);
-  assert.match(source, /runtime_probe_destroy_impl\(probe, true, true\);\s*tsx_board_adapter_display_unlock\(board\);/);
-  assert.match(source, /runtime_probe_destroy_impl\(probe, false, true\);/);
-  assert.match(lvglHostHeader, /lvgl_host_discard_without_lvgl/);
-  assert.match(lvglHost, /void lvgl_host_discard_without_lvgl\(lvgl_host_t \*host\)/);
-  assert.match(source, /if \(destroy_lvgl\) lvgl_host_destroy\(probe->lvgl_host\);\s*else lvgl_host_discard_without_lvgl/);
+  assert.match(source, /runtime_probe_stop_transport\(probe\);[\s\S]*tsx_board_adapter_display_lock\(board, 0\)/);
+  assert.match(source, /runtime_probe_destroy_lvgl_locked\(probe\);\s*tsx_board_adapter_display_unlock\(board\);\s*[\s\S]*runtime_probe_release_resources\(probe\);/);
+  assert.match(source, /s_pending_cleanup_probe = probe;[\s\S]*cleanup=retained/);
+  assert.match(source, /if \(s_pending_cleanup_probe != NULL\) return runtime_probe_cleanup\(s_pending_cleanup_probe\);/);
+  assert.match(lvglHostHeader, /lvgl_host_destroy/);
+  assert.match(lvglHost, /void lvgl_host_destroy\(lvgl_host_t \*host\)/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {

@@ -48,9 +48,10 @@ npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 The target composition resolves `espressif/quickjs-ng` 0.14.0, LVGL 9.5 and
 the Waveshare V1 BSP 1.1.4. The board ID header is generated from the selected
 profile at `main/generated/tsx_board_target_id.h`; it is not hand-maintained.
-The V1 adapter accepts the compile-time target only; it does not observe or
-prove physical identity. Plan 004 owns matched, mismatched and unknown
-identity states.
+The V1 adapter's typed identity seam returns
+`TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED` with `ESP_OK` as migration metadata
+only; it does not observe physical identity or gate readiness. Plan 004 owns
+matched, mismatched and unknown identity states.
 Generated dependency/build output (`build/`,
 `managed_components/`, `sdkconfig`) is local and gitignored;
 `dependencies.lock` is tracked for this target.

@@ -41,13 +41,15 @@ static void v1_display_unlock(void *context)
     bsp_display_unlock();
 }
 
-/* Plan 003 has no observed identity probe. This explicit unsupported result
- * means compile-time migration acceptance only; it is never a readiness or
- * matched-identity signal. Plan 004 will add matched/mismatched/unknown state. */
-static esp_err_t v1_probe_identity(void *context)
+/* Plan 003 can report only compile-time migration acceptance. The typed result
+ * is not observed hardware identity and never gates readiness. Plan 004 will
+ * add matched, mismatched and unknown results. */
+static esp_err_t v1_probe_identity(void *context, tsx_board_identity_result_t *out_result)
 {
     (void)context;
-    return ESP_ERR_NOT_SUPPORTED;
+    if (out_result == NULL) return ESP_ERR_INVALID_ARG;
+    *out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;
+    return ESP_OK;
 }
 
 static esp_err_t v1_motion_create(void *context, tsx_motion_provider_t **out_provider)

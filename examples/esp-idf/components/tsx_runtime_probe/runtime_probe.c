@@ -107,11 +107,13 @@ struct runtime_probe {
 
 /** One probe is ever live; recovers the instance for callbacks LVGL/esp_timer invoke with a narrow signature. */
 static runtime_probe_t *s_active_probe;
+/** A failed lock reacquisition retains the inactive probe for owner-task retry. */
+static runtime_probe_t *s_pending_cleanup_probe;
 
-/* Start failures happen before the host is created, so they must use the
- * no-LVGL cleanup path explicitly. The full definition stays with the
- * teardown implementation below. */
-static void runtime_probe_destroy_impl(runtime_probe_t *probe, bool destroy_lvgl, bool transport_stopped);
+/* Start failures happen before the host is created, so they release only
+ * non-LVGL state. The full definition stays with the teardown implementation
+ * below. */
+static void runtime_probe_release_resources(runtime_probe_t *probe);
 
 static const char *const TIMER_SLOT_NAMES[TIMER_SLOT_COUNT] = {
     "js_timer_0", "js_timer_1", "js_timer_2", "js_timer_3",
@@ -1415,13 +1417,13 @@ esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
     probe->reload_queue = xQueueCreate(1, sizeof(reload_request_t *));
     atomic_init(&probe->reload_in_flight, false);
     if (probe->event_queue == NULL || probe->reload_queue == NULL) {
-        runtime_probe_destroy_impl(probe, false, true);
+        runtime_probe_release_resources(probe);
         return ESP_ERR_NO_MEM;
     }
 
     probe->runtime = JS_NewRuntime2(&JS_PSRAM_MALLOC_FUNCTIONS, NULL);
     if (probe->runtime == NULL) {
-        runtime_probe_destroy_impl(probe, false, true);
+        runtime_probe_release_resources(probe);
         return ESP_ERR_NO_MEM;
     }
     JS_SetRuntimeInfo(probe->runtime, "tsx-lvgl-runtime-probe");
@@ -1429,13 +1431,13 @@ esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
     JS_SetMaxStackSize(probe->runtime, ENGINE_STACK_LIMIT);
     probe->context = JS_NewContext(probe->runtime);
     if (probe->context == NULL) {
-        runtime_probe_destroy_impl(probe, false, true);
+        runtime_probe_release_resources(probe);
         return ESP_ERR_NO_MEM;
     }
     JS_SetContextOpaque(probe->context, probe);
 
     if (install_native_bindings(probe) != ESP_OK) {
-        runtime_probe_destroy_impl(probe, false, true);
+        runtime_probe_release_resources(probe);
         return ESP_FAIL;
     }
 
@@ -1447,7 +1449,7 @@ esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
             .name = TIMER_SLOT_NAMES[slot],
         };
         if (esp_timer_create(&timer_args, &probe->timer_slots[slot].timer) != ESP_OK) {
-            runtime_probe_destroy_impl(probe, false, true);
+            runtime_probe_release_resources(probe);
             return ESP_FAIL;
         }
     }
@@ -1495,12 +1497,35 @@ esp_err_t runtime_probe_start_connectivity(runtime_probe_t *probe)
     return result;
 }
 
-static void runtime_probe_destroy_impl(runtime_probe_t *probe, bool destroy_lvgl, bool transport_stopped)
+/**
+ * Fences callbacks and joins the transport. This phase must run without the
+ * display lock: a transport request can be waiting for the owner task's
+ * reload handoff, so joining while locked would create a lock/join cycle.
+ */
+static void runtime_probe_stop_transport(runtime_probe_t *probe)
 {
     if (probe == NULL) return;
     probe->active = false;
     if (s_active_probe == probe) s_active_probe = NULL;
-    if (!transport_stopped) bundle_transport_stop();
+    bundle_transport_stop();
+}
+
+/** Caller must be the owner task and hold the board display lock. */
+static void runtime_probe_destroy_lvgl_locked(runtime_probe_t *probe)
+{
+    if (probe == NULL || probe->lvgl_host == NULL) return;
+    lvgl_host_destroy(probe->lvgl_host);
+    probe->lvgl_host = NULL;
+}
+
+/**
+ * Releases providers, queues, timers and QuickJS state after the display lock
+ * has been released. The host must already have been destroyed in the locked
+ * phase; start failures never create one and may call this directly.
+ */
+static void runtime_probe_release_resources(runtime_probe_t *probe)
+{
+    if (probe == NULL) return;
 
     /* Join the I2C task before destroying queues/QuickJS state it may still
      * indirectly service after its bounded 100ms transfer returns. */
@@ -1544,11 +1569,7 @@ static void runtime_probe_destroy_impl(runtime_probe_t *probe, bool destroy_lvgl
         probe->reload_queue = NULL;
     }
 
-    if (probe->lvgl_host != NULL) {
-        if (destroy_lvgl) lvgl_host_destroy(probe->lvgl_host);
-        else lvgl_host_discard_without_lvgl(probe->lvgl_host);
-        probe->lvgl_host = NULL;
-    }
+    /* LVGL/native UI teardown is intentionally not part of this phase. */
 
     if (probe->context != NULL) {
         if (!JS_IsUndefined(probe->click_dispatch)) JS_FreeValue(probe->context, probe->click_dispatch);
@@ -1566,41 +1587,38 @@ static void runtime_probe_destroy_impl(runtime_probe_t *probe, bool destroy_lvgl
     free(probe);
 }
 
-void runtime_probe_destroy(runtime_probe_t *probe)
-{
-    /* This interface is intentionally lock-scoped. The shared owner entry
-     * point performs transport join before acquiring that lock and uses the
-     * internal no-LVGL path when acquisition fails. */
-    runtime_probe_destroy_impl(probe, true, false);
-}
-
 static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe)
 {
     if (probe == NULL) return ESP_ERR_INVALID_ARG;
 
-    /* Join transport before taking the display lock. A transport request may
-     * be waiting for the owner task's reload handoff; joining while this task
-     * holds the lock would create a lock/join cycle. */
-    bundle_transport_stop();
-    const bool display_locked = tsx_board_adapter_display_lock(probe->board, 0);
-    if (display_locked) {
-        const tsx_board_adapter_t *board = probe->board;
-        runtime_probe_destroy_impl(probe, true, true);
-        tsx_board_adapter_display_unlock(board);
-        return ESP_OK;
+    runtime_probe_stop_transport(probe);
+    const tsx_board_adapter_t *board = probe->board;
+    if (!tsx_board_adapter_display_lock(board, 0)) {
+        /* Retain the complete inactive probe. A mounted host owns native
+         * objects, so neither the host wrapper nor any provider/runtime state
+         * may be freed until a later owner-task retry obtains the lock. */
+        s_pending_cleanup_probe = probe;
+        ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail cleanup=retained");
+        return ESP_ERR_TIMEOUT;
     }
 
-    /* No LVGL call is permitted without the lock. This is safe for the
-     * pre-boot path (the host is not created until runtime_probe_boot); after
-     * a failed lock retry it deliberately discards only the host wrapper. */
-    ESP_LOGE(TAG, "PROBE checkpoint=lvgl_lock status=fail cleanup=no-lvgl");
-    runtime_probe_destroy_impl(probe, false, true);
-    return ESP_ERR_TIMEOUT;
+    /* Phase 2: every LVGL/native UI call is made by this owner task under the
+     * board lock. No transport join occurs in this phase. */
+    runtime_probe_destroy_lvgl_locked(probe);
+    tsx_board_adapter_display_unlock(board);
+
+    /* Phase 3: providers, timers, queues and QuickJS are freed only after the
+     * display lock is released, preserving their existing teardown order. */
+    s_pending_cleanup_probe = NULL;
+    runtime_probe_release_resources(probe);
+    return ESP_OK;
 }
 
 esp_err_t runtime_probe_run(const tsx_board_adapter_t *board,
                             const runtime_probe_assets_t *assets)
 {
+    if (s_pending_cleanup_probe != NULL) return runtime_probe_cleanup(s_pending_cleanup_probe);
+
     runtime_probe_t *probe = NULL;
     esp_err_t result = runtime_probe_start(board, assets, &probe);
     if (result != ESP_OK) return result;

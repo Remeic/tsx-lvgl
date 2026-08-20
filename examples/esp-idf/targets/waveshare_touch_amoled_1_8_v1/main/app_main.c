@@ -37,7 +37,11 @@ static RTC_DATA_ATTR uint32_t probe_boot_count;
 static void runtime_probe_owner_task(void *arg)
 {
     const tsx_board_adapter_t *board = arg;
-    const esp_err_t result = runtime_probe_run(board, &RUNTIME_ASSETS);
+    esp_err_t result;
+    do {
+        result = runtime_probe_run(board, &RUNTIME_ASSETS);
+        if (result == ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(20));
+    } while (result == ESP_ERR_TIMEOUT);
     if (result != ESP_OK) {
         ESP_LOGE(TAG, "PROBE checkpoint=runtime_owner status=fail err=%s",
                  esp_err_to_name(result));

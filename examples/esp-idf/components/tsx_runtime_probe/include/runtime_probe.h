@@ -48,8 +48,6 @@ esp_err_t runtime_probe_start_connectivity(runtime_probe_t *probe);
 /** Evaluates kernel/app only after providers are configured; caller owns LVGL lock. */
 esp_err_t runtime_probe_boot(runtime_probe_t *probe);
 void runtime_probe_task(void *arg);
-/** Destroys a live probe; caller must be the owner task and hold the display lock. */
-void runtime_probe_destroy(runtime_probe_t *probe);
 
 typedef enum {
     RUNTIME_PROBE_RELOAD_COMMITTED,
