@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +10,10 @@ import { readFlagValue } from "./lib/cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE_SHA_PATTERN = /^[a-f0-9]{40,64}$/;
+/* Keep in sync with DEFAULT_KERNEL_OUT in scripts/build-kernel.mjs; that
+ * module cannot be imported here without pulling bundler dependencies into
+ * the firmware build environment. */
+const CANONICAL_KERNEL_PATH = resolve(repoRoot, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/kernel.js");
 
 function usage() {
   return "Usage:\n  npm run board:build -- --target <target-key>\n\nA successful build also writes the target-bound artifact descriptor.\n";
@@ -29,14 +34,26 @@ export function parseCli(argv) {
   return { help: false, target };
 }
 
-export async function run(argv = process.argv.slice(2), runner = spawnSync) {
-  const parsed = parseCli(argv);
+/**
+ * Targets embed one shared generated kernel. The canonical artifact lives in
+ * the V1 reference target; every other target copies it at build time so a
+ * committed twin cannot silently drift.
+ */
+function syncTargetKernel(profile) {
+  const targetKernel = resolve(profile.projectDirectory, "main", "kernel.js");
+  if (resolve(targetKernel) === resolve(CANONICAL_KERNEL_PATH)) return;
+  if (!existsSync(CANONICAL_KERNEL_PATH)) throw new Error(`canonical kernel missing: run node scripts/build-kernel.mjs`);
+  copyFileSync(CANONICAL_KERNEL_PATH, targetKernel);
+}
+
+export async function run(argv = process.argv.slice(2), runner = spawnSync) {  const parsed = parseCli(argv);
   if (parsed.help) {
     console.log(usage());
     return 0;
   }
   const profile = resolveBoardProfile(parsed.target, repoRoot);
   await generateBoardTargetIdHeader(profile);
+  syncTargetKernel(profile);
   const projectPath = relative(repoRoot, profile.projectDirectory);
   if (!projectPath || projectPath.startsWith("..")) throw new Error("board target project must be inside this repository");
   const result = runner("./tools/dev", ["qemu", `cd ${projectPath} && idf.py build`], {

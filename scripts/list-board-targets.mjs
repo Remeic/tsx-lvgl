@@ -29,8 +29,7 @@ export function parseCli(argv) {
   return { help: false, firmware, json };
 }
 
-export function listBoardTargets(options = { firmware: true }) {
-  if (!options.firmware) throw new Error("only firmware targets are available");
+export function listBoardTargets() {
   return listFirmwareTargets();
 }
 
@@ -47,7 +46,7 @@ export function run(argv = process.argv.slice(2), output = console.log) {
     output(usage());
     return 0;
   }
-  output(renderBoardTargets(listBoardTargets(parsed), parsed.json).trimEnd());
+  output(renderBoardTargets(listBoardTargets(), parsed.json).trimEnd());
   return 0;
 }
 

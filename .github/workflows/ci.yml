@@ -75,7 +75,7 @@ jobs:
             echo "targetKey=${target}"
             node --input-type=module -e 'import { resolveBoardProfile } from "./scripts/board-profile.mjs"; const p=resolveBoardProfile(process.argv[1]); console.log(`boardId=${p.boardId}`); console.log(`supportStatus=${p.supportStatus}`); console.log(`bsp=${p.bsp.name}@${p.bsp.version}`)' "${target}"
             echo "node=$(node --version)"
-            echo "idf=5.5.5 (tools/dev pinned image)"
+            echo "idf=$(grep -o 'espressif/idf:v[0-9.]*' .devcontainer/Dockerfile | cut -d: -f2) (tools/dev pinned image)"
             echo "artifactSha256=$(sha256sum "${artifact}" | cut -d " " -f 1)"
             echo "descriptorSha256=$(sha256sum "${descriptor}" | cut -d " " -f 1)"
             echo "lockSha256=$(sha256sum "${project}/dependencies.lock" | cut -d " " -f 1)"

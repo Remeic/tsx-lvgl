@@ -35,12 +35,13 @@ if (( target_count > 1 )); then
   exit 2
 fi
 
-if [[ "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
-  if [[ -z "${board_target}" ]]; then
-    echo "board-reload: --target is required" >&2
-    exit 2
-  fi
+if [[ -n "${board_target}" ]]; then
+  # The support gate is host-only registry validation; it runs even for
+  # dry-run so an unsupported target fails before any node-side work.
   node "${repo_root}/scripts/board-support-gate.mjs" --target "${board_target}"
+elif [[ "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
+  echo "board-reload: --target is required" >&2
+  exit 2
 fi
 
 if [[ "${TSX_LVGL_SKIP_BUILD:-0}" != "1" && "${has_dry_run}" == "0" && "${has_execute}" == "1" ]]; then
