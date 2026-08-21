@@ -6,7 +6,6 @@ const V1_TARGET = Object.freeze({
   boardId: "waveshare.esp32s3.touch-amoled-1.8.v1",
   projectPath: "examples/esp-idf/runtime_port_probe",
   artifactPath: "examples/esp-idf/runtime_port_probe/build/tsx_lvgl_runtime_port_probe.bin",
-  descriptorPath: "examples/esp-idf/runtime_port_probe/build/tsx_lvgl_runtime_port_probe.descriptor.json",
   embeddedAppDirectoryPath: "examples/esp-idf/runtime_port_probe/main",
   embeddedAppCodeFileName: "app.g1.js",
   embeddedAppManifestFileName: "app.g1.manifest.json",
@@ -31,7 +30,9 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
     throw new Error("--target is required");
   }
   const target = targets.get(targetKey);
-  if (target === undefined) throw new Error(`unsupported board target: ${targetKey}`);
+  if (target === undefined) {
+    throw new Error(`unsupported board target: ${targetKey}. Valid target keys: ${[...targets.keys()].join(", ")}`);
+  }
   const board = resolveCatalogBoard(target);
   const embeddedAppDirectory = resolve(repoRoot, target.embeddedAppDirectoryPath);
   return Object.freeze({
@@ -39,7 +40,6 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
     boardId: board.id,
     projectDirectory: resolve(repoRoot, target.projectPath),
     artifact: resolve(repoRoot, target.artifactPath),
-    descriptorPath: resolve(repoRoot, target.descriptorPath),
     embeddedAppDirectory,
     embeddedAppCodePath: resolve(embeddedAppDirectory, target.embeddedAppCodeFileName),
     embeddedAppManifestPath: resolve(embeddedAppDirectory, target.embeddedAppManifestFileName),

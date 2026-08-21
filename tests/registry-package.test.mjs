@@ -45,7 +45,6 @@ test("registry SDK pack is public, self-contained, pack-clean, and installs its 
   });
   assert.equal(existsSync(join(packageRoot, "dist", "vendor", "runtime", "index.js")), true);
   assert.equal(existsSync(join(packageRoot, "dist", "board-catalog.json")), true);
-  assert.equal(existsSync(join(packageRoot, "dist", "board-profile.mjs")), false);
   assert.equal(existsSync(join(packageRoot, "dist", "tsconfig.tsbuildinfo")), false);
 
   const dryRun = spawnSync("npm", ["pack", "--dry-run", packed.artifactPath, "--ignore-scripts"], {
@@ -54,6 +53,7 @@ test("registry SDK pack is public, self-contained, pack-clean, and installs its 
   });
   assert.equal(dryRun.status, 0, `${dryRun.stdout}\n${dryRun.stderr}`);
   assert.doesNotMatch(`${dryRun.stdout}\n${dryRun.stderr}`, /auto-corrected|Skipping workspace|script name .* invalid/i);
+  assert.doesNotMatch(dryRun.stdout, /board-profile/);
 
   const consumerRoot = join(sandbox, "consumer");
   writeFileSync(join(sandbox, "consumer-package.json"), JSON.stringify({ name: "registry-sdk-contract", private: true }));
@@ -65,6 +65,13 @@ test("registry SDK pack is public, self-contained, pack-clean, and installs its 
   const help = spawnSync(cli, ["--help"], { cwd: consumerRoot, encoding: "utf8" });
   assert.equal(help.status, 0, `${help.stdout}\n${help.stderr}`);
   assert.match(help.stdout, /tsx-lvgl create/);
+
+  const boardsImport = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `const sdk = await import('@tsx-lvgl/sdk/boards'); if (sdk.listSupportedBoards().length === 0) throw new Error('empty catalog'); console.log('ok')`],
+    { cwd: consumerRoot, encoding: "utf8" },
+  );
+  assert.equal(boardsImport.status, 0, `${boardsImport.stdout}\n${boardsImport.stderr}`);
 });
 
 test("registry SDK pack refuses a dirty source tree", (t) => {

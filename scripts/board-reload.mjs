@@ -107,7 +107,9 @@ function parseCli(argv) {
     options.recoveryDir = resolve(options.recoveryDir);
   }
   if (!options.target) throw new Error("--target is required");
-  if (!options.artifact) options.artifact = resolveBoardProfile(options.target, repoRoot).artifact;
+  const profile = resolveBoardProfile(options.target, repoRoot);
+  if (!options.artifact) options.artifact = profile.artifact;
+  options.boardId = profile.boardId;
   return options;
 }
 
@@ -307,7 +309,7 @@ async function createOperationLog(options, plan, info, context) {
     `- Serial path: ${options.port} (transport only; not identity)\n` +
     `- Recovery directory: ${context.recoveryDir}\n` +
     `- Target key: ${options.target}\n` +
-    `- Board ID: ${resolveBoardProfile(options.target, repoRoot).boardId}\n` +
+    `- Board ID: ${options.boardId}\n` +
     `- Artifact: ${info.path}\n` +
     `- Artifact size: ${info.size}\n` +
     `- Artifact SHA-256: ${info.sha256}\n` +
