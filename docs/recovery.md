@@ -124,12 +124,36 @@ The repository provides `npm run board:install` for the V1 example application
 and `npm run board:reload` as its lower-level artifact-only primitive. The
 install command is a development convenience layered on top of the recovery
 gate, not a replacement for it: it regenerates the selected embedded app and
-then delegates the write to the reload primitive. The workflow requires the external per-unit recovery
-directory, creates a `0600` operation log before the first serial command,
-rechecks the same-unit identity/security/eFuse evidence, validates the local
-image offline, writes only the app partition at `0x10000`, runs a separate
-`verify-flash`, and then requests an explicit reset. It refuses `/Volumes`
-paths and contains no global erase or eFuse-write operation.
+then delegates the write to the reload primitive. A successful target build
+creates a versioned descriptor beside the app image. Descriptor generation
+reads the generated ESP-IDF `build/flasher_args.json` `flash_files` mapping and
+fails closed unless it binds the expected built partition-table binary to one
+validated hexadecimal flash offset. The descriptor binds that generated offset
+and binary path, the canonical target and board ID, artifact path/size/SHA-256,
+built partition-table semantic SHA-256, and selected application partition. A
+custom `--artifact` must provide an explicit matching `--descriptor`; the tool
+never infers one from a filename.
+
+The guarded workflow requires the external per-unit recovery directory, creates
+a `0600` operation log and a `0700` temporary live-table directory before the
+first serial command, rechecks the same-unit identity/security/eFuse evidence,
+reads the live partition sector, and compares its strict normalized structure
+with the descriptor. Any unreadable, malformed, encrypted, truncated or
+mismatched table stops with `FAIL/UNKNOWN` before a mutation plan exists. Use
+`--execute --preflight-only` for a logged read-and-compare acceptance step; it
+never writes, verifies or resets the board.
+
+Only after that comparison does the workflow write the observed application
+partition, run a separate `verify-flash`, and request the selected reset. It
+refuses `/Volumes` paths and contains no global erase, bootloader, partition
+table, boot-selection, OTA or eFuse-write operation. App-only reload never
+changes those areas. A stock V2 layout mismatch is an expected safe rejection,
+not permission to select another slot or offset.
+
+First-time provisioning and recovery-image installation remain a separate
+blocked workflow until Plan 006. A successful read is not write authorization
+when recovery custody, same-unit identity, security state or physical identity
+is incomplete.
 
 The default reset candidate is esptool 5.3.1's `watchdog-reset`, because the
 observed RTS-only reset did not reliably launch the application on this unit.

@@ -79,11 +79,26 @@ npm run board:install -- \
   --execute
 ```
 
-Omit `--execute` (or pass `--dry-run`) to build and inspect the guarded plan
-without opening the board. The public app-facing `tsx-lvgl dev --device`
+The successful target build generates a descriptor beside the firmware image.
+It proves the partition-table read offset from the generated ESP-IDF
+`build/flasher_args.json` `flash_files` mapping; the board profile does not
+provide a fallback offset. Missing or inconsistent build metadata stops
+descriptor generation.
+Before any app-only mutation, the guarded reload reads the live `0x1000`-byte
+partition sector and requires an exact semantic match for the descriptor and
+selected application partition. A V2/stock layout mismatch stops safely; the
+workflow never selects another slot or rewrites the partition table.
+
+Omit `--execute` (or pass `--dry-run`) to build and inspect the read-only plan
+without opening the board. For an operator-authorized logged read-only check,
+use `--execute --preflight-only`; this validates the live layout and then stops
+before write, verify or reset. The public app-facing `tsx-lvgl dev --device`
 command is the long-lived RAM hot-reload path for a consumer project; it
 intentionally does not flash. The framework-only `npm run dev:board` helper
 accepts an explicit entry for direct examples and uses the same watcher.
+
+First-time provisioning is not part of app-only reload and remains blocked until
+the separate Plan 006 workflow records its own recovery and security evidence.
 
 ## 3. Build the runtime-port probe
 
