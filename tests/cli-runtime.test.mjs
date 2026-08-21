@@ -20,7 +20,7 @@ function recorder() {
 
 function operations(overrides = {}) {
   return {
-    createProject: async (target, artifact) => ({ root: `/tmp/${target}`, lock: { ...lock, artifact: { ...lock.artifact, file: artifact ?? lock.artifact.file } } }),
+    createProject: async (target, options) => ({ root: `/tmp/${target}`, boardId: options.boardId, lock: { ...lock, artifact: { ...lock.artifact, file: options.artifact ?? lock.artifact.file } } }),
     syncProject: async () => ({ lock }),
     updateProject: async () => ({ lock }),
     checkProject: () => ({ files: ["src/App.tsx"] }),
@@ -33,14 +33,18 @@ function operations(overrides = {}) {
 }
 
 test("CLI parser normalizes supported options and rejects malformed input", () => {
-  assert.deepEqual(parseArgs(["create", "app", "--artifact", "sdk.tgz", "--json", "--"]), { command: "create", positional: ["app"], artifact: "sdk.tgz", json: true });
+  assert.deepEqual(parseArgs(["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--artifact", "sdk.tgz", "--json", "--"]), { command: "create", positional: ["app"], boardId: "waveshare.esp32s3.touch-amoled-1.8.v1", artifact: "sdk.tgz", json: true });
   assert.equal(parseArgs([]).command, "help");
   assert.deepEqual(parseArgs(["--help"]), { command: "help", positional: [], json: false });
   assert.equal(parseArgs(["sync", "-h"]).command, "help");
   assert.deepEqual(parseArgs(["create", "--artifact", "sdk.tgz", "--source", "framework", "--help"]), { command: "help", positional: [], json: false, artifact: "sdk.tgz", source: "framework" });
   assert.throws(() => parseArgs(["create", "--artifact"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["create", "--board"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["create", "--board", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.deepEqual(parseArgs(["create", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--help"]), { command: "help", positional: [], json: false, boardId: "waveshare.esp32s3.touch-amoled-1.8.v1" });
   assert.throws(() => parseArgs(["update", "--source", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["sync", "--wat"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
+  assert.throws(() => parseArgs(["sync", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.deepEqual(parseArgs(["dev", "--device", "--port", "/dev/cu.fake", "--json"]), { command: "dev", positional: [], device: true, port: "/dev/cu.fake", json: true });
   assert.throws(() => parseArgs(["dev", "--port"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
   assert.throws(() => parseArgs(["dev", "--port", "--json"]), { code: DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND });
@@ -97,7 +101,7 @@ test("CLI routes device dev and doctor through existing command names with deter
 test("CLI runtime routes every command and preserves machine-readable outcomes", async () => {
   const calls = [];
   const ops = operations({
-    createProject: async (...args) => { calls.push(["create", ...args]); return { root: "/tmp/app", lock }; },
+    createProject: async (...args) => { calls.push(["create", ...args]); return { root: "/tmp/app", boardId: args[1].boardId, lock }; },
     syncProject: async (root) => { calls.push(["sync", root]); return { lock }; },
     updateProject: async (...args) => { calls.push(["update", ...args]); return { lock }; },
     checkProject: (root) => { calls.push(["check", root]); return { files: ["src/App.tsx"] }; },
@@ -105,7 +109,10 @@ test("CLI runtime routes every command and preserves machine-readable outcomes",
     devProject: async (root) => { calls.push(["dev", root]); return operations().devProject(); },
     doctorProject: (root) => { calls.push(["doctor", root]); return { ok: true, resultCode: "DOCTOR_OK", checks: [] }; },
   });
-  for (const argv of [["create", "app", "--artifact", "sdk.tgz", "--json"], ["sync"], ["update", "--source", "/framework"], ["check"], ["build"], ["dev", "--json"], ["doctor", "--json"]]) {
+  const createWithoutArtifact = recorder();
+  assert.equal(await runCli(["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--json"], "/cwd", operations(), createWithoutArtifact.writer), 0);
+  assert.equal(JSON.parse(createWithoutArtifact.logs[0]).artifact, lock.artifact.file);
+  for (const argv of [["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8.v1", "--artifact", "sdk.tgz", "--json"], ["sync"], ["update", "--source", "/framework"], ["check"], ["build"], ["dev", "--json"], ["doctor", "--json"]]) {
     const output = recorder();
     assert.equal(await runCli(argv, "/cwd", ops, output.writer), 0);
     assert.equal(output.errors.length, 0);
@@ -133,6 +140,12 @@ test("CLI runtime emits help, doctor failures, usage failures and operation erro
   output = recorder();
   assert.equal(await runCli(["create", "--json"], "/cwd", operations(), output.writer), 2);
   assert.equal(JSON.parse(output.errors[0]).code, DIAGNOSTIC_CODES.UNSUPPORTED_COMMAND);
+  output = recorder();
+  assert.equal(await runCli(["create", "app", "--json"], "/cwd", operations(), output.writer), 1);
+  assert.equal(JSON.parse(output.errors[0]).code, DIAGNOSTIC_CODES.BOARD_SELECTION_REQUIRED);
+  output = recorder();
+  assert.equal(await runCli(["create", "app", "--board", "waveshare.esp32s3.touch-amoled-1.8", "--json"], "/cwd", operations(), output.writer), 1);
+  assert.equal(JSON.parse(output.errors[0]).code, DIAGNOSTIC_CODES.BOARD_TARGET_UNSUPPORTED);
   output = recorder();
   assert.equal(await runCli(["unknown"], "/cwd", operations(), output.writer), 2);
   assert.match(output.errors[1], /Usage:/);

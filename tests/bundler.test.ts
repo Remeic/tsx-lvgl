@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
-  BOARD_ID,
   PROTOCOL_VERSION,
   compileTsxBundle,
   escapeNonAscii,
@@ -11,6 +10,8 @@ import {
   wrapCjsModule,
 } from "@tsx-lvgl/bundler";
 import { validateRuntimeBundle } from "@tsx-lvgl/runtime";
+
+const TEST_BOARD_ID = "tsx-lvgl.host-test";
 
 const goldenSource = `import { Text } from "@tsx-lvgl/core";
 export default function App() {
@@ -30,8 +31,7 @@ function App() {
 
 const goldenSha256 = "95981a5a4b7a507d80f34a52767cc08f7e39b8b3b50cd33e16d7f953cbfd5e94";
 
-test("BOARD_ID and PROTOCOL_VERSION pin the exact board and protocol identifiers", () => {
-  assert.equal(BOARD_ID, "waveshare.esp32s3.touch-amoled-1.8");
+test("compileTsxBundle keeps board identity explicit and protocol version stable", () => {
   assert.equal(PROTOCOL_VERSION, 1);
 });
 
@@ -40,7 +40,7 @@ test("compileTsxBundle produces an exact golden code string", () => {
     fileName: "App.tsx",
     source: goldenSource,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   assert.equal(output.code, goldenCode);
@@ -55,7 +55,7 @@ export default function App() {
 }
 `,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
@@ -68,7 +68,7 @@ test("compileTsxBundle is deterministic across repeated builds", () => {
     fileName: "App.tsx",
     source: goldenSource,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   };
   const first = compileTsxBundle(input);
@@ -82,7 +82,7 @@ test("manifest sha256 matches an independently computed digest and a known vecto
     fileName: "App.tsx",
     source: goldenSource,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   const independentHash = createHash("sha256").update(Buffer.from(output.bytes)).digest("hex");
@@ -95,7 +95,7 @@ test("byteLength, bytes.byteLength, and code.length agree for ASCII output", () 
     fileName: "App.tsx",
     source: goldenSource,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   assert.equal(output.manifest.byteLength, output.bytes.byteLength);
@@ -126,7 +126,7 @@ export default function App() {
 }
 `,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   for (let index = 0; index < output.code.length; index += 1) {
@@ -143,7 +143,7 @@ test("compileTsxBundle throws with the diagnostic text on a syntax error", () =>
         fileName: "Bad.tsx",
         source: "export default function( {",
         bundleId: "app",
-        boardId: BOARD_ID,
+        boardId: TEST_BOARD_ID,
         generation: 1,
       }),
     /'\}' expected/,
@@ -157,7 +157,7 @@ test("compileTsxBundle joins multiple diagnostics with the exact prefix and newl
         fileName: "Bad.tsx",
         source: "const a = ;\nconst b = ;",
         bundleId: "app",
-        boardId: BOARD_ID,
+        boardId: TEST_BOARD_ID,
         generation: 1,
       }),
     (error: unknown) =>
@@ -176,7 +176,7 @@ export default function App() {
 }
 `,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   assert.ok(!output.code.includes("hidden"), "removeComments must strip the source comment");
@@ -190,7 +190,7 @@ test("compileTsxBundle rejects an empty or whitespace-only bundleId with the exa
         fileName: "App.tsx",
         source: goldenSource,
         bundleId: "",
-        boardId: BOARD_ID,
+        boardId: TEST_BOARD_ID,
         generation: 1,
       }),
     (error: unknown) =>
@@ -202,7 +202,7 @@ test("compileTsxBundle rejects an empty or whitespace-only bundleId with the exa
       fileName: "App.tsx",
       source: goldenSource,
       bundleId: "   ",
-      boardId: BOARD_ID,
+      boardId: TEST_BOARD_ID,
       generation: 1,
     }),
   );
@@ -215,7 +215,7 @@ test("compileTsxBundle rejects non-positive, fractional, and non-safe-integer ge
         fileName: "App.tsx",
         source: goldenSource,
         bundleId: "app",
-        boardId: BOARD_ID,
+        boardId: TEST_BOARD_ID,
         generation,
       }),
     );
@@ -226,7 +226,7 @@ test("compileTsxBundle rejects non-positive, fractional, and non-safe-integer ge
         fileName: "App.tsx",
         source: goldenSource,
         bundleId: "app",
-        boardId: BOARD_ID,
+        boardId: TEST_BOARD_ID,
         generation: 0,
       }),
     (error: unknown) =>
@@ -238,7 +238,7 @@ test("compileTsxBundle rejects non-positive, fractional, and non-safe-integer ge
       fileName: "App.tsx",
       source: goldenSource,
       bundleId: "app",
-      boardId: BOARD_ID,
+      boardId: TEST_BOARD_ID,
       generation: 1,
     }),
   );
@@ -249,13 +249,13 @@ test("compileTsxBundle output passes validateRuntimeBundle under the board polic
     fileName: "App.tsx",
     source: goldenSource,
     bundleId: "app",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 1,
   });
   const policy = {
     protocolVersion: 1,
     engine: "quickjs-ng" as const,
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     maxBytes: 262144,
     lastGeneration: 0,
   };

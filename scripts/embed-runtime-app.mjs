@@ -2,13 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
+import { compileTsxBundle } from "@tsx-lvgl/bundler";
 
 import { resolveBoardProfile } from "./board-profile.mjs";
 import { readFlagValue } from "./lib/cli.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const defaultProfile = "runtime-probe";
 const defaultEntry = resolve(repoRoot, "examples/apps/pomodoro.tsx");
 const examplesDirectory = resolve(repoRoot, "examples/apps");
 
@@ -20,7 +19,7 @@ Options:
   --entry PATH        TSX entry to embed; defaults to examples/apps/pomodoro.tsx.
   --app NAME           Shorthand for examples/apps/NAME.tsx.
   --bundle-id ID      Bundle identity; defaults to the entry basename.
-  --profile NAME      Board profile; default runtime-probe.
+  --target KEY        Explicit repository board target (required).
   --help              Show this help.
 
 The generated files always use the stable app.g1.* names expected by the
@@ -36,7 +35,7 @@ export function parseCli(argv) {
   const options = {
     entry: defaultEntry,
     bundleId: "",
-    profile: defaultProfile,
+    target: "",
   };
   let entrySpecified = false;
 
@@ -61,8 +60,8 @@ export function parseCli(argv) {
       case "--bundle-id":
         options.bundleId = value;
         break;
-      case "--profile":
-        options.profile = value;
+      case "--target":
+        options.target = value;
         break;
       default:
         throw new Error(`unknown option: ${argument}`);
@@ -70,18 +69,19 @@ export function parseCli(argv) {
   }
 
   if (!options.bundleId) options.bundleId = defaultBundleId(options.entry);
+  if (!options.target) throw new Error("--target is required");
   return { help: false, options };
 }
 
-export async function embedRuntimeApp({ entry, bundleId, profile = defaultProfile, repoRoot: root = repoRoot }) {
-  const board = resolveBoardProfile(profile, root);
+export async function embedRuntimeApp({ entry, bundleId, target, repoRoot: root = repoRoot }) {
+  const board = resolveBoardProfile(target, root);
   const entryPath = resolve(entry);
   const source = await readFile(entryPath, "utf8");
   const output = compileTsxBundle({
     fileName: entryPath,
     source,
     bundleId: bundleId || defaultBundleId(entryPath),
-    boardId: BOARD_ID,
+    boardId: board.boardId,
     generation: 1,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
@@ -127,4 +127,4 @@ async function run() {
 const isDirectExecution = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectExecution) await run();
 
-export { defaultEntry, defaultProfile, usage };
+export { defaultEntry, usage };

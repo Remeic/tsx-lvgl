@@ -1,10 +1,14 @@
 import { strict as assert } from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { test } from "node:test";
 
+import boardCatalog from "../packages/sdk/src/board-catalog.json" with { type: "json" };
 import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
+import { resolveBoardProfile } from "../scripts/board-profile.mjs";
 
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
+const runtimeHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.h", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
 const transportHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.h", import.meta.url), "utf8");
 const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/app_main.c", import.meta.url), "utf8");
@@ -18,6 +22,9 @@ const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_prob
   ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
   : "";
 const lvglHostHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.h", import.meta.url), "utf8");
+const target = resolveBoardProfile("waveshare-touch-amoled-1.8-v1", resolve(new URL("..", import.meta.url).pathname));
+const embeddedManifest = JSON.parse(readFileSync(target.embeddedAppManifestPath, "utf8"));
+const shakefaceManifest = JSON.parse(readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/shakeface.g1.manifest.json", import.meta.url), "utf8"));
 
 /** SCREAMING_SNAKE_CASE -> camelCase, e.g. "BACKGROUND_COLOR" -> "backgroundColor". */
 function toCamelCase(screamingSnakeCase) {
@@ -73,6 +80,16 @@ test("runtime probe uses stable embedded-app filenames so the app can change wit
   assert.match(source, /_binary_app_g1_js_start/);
   assert.match(source, /_binary_app_g1_manifest_json_start/);
   assert.match(embedRuntimeApp, /always use the stable app\.g1\.\* names/);
+});
+
+test("selected V1 target and committed embedded manifest share the canonical identity", () => {
+  const catalogBoard = boardCatalog.boards.find((board) => board.id === target.boardId);
+  assert.ok(catalogBoard, `catalog must contain target board ${target.boardId}`);
+  const escapedBoardId = catalogBoard.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.equal(target.boardId, catalogBoard.id);
+  assert.equal(embeddedManifest.boardId, catalogBoard.id);
+  assert.equal(shakefaceManifest.boardId, catalogBoard.id);
+  assert.match(runtimeHeader, new RegExp(`RUNTIME_PROBE_BOARD_ID "${escapedBoardId}"`));
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {

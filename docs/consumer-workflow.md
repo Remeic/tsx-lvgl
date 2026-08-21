@@ -6,7 +6,7 @@ framework checkout:
 
 ```bash
 npm install --global @tsx-lvgl/sdk
-tsx-lvgl create ./my-app
+tsx-lvgl create ./my-app --board waveshare.esp32s3.touch-amoled-1.8.v1
 cd my-app
 <package-manager> run doctor -- --json
 <package-manager> run dev
@@ -24,7 +24,7 @@ works without that checkout:
 ```bash
 npm run build
 npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
-tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
+tsx-lvgl create ./my-app --board waveshare.esp32s3.touch-amoled-1.8.v1 --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
 cd my-app
 <package-manager> run doctor -- --json
 <package-manager> run dev
@@ -77,3 +77,7 @@ that produce a result. The source workspace package remains private to prevent
 an incomplete direct publish; releases publish only the self-contained registry
 artifact. Both registry and offline artifacts provide the same
 `@tsx-lvgl/sdk` imports and `tsx-lvgl` binary.
+
+The board ID is a bundle/firmware compatibility target, not physical identity
+evidence. This release supports only V1. A catalog entry alone does not claim
+hardware support for a new board.

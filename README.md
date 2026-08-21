@@ -80,7 +80,7 @@ Install the public SDK/CLI, then create an app:
 
 ```bash
 npm install --global @tsx-lvgl/sdk
-tsx-lvgl create ./my-app
+tsx-lvgl create ./my-app --board waveshare.esp32s3.touch-amoled-1.8.v1
 cd my-app && npm run dev
 ```
 
@@ -88,8 +88,12 @@ Framework contributors can use the equivalent offline artifact workflow:
 
 ```bash
 npm run pack:sdk -- --out /tmp/tsx-lvgl-sdk
-tsx-lvgl create ./my-app --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
+tsx-lvgl create ./my-app --board waveshare.esp32s3.touch-amoled-1.8.v1 --artifact /tmp/tsx-lvgl-sdk/tsx-lvgl-sdk-0.1.0.tgz
 ```
+
+The board ID is a bundle/firmware compatibility target. It is not physical
+identity evidence. This release supports only the Waveshare V1 target;
+adding a catalog record is not enough to claim support for new hardware.
 
 With a development runtime already running on an attached board, keep this
 command running. It pushes the initial bundle and then reloads the configured

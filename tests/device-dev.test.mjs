@@ -11,7 +11,7 @@ const bundle = {
     format: "js",
     engine: "quickjs-ng",
     protocolVersion: 1,
-    boardId: "waveshare.esp32s3.touch-amoled-1.8",
+    boardId: "tsx-lvgl.host-test",
     generation: 5,
     sha256: "a".repeat(64),
     byteLength: 3,
