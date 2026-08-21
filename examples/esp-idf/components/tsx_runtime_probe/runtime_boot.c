@@ -55,12 +55,15 @@ static bool run_rejected_diagnostic_transport(const char *reason)
     return false;
 }
 
-static void remain_in_rejected_diagnostic_mode(void)
+static _Noreturn void remain_in_rejected_diagnostic_mode(void)
 {
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
-static void enter_rejected_diagnostic_mode(const char *reason)
+/* Never returns: every path either parks forever or restarts the chip. The
+ * _Noreturn contract makes a future fall-through into display/runtime boot on
+ * unverified hardware a compile error, not a silent safety hole. */
+static _Noreturn void enter_rejected_diagnostic_mode(const char *reason)
 {
     if (!run_rejected_diagnostic_transport(reason)) {
         /* The bounded retry did not establish the recovery channel. A
@@ -75,7 +78,6 @@ static void enter_rejected_diagnostic_mode(const char *reason)
             remain_in_rejected_diagnostic_mode();
         }
         esp_restart();
-        return;
     }
     remain_in_rejected_diagnostic_mode();
 }
