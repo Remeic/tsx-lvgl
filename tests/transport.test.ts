@@ -563,7 +563,7 @@ test("createPushSession fails on a device ERR while awaiting RDY", () => {
 test("createPushSession reports hardware reject reasons exactly and sends no data frame", () => {
   const bytes = new Uint8Array([1, 2, 3]);
   const manifest = manifestWith({ byteLength: bytes.length });
-  for (const reason of ["hardware-mismatch", "hardware-unknown"]) {
+  for (const reason of ["hardware-mismatch", "hardware-unknown", "hardware-startup-failure"]) {
     const session = createPushSession(manifest, bytes);
     const begin = session.begin();
     assert.equal(begin.state, "awaiting-rdy");

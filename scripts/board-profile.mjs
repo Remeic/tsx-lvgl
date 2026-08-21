@@ -5,6 +5,15 @@ import { readArtifactDescriptor, validateArtifactDescriptor } from "./board-arti
 const V1_TARGET = Object.freeze({
   targetKey: "waveshare-touch-amoled-1.8-v1",
   boardId: "waveshare.esp32s3.touch-amoled-1.8.v1",
+  displayName: "Waveshare ESP32-S3 Touch AMOLED 1.8 (V1)",
+  supportStatus: "supported",
+  adapterPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1",
+  bsp: Object.freeze({
+    name: "waveshare/esp32_s3_touch_amoled_1_8",
+    version: "1.1.4",
+    display: "SH8601",
+    touch: "FT3168",
+  }),
   projectPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1",
   artifactPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/tsx_lvgl_waveshare_v1.bin",
   descriptorPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/tsx_lvgl_waveshare_v1.descriptor.json",
@@ -27,7 +36,52 @@ const V1_TARGET = Object.freeze({
   embeddedAppManifestFileName: "app.g1.manifest.json",
 });
 
-const targets = new Map([[V1_TARGET.targetKey, V1_TARGET]]);
+const V2_TARGET = Object.freeze({
+  targetKey: "waveshare-touch-amoled-1.8-v2",
+  boardId: "waveshare.esp32s3.touch-amoled-1.8.v2",
+  displayName: "Waveshare ESP32-S3 Touch AMOLED 1.8 (V2)",
+  // Physical display/touch and stock-layout acceptance are intentionally not
+  // present yet. This status is visible in the SDK catalog and does not grant
+  // consumer install or reload support.
+  supportStatus: "experimental-build-only",
+  adapterPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/components/tsx_board_adapter_v2",
+  bsp: Object.freeze({
+    name: "waveshare/esp32_s3_touch_amoled_1_8",
+    version: "2.0.3",
+    display: "CO5300",
+    touch: "CST820 (CST816S-compatible API)",
+    dependencies: Object.freeze({
+      "espressif/esp_lcd_co5300": "2.1.0",
+      "espressif/esp_lcd_touch_cst816s": "1.1.2",
+      "espressif/esp_io_expander_tca9554": "2.0.3",
+    }),
+  }),
+  projectPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2",
+  artifactPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/build/tsx_lvgl_waveshare_v2.bin",
+  descriptorPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/build/tsx_lvgl_waveshare_v2.descriptor.json",
+  buildMetadataPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/build/flasher_args.json",
+  partitionTablePath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/build/partition_table/partition-table.bin",
+  targetIdHeaderPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/main/generated/tsx_board_target_id.h",
+  partitionTable: Object.freeze({
+    readSize: 0x1000,
+    flashSize: 0x1000000,
+    applicationPartition: Object.freeze({
+      label: "factory",
+      type: 0,
+      subtype: 0,
+      offset: 0x10000,
+      size: 0x800000,
+    }),
+  }),
+  embeddedAppDirectoryPath: "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v2/main",
+  embeddedAppCodeFileName: "app.g1.js",
+  embeddedAppManifestFileName: "app.g1.manifest.json",
+});
+
+const targets = new Map([
+  [V1_TARGET.targetKey, V1_TARGET],
+  [V2_TARGET.targetKey, V2_TARGET],
+]);
 
 export function resolveCatalogBoard(target, catalog = boardCatalog) {
   if (catalog.formatVersion !== 1 || !Array.isArray(catalog.boards)) {
@@ -36,6 +90,11 @@ export function resolveCatalogBoard(target, catalog = boardCatalog) {
   const board = catalog.boards.find((candidate) => candidate.id === target.boardId);
   if (board === undefined || typeof board.id !== "string") {
     throw new Error(`board target ${target.targetKey} does not resolve to a catalog board`);
+  }
+  for (const field of ["displayName", "supportStatus"]) {
+    if (target[field] !== undefined && target[field] !== board[field]) {
+      throw new Error(`board target ${target.targetKey} ${field} disagrees with catalog`);
+    }
   }
   return board;
 }
@@ -54,6 +113,10 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
   return Object.freeze({
     targetKey: target.targetKey,
     boardId: board.id,
+    displayName: board.displayName,
+    supportStatus: board.supportStatus,
+    adapterDirectory: resolve(repoRoot, target.adapterPath),
+    bsp: target.bsp,
     projectDirectory: resolve(repoRoot, target.projectPath),
     artifact: resolve(repoRoot, target.artifactPath),
     descriptorPath: resolve(repoRoot, target.descriptorPath),
@@ -67,7 +130,44 @@ export function resolveBoardProfile(targetKey, repoRoot = process.cwd()) {
   });
 }
 
-export { V1_TARGET };
+/**
+ * Device install/reload is reserved for catalog profiles that are explicitly
+ * supported. Build-only profiles remain available through board:build.
+ */
+export function assertSupportedBoardProfile(profile, operation) {
+  if (profile.supportStatus !== "supported") {
+    throw new Error(
+      `board target ${profile.targetKey} has support status ${profile.supportStatus}; ` +
+      `${operation} requires supportStatus supported (use the explicit firmware build command)`,
+    );
+  }
+  return profile;
+}
+
+/** Return all firmware targets in stable target-key order for CI/tooling. */
+export function listFirmwareTargets() {
+  return Object.freeze([...targets.values()]
+    .sort((left, right) => left.targetKey.localeCompare(right.targetKey))
+    .map((target) => {
+      const board = resolveCatalogBoard(target);
+      return Object.freeze({
+        targetKey: target.targetKey,
+        boardId: target.boardId,
+        displayName: board.displayName,
+        supportStatus: board.supportStatus,
+      projectPath: target.projectPath,
+      adapterPath: target.adapterPath,
+      artifactPath: target.artifactPath,
+      descriptorPath: target.descriptorPath,
+      buildMetadataPath: target.buildMetadataPath,
+      partitionTablePath: target.partitionTablePath,
+      targetIdHeaderPath: target.targetIdHeaderPath,
+        bsp: target.bsp,
+      });
+    }));
+}
+
+export { V1_TARGET, V2_TARGET };
 
 /** Load and validate the descriptor bound to a resolved target profile. */
 export async function loadBoardArtifactDescriptor(profile, {

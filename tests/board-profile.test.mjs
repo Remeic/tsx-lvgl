@@ -49,6 +49,22 @@ test("catalog additions and reordering cannot retarget the V1 profile", () => {
   assert.equal(resolveCatalogBoard(V1_TARGET, reorderedCatalog).id, V1_TARGET.boardId);
 });
 
+test("catalog metadata drift fails closed for every duplicated field", () => {
+  for (const field of ["displayName", "supportStatus"]) {
+    const driftedCatalog = {
+      formatVersion: 1,
+      boards: boardCatalog.boards.map((board) => board.id === V1_TARGET.boardId
+        ? { ...board, [field]: field === "displayName" ? "Drifted V1" : "experimental-build-only" }
+        : board),
+    };
+    assert.throws(
+      () => resolveCatalogBoard(V1_TARGET, driftedCatalog),
+      new RegExp(`${field} disagrees with catalog`),
+      `${field} drift must fail closed`,
+    );
+  }
+});
+
 test("unknown profiles cannot redirect build or artifact selection and list valid keys", () => {
   assert.throws(() => resolveBoardProfile("unknown", root), /unsupported board target: unknown\. Valid target keys: waveshare-touch-amoled-1\.8-v1/);
   assert.throws(() => resolveBoardProfile(undefined, root), /--target is required/);

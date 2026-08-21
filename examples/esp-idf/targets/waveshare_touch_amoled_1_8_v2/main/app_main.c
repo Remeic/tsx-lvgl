@@ -1,5 +1,5 @@
 #include "runtime_probe.h"
-#include "tsx_board_adapter_v1.h"
+#include "tsx_board_adapter_v2.h"
 
 #include <stdint.h>
 
@@ -17,6 +17,6 @@ static const runtime_probe_assets_t RUNTIME_ASSETS = {
 
 void app_main(void)
 {
-    runtime_probe_app_main(tsx_board_adapter_v1(), &RUNTIME_ASSETS,
-                           "ESP32-S3 / SH8601 / FT3168 / QMI8658 / LVGL 9.5");
+    runtime_probe_app_main(tsx_board_adapter_v2(), &RUNTIME_ASSETS,
+                           "ESP32-S3 / CO5300 / CST820 / motion=unavailable / LVGL 9.5");
 }

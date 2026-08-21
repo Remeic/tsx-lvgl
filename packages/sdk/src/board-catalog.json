@@ -4,7 +4,14 @@
     {
       "id": "waveshare.esp32s3.touch-amoled-1.8.v1",
       "displayName": "Waveshare ESP32-S3 Touch AMOLED 1.8 (V1)",
+      "supportStatus": "supported",
       "legacyIds": ["waveshare.esp32s3.touch-amoled-1.8"]
+    },
+    {
+      "id": "waveshare.esp32s3.touch-amoled-1.8.v2",
+      "displayName": "Waveshare ESP32-S3 Touch AMOLED 1.8 (V2)",
+      "supportStatus": "experimental-build-only",
+      "legacyIds": []
     }
   ]
 }

@@ -9,6 +9,7 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -72,7 +73,8 @@ static volatile bool s_stopping;
 static bool is_reject_reason(const char *reason)
 {
     return reason != NULL && (strcmp(reason, "hardware-mismatch") == 0 ||
-                              strcmp(reason, "hardware-unknown") == 0);
+                              strcmp(reason, "hardware-unknown") == 0 ||
+                              strcmp(reason, "hardware-startup-failure") == 0);
 }
 
 static void write_response(const char *line)
@@ -406,10 +408,14 @@ static esp_err_t bundle_transport_start_task(runtime_probe_t *probe,
         (!ready_mode && (probe != NULL || !is_reject_reason(reject_reason)))) {
         return ESP_ERR_INVALID_ARG;
     }
+    /* Invariant: reject mode never stages. s_state.probe stays NULL, so
+     * handle_begin rejects before any session can become active; DATA/END are
+     * inert because every handler gates on session.active. */
     if (s_task != NULL) return ESP_ERR_INVALID_STATE;
     memset(&s_state, 0, sizeof(s_state));
     s_state.probe = probe;
     s_state.reject_reason = reject_reason;
+    assert(ready_mode || !s_state.session.active);
     s_stopping = false;
     s_stopped = xSemaphoreCreateBinary();
     if (s_stopped == NULL) {

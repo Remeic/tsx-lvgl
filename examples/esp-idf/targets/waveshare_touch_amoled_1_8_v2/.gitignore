@@ -1,0 +1,8 @@
+# ESP-IDF build/dependency output — generated independently from V1.
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+main/generated/
+
+!dependencies.lock

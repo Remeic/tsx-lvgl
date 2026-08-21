@@ -84,6 +84,21 @@ It proves the partition-table read offset from the generated ESP-IDF
 `build/flasher_args.json` `flash_files` mapping; the board profile does not
 provide a fallback offset. Missing or inconsistent build metadata stops
 descriptor generation.
+
+The repository target registry lists both hardware compositions:
+
+```bash
+node scripts/list-board-targets.mjs --firmware
+npm run board:build -- --target waveshare-touch-amoled-1.8-v1
+```
+
+The V2 key `waveshare-touch-amoled-1.8-v2` is explicitly
+`experimental-build-only` and is documented in the [V2 target guide](targets/waveshare-v2.md).
+It uses a separate CO5300/CST-compatible adapter and BSP 2.0.3 composition;
+it does not change or select the V1 firmware at runtime. Build evidence does
+not prove a physical V2 display, touch controller, UART identity, recovery
+state or safe provisioning.
+
 Before any app-only mutation, the guarded reload reads the live `0x1000`-byte
 partition sector and requires an exact semantic match for the descriptor and
 selected application partition. A V2/stock layout mismatch stops safely; the

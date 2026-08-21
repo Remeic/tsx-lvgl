@@ -37,6 +37,19 @@ test("board target selection has no profile environment fallback", () => {
   assert.throws(() => parseEmbedCli(["--profile", "runtime-probe"]), /unknown option/);
 });
 
+test("board reload rejects every duplicate target spelling", () => {
+  for (const argv of [
+    ["--target", "waveshare-touch-amoled-1.8-v2", "--target", "waveshare-touch-amoled-1.8-v1", "--dry-run"],
+    ["--target", "waveshare-touch-amoled-1.8-v1", "--target", "waveshare-touch-amoled-1.8-v2", "--dry-run"],
+    ["--target", TARGET, "--target", TARGET, "--dry-run"],
+    ["--target", "waveshare-touch-amoled-1.8-v2", "--target=waveshare-touch-amoled-1.8-v1", "--dry-run"],
+    ["--target=waveshare-touch-amoled-1.8-v2", "--target", "waveshare-touch-amoled-1.8-v1", "--dry-run"],
+    ["--target=waveshare-touch-amoled-1.8-v2", "--target=waveshare-touch-amoled-1.8-v1", "--dry-run"],
+  ]) {
+    assert.throws(() => parseBoardReloadCli(argv), /--target may be supplied only once/);
+  }
+});
+
 test("selected target generates the canonical C identity and rejects invalid IDs", async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), "tsx-lvgl-target-id-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

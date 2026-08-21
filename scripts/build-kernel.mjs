@@ -14,7 +14,7 @@ const ROOT = resolve(__dirname, "..");
 /** Fixed emit order: byte-deterministic, not a dependency requirement (requires resolve lazily). */
 const PACKAGES = ["core", "capabilities", "connectivity", "sensors", "runtime", "device"];
 
-const DEFAULT_OUT = resolve(ROOT, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/kernel.js");
+export const DEFAULT_KERNEL_OUT = resolve(ROOT, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/kernel.js");
 const KERNEL_BUDGET_BYTES = 128 * 1024;
 
 const ALIASES = [
@@ -51,13 +51,13 @@ function usage() {
   node scripts/build-kernel.mjs [--out <path>]
 
 Options:
-  --out PATH   Kernel output path (default: ${DEFAULT_OUT}).
+  --out PATH   Kernel output path (default: ${DEFAULT_KERNEL_OUT}).
   --help       Show this help.
 `;
 }
 
 function parseCli(argv) {
-  let out = DEFAULT_OUT;
+  let out = DEFAULT_KERNEL_OUT;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--help") return { help: true };
