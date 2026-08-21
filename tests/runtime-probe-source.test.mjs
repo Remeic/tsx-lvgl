@@ -257,7 +257,7 @@ test("lvgl host stages widget creation for reparenting", () => {
 
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {
   assert.match(source, /JSValue period = JS_GetPropertyStr\(context, argv\[0\], "periodMs"\);/);
-  assert.match(source, /probe->board->motion->set_period_ms\(/);
+  assert.match(source, /tsx_board_adapter_motion_set_period_ms\(/);
   assert.match(adapterSource, /waveshare_v1_sensors_set_period_ms\(/);
 });
 
