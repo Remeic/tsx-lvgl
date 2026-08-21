@@ -104,11 +104,16 @@ bundle transport; it imports no BSP or provider implementation. Each target
 selects its pinned BSP/LVGL dependencies, embedded files and generated
 `tsx_board_target_id.h`, then links one adapter implementing the opaque board,
 display, motion and Wi-Fi ports. The V1 target keeps the existing
-SH8601/FT3168 startup and optional-provider behavior behind that adapter. This
-composition has no runtime board detection or registry switch. The V1 adapter's
-typed identity seam returns `TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED` with
-`ESP_OK` as migration metadata only; it does not observe physical identity or
-gate readiness. Plan 004 owns matched, mismatched and unknown identity states.
+SH8601/FT3168 startup and optional-provider behavior behind that adapter. Before
+the display or runtime composition starts, its boot port uses the BSP-owned I2C
+bus for two bounded, read-only address probes: FT5x06-family `0x38` is positive
+V1 evidence and CST816S-compatible `0x15` is conflicting V2 evidence. The
+IDF-independent classifier returns `matched`, `mismatch`, or `unknown` with a
+bounded evidence code. Only `matched` enters display, providers, QuickJS, app,
+and ready transport startup. A mismatch or unknown state keeps the diagnostic
+transport alive and returns a terminal `TSXB ERR hardware-mismatch` or
+`TSXB ERR hardware-unknown`; it does not construct LVGL or QuickJS state. This
+composition has no universal runtime board detector or registry switch.
 
 Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
 only; the SDK facade adapts the app bundle's public module specifiers to the

@@ -48,10 +48,18 @@ npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 The target composition resolves `espressif/quickjs-ng` 0.14.0, LVGL 9.5 and
 the Waveshare V1 BSP 1.1.4. The board ID header is generated from the selected
 profile at `main/generated/tsx_board_target_id.h`; it is not hand-maintained.
-The V1 adapter's typed identity seam returns
-`TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED` with `ESP_OK` as migration metadata
-only; it does not observe physical identity or gate readiness. Plan 004 owns
-matched, mismatched and unknown identity states.
+Before display or runtime startup, the V1 adapter probes the BSP-owned I2C bus
+without writes. A positive ACK at `0x38` and a reliable NACK at `0x15` produce
+`TSX_BOARD_IDENTITY_MATCHED` with evidence `v1-ft-ack`. An ACK at `0x15`
+produces `TSX_BOARD_IDENTITY_MISMATCH`; both ACKs, no ACK, or a bus error stay
+`TSX_BOARD_IDENTITY_UNKNOWN` with a bounded evidence code. Only matched starts
+the display, providers, QuickJS, app, and ready TSXB transport. Mismatch and
+unknown keep a minimal diagnostic transport alive and return
+`TSXB ERR hardware-mismatch` or `TSXB ERR hardware-unknown` to `BEGIN`; they
+never emit `RDY` or allocate staging.
+The `0x15` ACK takes precedence over a `0x38` probe error: `(FT ERROR, CST
+ACK)` is still `TSX_BOARD_IDENTITY_MISMATCH` with `v2-cst-ack`. Other error
+combinations without a unique positive ACK remain `UNKNOWN`.
 Generated dependency/build output (`build/`,
 `managed_components/`, `sdkconfig`) is local and gitignored;
 `dependencies.lock` is tracked for this target.
@@ -68,9 +76,17 @@ On a physical V1 board, capture UART/USB console output and check it with:
 node tools/check-runtime-probe.mjs <log-file> [--require-reload]
 ```
 
+For a target-bound capture, add `--target
+waveshare.esp32s3.touch-amoled-1.8.v1`; the checker then requires the positive
+identity checkpoint to name this exact target.
+Every identity event must include that canonical target shape and one bounded
+evidence code. Any `mismatch` or `unknown` event remains a capture failure,
+even if a later boot reports `pass`.
+
 Baseline (boot only), required:
 
 ```text
+PROBE checkpoint=board_identity status=pass target=waveshare.esp32s3.touch-amoled-1.8.v1 evidence=v1-ft-ack
 PROBE checkpoint=board_start status=pass
 PROBE checkpoint=display_init status=pass
 PROBE checkpoint=touch_init status=pass        # unavailable is fail-soft

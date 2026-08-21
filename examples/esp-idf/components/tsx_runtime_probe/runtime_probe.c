@@ -1504,12 +1504,12 @@ esp_err_t runtime_probe_start_connectivity(runtime_probe_t *probe)
  * display lock: a transport request can be waiting for the owner task's
  * reload handoff, so joining while locked would create a lock/join cycle.
  */
-static void runtime_probe_stop_transport(runtime_probe_t *probe)
+static esp_err_t runtime_probe_stop_transport(runtime_probe_t *probe)
 {
-    if (probe == NULL) return;
+    if (probe == NULL) return ESP_ERR_INVALID_ARG;
     probe->active = false;
     if (s_active_probe == probe) s_active_probe = NULL;
-    bundle_transport_stop();
+    return bundle_transport_stop();
 }
 
 /** Caller must be the owner task and hold the board display lock. */
@@ -1595,7 +1595,19 @@ static esp_err_t runtime_probe_cleanup(runtime_probe_t *probe,
 {
     if (probe == NULL) return ESP_ERR_INVALID_ARG;
 
-    runtime_probe_stop_transport(probe);
+    const esp_err_t transport_result = runtime_probe_stop_transport(probe);
+    if (transport_result != ESP_OK) {
+        /* The transport still owns its task, request references and staging
+         * state. Keep the complete inactive probe for a later owner retry. */
+        s_pending_cleanup = (runtime_probe_pending_cleanup_t) {
+            .probe = probe,
+            .retry = retry,
+            .result = result,
+        };
+        ESP_LOGE(TAG, "PROBE checkpoint=transport_stop status=fail cleanup=retained err=%s",
+                 esp_err_to_name(transport_result));
+        return transport_result;
+    }
     const tsx_board_adapter_t *board = probe->board;
     if (!tsx_board_adapter_display_lock(board, 0)) {
         /* Retain the complete inactive probe. A mounted host owns native

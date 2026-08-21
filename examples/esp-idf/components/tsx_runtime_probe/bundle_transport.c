@@ -25,6 +25,9 @@ static const char *TAG = "tsx_bundle_transport";
 #define INACTIVITY_TIMEOUT_MS 2000U
 #define RELOAD_TIMEOUT_MS 5000U
 #define BUNDLE_TRANSPORT_STACK_WORDS (8192U)
+/* A ready-mode END can wait RELOAD_TIMEOUT_MS for the owner handoff. The
+ * margin covers the final USB poll and task scheduling before the join. */
+#define BUNDLE_TRANSPORT_STOP_TIMEOUT_MS (RELOAD_TIMEOUT_MS + 1000U)
 /* (DATA_CHUNK_BASE64_LIMIT / 4) * 3, mirrors packages/bundler/src/transport.ts. */
 #define DATA_CHUNK_MAX_BYTES 288U
 
@@ -54,6 +57,8 @@ typedef struct {
 
 typedef struct {
     runtime_probe_t *probe;
+    /* Non-NULL means the task is diagnostic-only and never stages or reads a runtime. */
+    const char *reject_reason;
     transport_session_t session;
     char line[LINE_BUFFER_CAPACITY];
     size_t line_length;
@@ -63,6 +68,12 @@ static transport_state_t s_state;
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_stopped;
 static volatile bool s_stopping;
+
+static bool is_reject_reason(const char *reason)
+{
+    return reason != NULL && (strcmp(reason, "hardware-mismatch") == 0 ||
+                              strcmp(reason, "hardware-unknown") == 0);
+}
 
 static void write_response(const char *line)
 {
@@ -131,6 +142,13 @@ static bool parse_manifest_fields(transport_session_t *session)
 
 static void handle_begin(transport_state_t *state, const char *base64_manifest)
 {
+    if (state->reject_reason != NULL) {
+        /* Reject before decoding or allocating a manifest/staging buffer. */
+        char response[64];
+        snprintf(response, sizeof(response), "TSXB ERR %s", state->reject_reason);
+        write_response(response);
+        return;
+    }
     if (state->session.active) {
         write_response("TSXB ERR busy");
         return;
@@ -293,7 +311,10 @@ static void handle_end(transport_state_t *state, const char *remainder)
             snprintf(response, sizeof(response), "TSXB ERR timeout");
             break;
     }
-    write_response(response);
+    /* Stop is cooperative. Do not write after the owner has requested the
+     * transport to leave; the task still owns this session until its normal
+     * cleanup below completes. */
+    if (!s_stopping) write_response(response);
     reset_session(session);
 }
 
@@ -377,21 +398,34 @@ static void bundle_transport_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t bundle_transport_start(runtime_probe_t *probe)
+static esp_err_t bundle_transport_start_task(runtime_probe_t *probe,
+                                             const char *reject_reason,
+                                             bool ready_mode)
 {
+    if ((ready_mode && (probe == NULL || reject_reason != NULL)) ||
+        (!ready_mode && (probe != NULL || !is_reject_reason(reject_reason)))) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (s_task != NULL) return ESP_ERR_INVALID_STATE;
     memset(&s_state, 0, sizeof(s_state));
     s_state.probe = probe;
+    s_state.reject_reason = reject_reason;
     s_stopping = false;
     s_stopped = xSemaphoreCreateBinary();
-    if (s_stopped == NULL) return ESP_ERR_NO_MEM;
+    if (s_stopped == NULL) {
+        s_state.probe = NULL;
+        s_state.reject_reason = NULL;
+        return ESP_ERR_NO_MEM;
+    }
 
-    /* The ESP mbedtls SHA port creates its hardware-lock mutex lazily on
-     * first use, and that internal-RAM allocation aborts the chip on OOM
-     * (newlib lock_init_generic). Hash once now, while boot-time internal
-     * heap is guaranteed, so handle_end never triggers the lazy init. */
-    unsigned char warmup_digest[32];
-    mbedtls_sha256((const unsigned char *)"", 0U, warmup_digest, 0);
+    if (ready_mode) {
+        /* The ESP mbedtls SHA port creates its hardware-lock mutex lazily on
+         * first use, and that internal-RAM allocation aborts the chip on OOM
+         * (newlib lock_init_generic). Hash once now, while boot-time internal
+         * heap is guaranteed, so handle_end never triggers the lazy init. */
+        unsigned char warmup_digest[32];
+        mbedtls_sha256((const unsigned char *)"", 0U, warmup_digest, 0);
+    }
 
     usb_serial_jtag_driver_config_t usj_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usj_config.rx_buffer_size = 1024;
@@ -399,6 +433,8 @@ esp_err_t bundle_transport_start(runtime_probe_t *probe)
     if (install_result != ESP_OK) {
         vSemaphoreDelete(s_stopped);
         s_stopped = NULL;
+        s_state.probe = NULL;
+        s_state.reject_reason = NULL;
         return install_result;
     }
 
@@ -406,23 +442,46 @@ esp_err_t bundle_transport_start(runtime_probe_t *probe)
         (void)usb_serial_jtag_driver_uninstall();
         vSemaphoreDelete(s_stopped);
         s_stopped = NULL;
+        s_state.probe = NULL;
+        s_state.reject_reason = NULL;
         return ESP_FAIL;
     }
     return ESP_OK;
 }
 
-void bundle_transport_stop(void)
+esp_err_t bundle_transport_start(runtime_probe_t *probe)
 {
-    if (s_task == NULL) return;
+    return bundle_transport_start_task(probe, NULL, true);
+}
+
+esp_err_t bundle_transport_start_rejected(const char *reason)
+{
+    return bundle_transport_start_task(NULL, reason, false);
+}
+
+esp_err_t bundle_transport_stop(void)
+{
+    if (s_task == NULL) return ESP_OK;
     s_stopping = true;
-    if (s_stopped != NULL) {
-        (void)xSemaphoreTake(s_stopped, portMAX_DELAY);
-        vSemaphoreDelete(s_stopped);
-        s_stopped = NULL;
+    if (s_stopped == NULL) {
+        ESP_LOGE(TAG, "transport_stop invalid_state task_retained=true");
+        return ESP_ERR_INVALID_STATE;
     }
+    if (xSemaphoreTake(s_stopped, pdMS_TO_TICKS(BUNDLE_TRANSPORT_STOP_TIMEOUT_MS)) != pdTRUE) {
+        /* A ready-mode task may still own a reload request and its staging
+         * buffer. Never delete it or free shared state from another task. The
+         * caller retains the probe and retries this join through the existing
+         * cleanup retry path. */
+        ESP_LOGE(TAG, "transport_stop timeout task_retained=true");
+        return ESP_ERR_TIMEOUT;
+    }
+    vSemaphoreDelete(s_stopped);
+    s_stopped = NULL;
     (void)usb_serial_jtag_driver_uninstall();
     reset_session(&s_state.session);
     s_state.probe = NULL;
+    s_state.reject_reason = NULL;
     s_state.line_length = 0;
     s_task = NULL;
+    return ESP_OK;
 }

@@ -12,5 +12,11 @@
  * engine directly, and never writes to flash.
  */
 esp_err_t bundle_transport_start(runtime_probe_t *probe);
-/** Stops and joins the transport task before its probe or staging state is destroyed. */
-void bundle_transport_stop(void);
+/** Starts only the diagnostic responder; BEGIN returns the supplied terminal hardware reason. */
+esp_err_t bundle_transport_start_rejected(const char *reason);
+/**
+ * Requests cooperative stop and joins the transport task before its probe or
+ * staging state is destroyed. On timeout, returns ESP_ERR_TIMEOUT and retains
+ * every transport object for a later controlled retry.
+ */
+esp_err_t bundle_transport_stop(void);

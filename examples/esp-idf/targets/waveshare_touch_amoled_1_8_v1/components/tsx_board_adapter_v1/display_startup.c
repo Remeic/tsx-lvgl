@@ -19,6 +19,9 @@ static const char *TAG = "tsx_display_startup";
  * creates a second I2C owner or a polling retry loop. */
 #define WAVESHARE_V1_TOUCH_BUS_SETTLE_MS (20U)
 #define WAVESHARE_V1_TOUCH_INIT_ATTEMPTS (2U)
+#define WAVESHARE_V1_IDENTITY_PROBE_TIMEOUT_MS (100)
+#define WAVESHARE_V1_FT3168_ADDRESS (0x38U)
+#define WAVESHARE_V1_CST816S_ADDRESS (0x15U)
 
 static bool s_display_started;
 
@@ -34,6 +37,42 @@ static esp_err_t prepare_touch_bus(void)
     ESP_LOGI(TAG, "touch_bus_reset status=%s", result == ESP_OK ? "pass" : "fail");
     vTaskDelay(pdMS_TO_TICKS(WAVESHARE_V1_TOUCH_BUS_SETTLE_MS));
     return result;
+}
+
+static tsx_board_probe_result_t probe_address(i2c_master_bus_handle_t bus, uint16_t address)
+{
+    const esp_err_t result = i2c_master_probe(bus, address, WAVESHARE_V1_IDENTITY_PROBE_TIMEOUT_MS);
+    if (result == ESP_OK) return TSX_BOARD_PROBE_ACK;
+    if (result == ESP_ERR_NOT_FOUND) return TSX_BOARD_PROBE_NO_ACK;
+    return TSX_BOARD_PROBE_ERROR;
+}
+
+esp_err_t tsx_board_adapter_v1_probe_identity(tsx_board_identity_t *out_identity)
+{
+    if (out_identity == NULL) return ESP_ERR_INVALID_ARG;
+    *out_identity = (tsx_board_identity_t) {
+        .state = TSX_BOARD_IDENTITY_UNKNOWN,
+        .evidence_code = TSX_BOARD_EVIDENCE_PROBE_ERROR,
+    };
+
+    /* The BSP owns this bus. Probe only after its bounded reset/settle path;
+     * no panel constructor, expander fallback, or register write is allowed. */
+    if (bsp_i2c_init() != ESP_OK) {
+        ESP_LOGW(TAG, "board_identity status=unknown evidence=%s", out_identity->evidence_code);
+        return ESP_OK;
+    }
+    i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
+    if (bus == NULL || prepare_touch_bus() != ESP_OK) {
+        ESP_LOGW(TAG, "board_identity status=unknown evidence=%s", out_identity->evidence_code);
+        return ESP_OK;
+    }
+
+    const tsx_board_probe_result_t ft3168 = probe_address(bus, WAVESHARE_V1_FT3168_ADDRESS);
+    const tsx_board_probe_result_t cst816s = probe_address(bus, WAVESHARE_V1_CST816S_ADDRESS);
+    *out_identity = tsx_board_classify_identity(ft3168, cst816s);
+    ESP_LOGI(TAG, "board_identity state=%s evidence=%s", tsx_board_identity_state_name(out_identity->state),
+             out_identity->evidence_code);
+    return ESP_OK;
 }
 
 static lv_display_t *start_display_lcd(void)

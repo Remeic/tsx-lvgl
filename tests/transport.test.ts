@@ -560,6 +560,21 @@ test("createPushSession fails on a device ERR while awaiting RDY", () => {
   assert.deepEqual(progress.send, ["TSXB ABORT"]);
 });
 
+test("createPushSession reports hardware reject reasons exactly and sends no data frame", () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const manifest = manifestWith({ byteLength: bytes.length });
+  for (const reason of ["hardware-mismatch", "hardware-unknown"]) {
+    const session = createPushSession(manifest, bytes);
+    const begin = session.begin();
+    assert.equal(begin.state, "awaiting-rdy");
+    const rejected = session.handle({ kind: "line", line: `TSXB ERR ${reason}` });
+    assert.equal(rejected.state, "failed");
+    assert.equal(rejected.failure, `device error: ${reason}`);
+    assert.deepEqual(rejected.send, ["TSXB ABORT"]);
+    assert.equal(rejected.acked, 0);
+  }
+});
+
 test("createPushSession times out while awaiting RDY", () => {
   const bytes = new Uint8Array([1, 2, 3]);
   const manifest = manifestWith({ byteLength: bytes.length });

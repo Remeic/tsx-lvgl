@@ -210,7 +210,24 @@ Device to host:
 - `TSXB ERR <reason>` — terminal for this attempt. `reason` is one of the
   nine `RuntimeBundleRejection` values or `frame`, `base64`, `sequence`,
   `overflow`, `sha256`, `timeout`, `busy`, `malformed-manifest`,
-  `non-ascii`, `evaluate-rolled-back`.
+  `non-ascii`, `evaluate-rolled-back`, `hardware-mismatch`, or
+  `hardware-unknown`.
+
+Before the V1 display/runtime composition starts, the adapter performs a
+bounded, read-only identity check through the existing BSP I2C owner. An ACK
+at `0x38` with a reliable NACK at `0x15` is the only V1 `matched` result. An
+ACK at `0x15` is V2 `mismatch`, including when the `0x38` probe errors; both
+ACKs are ambiguous `unknown`; error combinations without a unique positive ACK
+are `unknown`. Identity is logged as one bounded checkpoint:
+`PROBE checkpoint=board_identity status=pass|mismatch|unknown target=<id>
+evidence=<code>`.
+
+If identity is not matched, the target does not create display, provider,
+QuickJS, or app state. A minimal diagnostic transport remains available:
+`TSXB BEGIN` receives exactly one terminal hardware error, with no `RDY`,
+staging allocation, `DATA` ACK, or runtime generation call. The protocol
+grammar and version remain unchanged. A matched target keeps the ready-mode
+handshake and optional touch/motion capability semantics unchanged.
 
 Rules:
 
@@ -228,6 +245,10 @@ Rules:
   `maxBytes` → `ERR overflow`. A transfer while one is active → `ERR busy`.
 - Non-`TSXB` lines in either direction are noise (device logs interleave on
   the same console) and must be ignored, never treated as protocol errors.
+- Teardown sets a cooperative stop flag and joins the transport through the
+  full reload handoff budget plus a scheduling margin. A join timeout returns
+  failure and retains the task, reload request references, queue, and staging
+  state for the owner-task cleanup retry; it never force-deletes a live task.
 
 ### Consumer device development command
 
