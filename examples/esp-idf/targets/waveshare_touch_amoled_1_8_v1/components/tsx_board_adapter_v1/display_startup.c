@@ -47,16 +47,6 @@ static tsx_board_probe_result_t probe_address(i2c_master_bus_handle_t bus, uint1
     return TSX_BOARD_PROBE_ERROR;
 }
 
-static const char *identity_state_name(tsx_board_identity_state_t state)
-{
-    switch (state) {
-        case TSX_BOARD_IDENTITY_MATCHED: return "pass";
-        case TSX_BOARD_IDENTITY_MISMATCH: return "mismatch";
-        case TSX_BOARD_IDENTITY_UNKNOWN: return "unknown";
-    }
-    return "unknown";
-}
-
 esp_err_t tsx_board_adapter_v1_probe_identity(tsx_board_identity_t *out_identity)
 {
     if (out_identity == NULL) return ESP_ERR_INVALID_ARG;
@@ -80,7 +70,7 @@ esp_err_t tsx_board_adapter_v1_probe_identity(tsx_board_identity_t *out_identity
     const tsx_board_probe_result_t ft3168 = probe_address(bus, WAVESHARE_V1_FT3168_ADDRESS);
     const tsx_board_probe_result_t cst816s = probe_address(bus, WAVESHARE_V1_CST816S_ADDRESS);
     *out_identity = tsx_board_classify_identity(ft3168, cst816s);
-    ESP_LOGI(TAG, "board_identity state=%s evidence=%s", identity_state_name(out_identity->state),
+    ESP_LOGI(TAG, "board_identity state=%s evidence=%s", tsx_board_identity_state_name(out_identity->state),
              out_identity->evidence_code);
     return ESP_OK;
 }

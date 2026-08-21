@@ -36,3 +36,13 @@ tsx_board_identity_t tsx_board_classify_identity(tsx_board_probe_result_t ft3168
         .evidence_code = TSX_BOARD_EVIDENCE_PROBE_ERROR,
     };
 }
+
+const char *tsx_board_identity_state_name(tsx_board_identity_state_t state)
+{
+    switch (state) {
+        case TSX_BOARD_IDENTITY_MATCHED: return "pass";
+        case TSX_BOARD_IDENTITY_MISMATCH: return "mismatch";
+        case TSX_BOARD_IDENTITY_UNKNOWN: return "unknown";
+    }
+    return "unknown";
+}

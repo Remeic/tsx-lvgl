@@ -290,7 +290,7 @@ test("UART acceptance keeps optional touch and motion capability checks fail-sof
   assert.match(checker, /--target <board-id>/);
   assert.match(checker, /observedTarget !== target/);
   assert.match(checker, /latestIdentityStatus/);
-  assert.match(checker, /identityOrderFailures/);
+  assert.match(checker, /identityGateFailures/);
   assert.match(checker, /CANONICAL_TARGET_PATTERN/);
   assert.match(checker, /IDENTITY_EVIDENCE_BY_STATUS = new Map/);
   assert.match(checker, /\["pass", new Set\(\["v1-ft-ack"\]\)\]/);

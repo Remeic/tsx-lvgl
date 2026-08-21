@@ -24,6 +24,7 @@ static const runtime_probe_assets_t RUNTIME_ASSETS = {
 
 static const char *TAG = "tsx_runtime_probe";
 static RTC_DATA_ATTR uint32_t probe_boot_count;
+static RTC_DATA_ATTR uint32_t s_reject_reset_count;
 
 /* QuickJS mount and the owner pump share one bounded task. The board cannot
  * reliably reserve a second native owner stack after the runtime and
@@ -37,6 +38,9 @@ static RTC_DATA_ATTR uint32_t probe_boot_count;
 #define RUNTIME_PROBE_BOOT_STACK_WORDS (32768U)
 #define REJECT_TRANSPORT_START_ATTEMPTS (3U)
 #define REJECT_TRANSPORT_RETRY_BACKOFF_MS (100U)
+/* Bounded reject-mode resets: after this many consecutive diagnostic-transport
+ * failures the board halts in diagnostic mode instead of looping forever. */
+#define REJECT_RESET_LIMIT (3U)
 
 static void runtime_probe_owner_task(void *arg)
 {
@@ -53,16 +57,6 @@ static void runtime_probe_owner_task(void *arg)
                  esp_err_to_name(result));
     }
     vTaskDelete(NULL);
-}
-
-static const char *identity_status(tsx_board_identity_state_t state)
-{
-    switch (state) {
-        case TSX_BOARD_IDENTITY_MATCHED: return "pass";
-        case TSX_BOARD_IDENTITY_MISMATCH: return "mismatch";
-        case TSX_BOARD_IDENTITY_UNKNOWN: return "unknown";
-    }
-    return "unknown";
 }
 
 static bool run_rejected_diagnostic_transport(const char *reason)
@@ -110,7 +104,7 @@ void app_main(void)
     }
     const char *target_id = tsx_board_adapter_target_id(board);
     ESP_LOGI(TAG, "PROBE checkpoint=board_identity status=%s target=%s evidence=%s",
-             identity_status(identity.state), target_id != NULL ? target_id : "unknown",
+             tsx_board_identity_state_name(identity.state), target_id != NULL ? target_id : "unknown",
              identity.evidence_code != NULL ? identity.evidence_code : TSX_BOARD_EVIDENCE_PROBE_ERROR);
 
     if (!tsx_board_identity_is_matched(identity)) {
@@ -119,9 +113,17 @@ void app_main(void)
                                  : "hardware-unknown";
         if (!run_rejected_diagnostic_transport(reason)) {
             /* The bounded retry did not establish the recovery channel. A
-             * controlled reset gives the board a deterministic next attempt
-             * without falling into a silent infinite sleep. */
-            esp_restart();
+             * controlled reset gives the board a deterministic next attempt;
+             * the RTC counter bounds the loop and halts instead of resetting
+             * forever on a dead board. The counter clears on power-on or a
+             * matched boot. */
+            s_reject_reset_count += 1U;
+            if (s_reject_reset_count >= REJECT_RESET_LIMIT) {
+                ESP_LOGE(TAG, "PROBE checkpoint=bundle_transport_start status=terminal mode=reject reason=%s action=halt resets=%u",
+                         reason, (unsigned)s_reject_reset_count);
+            } else {
+                esp_restart();
+            }
             return;
         }
         remain_in_rejected_diagnostic_mode();
@@ -131,6 +133,7 @@ void app_main(void)
         ESP_LOGE(TAG, "PROBE checkpoint=board_start status=fail");
         return;
     }
+    s_reject_reset_count = 0;
 
     ESP_LOGI(TAG, "PROBE checkpoint=board_start status=pass");
 

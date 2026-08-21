@@ -40,6 +40,11 @@ if (!logPath) {
   console.error(usage());
   process.exit(2);
 }
+if (positional.length > 1) {
+  console.error(`unexpected extra arguments: ${positional.slice(1).join(", ")}`);
+  console.error(usage());
+  process.exit(2);
+}
 
 const CANONICAL_TARGET_MAX_LENGTH = 64;
 const CANONICAL_TARGET_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
@@ -78,7 +83,7 @@ const optionalCapabilities = new Map([
 ]);
 const checkpoints = new Map();
 const events = [];
-for (const match of log.matchAll(/PROBE checkpoint=(\S+) status=(\S+)([^\r\n]*)/g)) {
+for (const match of log.matchAll(/^PROBE checkpoint=(\S+) status=(\S+)([^\r\n]*)/gm)) {
   const checkpoint = match[1];
   const status = match[2];
   const attributes = new Map();
@@ -101,44 +106,44 @@ for (const [checkpoint, allowed] of optionalCapabilities) {
  * This keeps a later `pass` from hiding an earlier rejected boot in a mixed
  * UART capture and makes the gate useful even when a checkpoint is duplicated. */
 let latestIdentityStatus;
-const identityOrderFailures = new Set();
+const identityGateFailures = new Set();
 for (const { checkpoint, status, observedTarget, evidenceCode } of events) {
   if (checkpoint === "board_identity") {
     if (!isCanonicalTarget(observedTarget)) {
-      identityOrderFailures.add(`board_identity (target=${observedTarget ?? "missing"})`);
+      identityGateFailures.add(`board_identity (target=${observedTarget ?? "missing"})`);
     }
     const allowedEvidence = IDENTITY_EVIDENCE_BY_STATUS.get(status);
     if (!allowedEvidence?.has(evidenceCode) || !IDENTITY_EVIDENCE_CODES.has(evidenceCode)) {
-      identityOrderFailures.add(`board_identity (status=${status} evidence=${evidenceCode ?? "missing"})`);
+      identityGateFailures.add(`board_identity (status=${status} evidence=${evidenceCode ?? "missing"})`);
     }
     if (target !== undefined && observedTarget !== target) {
-      identityOrderFailures.add(`board_identity (target=${observedTarget ?? "missing"})`);
+      identityGateFailures.add(`board_identity (target=${observedTarget ?? "missing"})`);
     }
     if (status !== "pass") {
       /* A later positive event cannot erase an earlier rejected observation in
        * a mixed capture. The operator must split the capture or investigate
        * the failed boot before acceptance. */
-      identityOrderFailures.add(`board_identity (status=${status})`);
+      identityGateFailures.add(`board_identity (status=${status})`);
     }
     latestIdentityStatus = status;
     continue;
   }
   if (required.includes(checkpoint) || optionalCapabilities.has(checkpoint)) {
     if (latestIdentityStatus !== "pass") {
-      identityOrderFailures.add(`${checkpoint} (identity=${latestIdentityStatus ?? "missing"})`);
+      identityGateFailures.add(`${checkpoint} (identity=${latestIdentityStatus ?? "missing"})`);
     }
   }
 }
 if (target !== undefined && !isCanonicalTarget(target)) {
-  identityOrderFailures.add(`requested target (invalid=${target})`);
+  identityGateFailures.add(`requested target (invalid=${target})`);
 }
-failures.push(...identityOrderFailures);
+failures.push(...identityGateFailures);
 if (failures.length > 0) {
   console.error(`runtime probe incomplete: ${failures.join(", ")}`);
   for (const checkpoint of [...required, ...optionalCapabilities.keys()]) {
     console.error(`  ${checkpoint}: ${checkpoints.get(checkpoint) ?? "missing"}`);
   }
-  for (const failure of identityOrderFailures) console.error(`  ${failure}`);
+  for (const failure of identityGateFailures) console.error(`  ${failure}`);
   process.exit(1);
 }
 

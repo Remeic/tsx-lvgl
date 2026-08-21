@@ -45,3 +45,6 @@ static inline bool tsx_board_identity_is_matched(tsx_board_identity_t identity)
 {
     return identity.state == TSX_BOARD_IDENTITY_MATCHED;
 }
+
+/** Single static checkpoint name for a state: "pass", "mismatch" or "unknown". */
+const char *tsx_board_identity_state_name(tsx_board_identity_state_t state);
