@@ -97,6 +97,19 @@ adapters. They must satisfy the same contracts. QuickJS-NG lifecycle, job
 pumping, memory limits and serialized ownership are explicit host concerns;
 LVGL mutation occurs only through the owner task or its documented lock.
 
+The ESP-IDF board composition is target-local. The shared
+`examples/esp-idf/components/tsx_runtime_probe` component owns QuickJS/LVGL
+runtime orchestration, the single owner task, display-lock boundaries and USB
+bundle transport; it imports no BSP or provider implementation. Each target
+selects its pinned BSP/LVGL dependencies, embedded files and generated
+`tsx_board_target_id.h`, then links one adapter implementing the opaque board,
+display, motion and Wi-Fi ports. The V1 target keeps the existing
+SH8601/FT3168 startup and optional-provider behavior behind that adapter. This
+composition has no runtime board detection or registry switch. The V1 adapter's
+typed identity seam returns `TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED` with
+`ESP_OK` as migration metadata only; it does not observe physical identity or
+gate readiness. Plan 004 owns matched, mismatched and unknown identity states.
+
 Consumer applications are not composition roots. They import `@tsx-lvgl/sdk`
 only; the SDK facade adapts the app bundle's public module specifiers to the
 same device-kernel aliases. Core/runtime/sensors/bundler/device workspace

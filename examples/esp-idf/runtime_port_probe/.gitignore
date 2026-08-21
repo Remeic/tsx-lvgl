@@ -1,12 +1,2 @@
-# ESP-IDF build/dependency output — already ignored repo-wide by the root
-# .gitignore (build/, managed_components/, sdkconfig, sdkconfig.old,
-# dependencies.lock). Restated here for anyone reading this directory in
-# isolation.
-build/
-managed_components/
-sdkconfig
-sdkconfig.old
-
-# Mirrors examples/esp-idf/tsx_lvgl_v1: dependencies.lock is tracked so the
-# component manager's resolution is reproducible without a live registry hit.
-!dependencies.lock
+# The V1 ESP-IDF composition root moved to targets/waveshare_touch_amoled_1_8_v1.
+# Keep this compatibility directory free of generated firmware output.

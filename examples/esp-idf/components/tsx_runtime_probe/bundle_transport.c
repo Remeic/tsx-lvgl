@@ -179,7 +179,8 @@ static void handle_begin(transport_state_t *state, const char *base64_manifest)
 
     char response[160];
     snprintf(response, sizeof(response), "TSXB RDY maxBytes=%u protocol=%d board=%s lastGeneration=%u",
-             (unsigned)RUNTIME_BUNDLE_MAX_BYTES, RUNTIME_PROBE_PROTOCOL_VERSION, RUNTIME_PROBE_BOARD_ID,
+             (unsigned)RUNTIME_BUNDLE_MAX_BYTES, RUNTIME_PROBE_PROTOCOL_VERSION,
+             runtime_probe_target_id(state->probe),
              (unsigned)runtime_probe_last_generation(state->probe));
     write_response(response);
 }

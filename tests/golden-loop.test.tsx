@@ -190,7 +190,7 @@ test("the device-backed TSXB fixture commits valid input and rejects malformed/e
 
 test("the embedded Pomodoro bundle is generated from the canonical SDK entry", () => {
   const generated = compilePomodoro(pomodoroSource, 1);
-  const embeddedDirectory = join(repoRoot, "examples/esp-idf/runtime_port_probe/main");
+  const embeddedDirectory = join(repoRoot, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main");
   assert.equal(readFileSync(join(embeddedDirectory, "app.g1.js"), "utf8"), generated.code);
   assert.deepEqual(JSON.parse(readFileSync(join(embeddedDirectory, "app.g1.manifest.json"), "utf8")), generated.manifest);
 });

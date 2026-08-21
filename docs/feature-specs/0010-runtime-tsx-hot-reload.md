@@ -257,7 +257,8 @@ The deterministic host path proves the slice diagrammed in
 the real QuickJS-NG adapter remains a board-host gate.
 
 The committed physical runtime-port probe under
-`examples/esp-idf/runtime_port_probe` proves only QuickJS-NG, direct LVGL
+`examples/esp-idf/components/tsx_runtime_probe` plus the V1 target composition
+proves only QuickJS-NG, direct LVGL
 calls, timer delivery, sensor-shaped data and touch callback feasibility on
 the target. Board captures and other transient physical evidence are not
 committed; the probe is not reconciler or hot-reload evidence.

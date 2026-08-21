@@ -46,14 +46,14 @@ async function fixture(t) {
     ]);
   });
   const profile = resolveBoardProfile(TARGET, root);
-  await mkdir(resolve(root, "examples/esp-idf/runtime_port_probe/build/partition_table"), { recursive: true });
+  await mkdir(resolve(root, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/partition_table"), { recursive: true });
   const artifactBytes = Buffer.from("host-generated artifact");
   await writeFile(profile.artifact, artifactBytes);
   await writeFile(profile.partitionTableBinary, v1Table);
   await writeFile(profile.buildMetadataPath, JSON.stringify({
     flash_files: {
       "0x9000": "partition_table/partition-table.bin",
-      "0x10000": "tsx_lvgl_runtime_port_probe.bin",
+      "0x10000": "tsx_lvgl_waveshare_v1.bin",
     },
   }));
   await createArtifactDescriptor({

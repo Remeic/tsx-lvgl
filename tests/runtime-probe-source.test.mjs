@@ -7,24 +7,30 @@ import boardCatalog from "../packages/sdk/src/board-catalog.json" with { type: "
 import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
 import { resolveBoardProfile } from "../scripts/board-profile.mjs";
 
-const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
-const runtimeHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.h", import.meta.url), "utf8");
-const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
-const transportHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.h", import.meta.url), "utf8");
-const appMain = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/app_main.c", import.meta.url), "utf8");
-const lvglHost = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.c", import.meta.url), "utf8");
-const component = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
-const mainCmake = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/CMakeLists.txt", import.meta.url), "utf8");
+const source = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/runtime_probe.c", import.meta.url), "utf8");
+const runtimeHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/include/runtime_probe.h", import.meta.url), "utf8");
+const transport = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/bundle_transport.c", import.meta.url), "utf8");
+const transportHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/include/bundle_transport.h", import.meta.url), "utf8");
+const appMain = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/app_main.c", import.meta.url), "utf8");
+const lvglHost = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/lvgl_host.c", import.meta.url), "utf8");
+const component = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/waveshare_v1_wifi/waveshare_v1_wifi.c", import.meta.url), "utf8");
+const mainCmake = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/CMakeLists.txt", import.meta.url), "utf8");
+const runtimeCmake = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/CMakeLists.txt", import.meta.url), "utf8");
+const adapterCmake = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/CMakeLists.txt", import.meta.url), "utf8");
+const adapterSource = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/tsx_board_adapter_v1.c", import.meta.url), "utf8");
+const adapterContract = readFileSync(new URL("../examples/esp-idf/components/tsx_board_adapter/include/tsx_board_adapter.h", import.meta.url), "utf8");
+const targetReadme = readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/README.md", import.meta.url), "utf8");
 const checker = readFileSync(new URL("../tools/check-runtime-probe.mjs", import.meta.url), "utf8");
 const kernelBuilder = readFileSync(new URL("../scripts/build-kernel.mjs", import.meta.url), "utf8");
+const targetIdGenerator = readFileSync(new URL("../scripts/generate-board-target-id.mjs", import.meta.url), "utf8");
 const embedRuntimeApp = readFileSync(new URL("../scripts/embed-runtime-app.mjs", import.meta.url), "utf8");
-const displayStartup = existsSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url))
-  ? readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/display_startup.c", import.meta.url), "utf8")
+const displayStartup = existsSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/display_startup.c", import.meta.url))
+  ? readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/components/tsx_board_adapter_v1/display_startup.c", import.meta.url), "utf8")
   : "";
-const lvglHostHeader = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/lvgl_host.h", import.meta.url), "utf8");
+const lvglHostHeader = readFileSync(new URL("../examples/esp-idf/components/tsx_runtime_probe/include/lvgl_host.h", import.meta.url), "utf8");
 const target = resolveBoardProfile("waveshare-touch-amoled-1.8-v1", resolve(new URL("..", import.meta.url).pathname));
 const embeddedManifest = JSON.parse(readFileSync(target.embeddedAppManifestPath, "utf8"));
-const shakefaceManifest = JSON.parse(readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/shakeface.g1.manifest.json", import.meta.url), "utf8"));
+const shakefaceManifest = JSON.parse(readFileSync(new URL("../examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main/shakeface.g1.manifest.json", import.meta.url), "utf8"));
 
 /** SCREAMING_SNAKE_CASE -> camelCase, e.g. "BACKGROUND_COLOR" -> "backgroundColor". */
 function toCamelCase(screamingSnakeCase) {
@@ -69,27 +75,76 @@ function createReservationFence(slotCount = 4) {
 }
 
 test("runtime probe trims the ESP-IDF embedded kernel terminator before QuickJS evaluation", () => {
-  assert.match(source, /size_t kernel_length = \(size_t\)\(_binary_kernel_js_end - _binary_kernel_js_start\);/);
-  assert.match(source, /if \(kernel_length > 0U && _binary_kernel_js_start\[kernel_length - 1U\] == '\\0'\) kernel_length--;/);
+  assert.match(runtimeHeader, /runtime_probe_assets_t/);
+  assert.match(source, /size_t kernel_length = \(size_t\)\(probe->assets\.kernel_end - probe->assets\.kernel_start\);/);
+  assert.match(source, /if \(kernel_length > 0U && probe->assets\.kernel_start\[kernel_length - 1U\] == '\\0'\) kernel_length--;/);
+  assert.match(appMain, /_binary_kernel_js_end/);
   assert.match(kernelBuilder, /const KERNEL_BUDGET_BYTES = 128 \* 1024;/);
   assert.match(kernelBuilder, /finalBytes > KERNEL_BUDGET_BYTES/);
 });
 
 test("runtime probe uses stable embedded-app filenames so the app can change without C edits", () => {
   assert.match(mainCmake, /EMBED_TXTFILES "kernel\.js" "app\.g1\.js" "app\.g1\.manifest\.json"/);
-  assert.match(source, /_binary_app_g1_js_start/);
-  assert.match(source, /_binary_app_g1_manifest_json_start/);
+  assert.match(appMain, /_binary_app_g1_js_start/);
+  assert.match(appMain, /_binary_app_g1_manifest_json_start/);
   assert.match(embedRuntimeApp, /always use the stable app\.g1\.\* names/);
 });
 
 test("selected V1 target and committed embedded manifest share the canonical identity", () => {
   const catalogBoard = boardCatalog.boards.find((board) => board.id === target.boardId);
   assert.ok(catalogBoard, `catalog must contain target board ${target.boardId}`);
-  const escapedBoardId = catalogBoard.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   assert.equal(target.boardId, catalogBoard.id);
   assert.equal(embeddedManifest.boardId, catalogBoard.id);
   assert.equal(shakefaceManifest.boardId, catalogBoard.id);
-  assert.match(runtimeHeader, new RegExp(`RUNTIME_PROBE_BOARD_ID "${escapedBoardId}"`));
+  assert.match(adapterSource, /TSX_BOARD_TARGET_ID/);
+  assert.match(adapterCmake, /tsx_board_target_id\.h/);
+  assert.match(adapterContract, /const char \*\(\*target_id\)/);
+  assert.match(targetIdGenerator, /profile\.boardId/);
+  assert.match(targetIdGenerator, /TSX_BOARD_TARGET_ID/);
+  assert.doesNotMatch(adapterSource, /waveshare\.esp32s3\.touch-amoled-1\.8\.v1/);
+});
+
+test("shared runtime component has no target BSP or provider dependency", () => {
+  const sharedSources = [runtimeHeader, source, transportHeader, transport, lvglHost, lvglHostHeader, runtimeCmake].join("\n");
+  assert.doesNotMatch(sharedSources, /waveshare_v1|WAVESHARE_V1|bsp\//);
+  assert.doesNotMatch(runtimeCmake, /waveshare|bsp|provider/i);
+  assert.match(adapterSource, /bsp\/esp32_s3_touch_amoled_1_8\.h/);
+  assert.match(adapterSource, /waveshare_v1_sensors\.h/);
+  assert.match(adapterSource, /waveshare_v1_wifi\.h/);
+  assert.match(adapterCmake, /if\(NOT EXISTS[\s\S]*tsx_board_target_id\.h/);
+  assert.match(adapterCmake, /message\(FATAL_ERROR/);
+  assert.match(adapterSource, /static const tsx_board_adapter_t adapter/);
+  assert.match(adapterSource, /static esp_err_t v1_probe_identity\(void \*context, tsx_board_identity_result_t \*out_result\)/);
+  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;/);
+  assert.match(adapterSource, /\*out_result = TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED;[\s\S]*return ESP_OK;/);
+  assert.match(adapterContract, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
+  assert.match(adapterContract, /probe_identity\)\(void \*context, tsx_board_identity_result_t \*out_result\)/);
+  assert.match(targetReadme, /TSX_BOARD_IDENTITY_COMPILE_TIME_ACCEPTED/);
+  assert.match(targetReadme, /does not observe physical identity or\s+gate readiness/);
+});
+
+test("the shared owner entry owns bootstrap, loop, and lock-scoped cleanup", () => {
+  assert.match(runtimeHeader, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
+  assert.match(source, /esp_err_t runtime_probe_run\(const tsx_board_adapter_t \*board/);
+  assert.match(appMain, /runtime_probe_run\(board, &RUNTIME_ASSETS\)/);
+  assert.doesNotMatch(appMain, /bundle_transport_start|runtime_probe_start_sensors|runtime_probe_start_connectivity|runtime_probe_boot|runtime_probe_destroy/);
+  assert.doesNotMatch(runtimeHeader, /runtime_probe_destroy/);
+  assert.doesNotMatch(source, /runtime_probe_destroy_impl|lvgl_host_discard_without_lvgl/);
+  assert.match(source, /RUNTIME_PROBE_CLEANUP_RETRY_RESTART/);
+  assert.match(source, /RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT/);
+  assert.match(source, /const esp_err_t transport_result = bundle_transport_start\(probe\);[\s\S]*const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);[\s\S]*const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
+  assert.match(source, /runtime_probe_task\(probe\);\s*return runtime_probe_cleanup\(probe, RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT, ESP_OK\);/);
+  assert.match(source, /runtime_probe_stop_transport\(probe\);[\s\S]*tsx_board_adapter_display_lock\(board, 0\)/);
+  assert.match(source, /runtime_probe_destroy_lvgl_locked\(probe\);\s*tsx_board_adapter_display_unlock\(board\);\s*[\s\S]*runtime_probe_release_resources\(probe\);/);
+  assert.match(source, /s_pending_cleanup = \(runtime_probe_pending_cleanup_t\) \{[\s\S]*cleanup=retained/);
+  assert.match(source, /const runtime_probe_pending_cleanup_t pending = s_pending_cleanup;[\s\S]*if \(pending\.retry == RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT\) return pending\.result;/);
+  assert.match(source, /if \(pending\.retry == RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT\) return pending\.result;[\s\S]*runtime_probe_start\(board, assets, &probe\)/);
+  assert.match(source, /runtime_probe_cleanup\(\s*probe, RUNTIME_PROBE_CLEANUP_RETRY_RESTART, ESP_OK\)[\s\S]*if \(cleanup_result != ESP_OK\) return cleanup_result;[\s\S]*continue;/);
+  assert.match(source, /runtime_probe_cleanup\(\s*probe, RUNTIME_PROBE_CLEANUP_RETRY_RETURN_RESULT, result\)[\s\S]*if \(cleanup_result != ESP_OK\) return cleanup_result;[\s\S]*return result;/);
+  assert.match(source, /memset\(&s_pending_cleanup, 0, sizeof\(s_pending_cleanup\)\);\s*runtime_probe_release_resources\(probe\);/);
+  assert.doesNotMatch(source, /\(void\)runtime_probe_cleanup/);
+  assert.match(lvglHostHeader, /lvgl_host_destroy/);
+  assert.match(lvglHost, /void lvgl_host_destroy\(lvgl_host_t \*host\)/);
 });
 
 test("native runtime diagnostics are bounded metadata and never stringify payloads", () => {
@@ -115,7 +170,7 @@ test("reload responses stay within the documented TSXB error vocabulary", () => 
 });
 
 test("display startup owns one bounded FT3168 recovery path and keeps SH8601 alive", () => {
-  assert.match(mainCmake, /display_startup\.c/);
+  assert.match(adapterCmake, /display_startup\.c/);
   assert.match(displayStartup, /bsp_i2c_init\(\)/);
   assert.match(displayStartup, /i2c_master_bus_handle_t bus = bsp_i2c_get_handle\(\);/);
   assert.match(displayStartup, /i2c_master_bus_reset\(bus\)/);
@@ -127,7 +182,7 @@ test("display startup owns one bounded FT3168 recovery path and keeps SH8601 ali
   assert.doesNotMatch(displayStartup, /lvgl_port_add_disp_rgb/);
   assert.doesNotMatch(displayStartup, /bsp_display_start\(/);
   assert.doesNotMatch(displayStartup, /i2c_new_master_bus\(/);
-  assert.match(appMain, /waveshare_v1_display_start\(\)/);
+  assert.match(appMain, /tsx_board_adapter_display_start\(board\)/);
   assert.doesNotMatch(appMain, /ESP_ERROR_CHECK\(bsp_display_brightness_set/);
 });
 
@@ -154,16 +209,16 @@ test("native host gives Screen and View a centered vertical layout", () => {
 });
 
 test("optional providers report unavailable state without aborting application boot", () => {
-  assert.match(appMain, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
-  assert.match(appMain, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
-  assert.match(appMain, /status=unavailable/);
+  assert.match(source, /const esp_err_t sensors_result = runtime_probe_start_sensors\(probe\);/);
+  assert.match(source, /const esp_err_t connectivity_result = runtime_probe_start_connectivity\(probe\);/);
+  assert.match(source, /status=unavailable/);
   assert.match(appMain, /#define RUNTIME_PROBE_BOOT_STACK_WORDS \(32768U\)/);
   assert.doesNotMatch(appMain, /xTaskCreate\(runtime_probe_task/);
-  assert.match(appMain, /runtime_probe_task\(probe\);/);
-  assert.ok(appMain.indexOf("bundle_transport_start(probe)") < appMain.indexOf("runtime_probe_start_sensors(probe)"));
-  assert.ok(appMain.indexOf("runtime_probe_start_connectivity(probe)") < appMain.indexOf("runtime_probe_boot(probe)"));
-  assert.doesNotMatch(appMain, /if \(runtime_probe_start_sensors\(probe\)/);
-  assert.doesNotMatch(appMain, /if \(runtime_probe_start_connectivity\(probe\)/);
+  assert.doesNotMatch(appMain, /runtime_probe_task\(probe\)/);
+  assert.ok(source.indexOf("bundle_transport_start(probe)") < source.indexOf("runtime_probe_start_sensors(probe)"));
+  assert.ok(source.indexOf("runtime_probe_start_connectivity(probe)") < source.indexOf("runtime_probe_boot(probe)"));
+  assert.doesNotMatch(source, /if \(runtime_probe_start_sensors\(probe\)/);
+  assert.doesNotMatch(source, /if \(runtime_probe_start_connectivity\(probe\)/);
   assert.doesNotMatch(source, /probe == NULL \|\| probe->sensors == NULL \|\| probe->wifi == NULL/);
   assert.match(source, /if \(probe->sensors == NULL\) \{/);
   assert.match(source, /static void log_sensor_checkpoint\(runtime_probe_t \*probe, bool available\)/);
@@ -202,7 +257,8 @@ test("lvgl host stages widget creation for reparenting", () => {
 
 test("runtime probe submits the bounded motion period to the QMI cache provider", () => {
   assert.match(source, /JSValue period = JS_GetPropertyStr\(context, argv\[0\], "periodMs"\);/);
-  assert.match(source, /waveshare_v1_sensors_set_period_ms\(probe->sensors, \(uint32_t\)period_ms\)/);
+  assert.match(source, /tsx_board_adapter_motion_set_period_ms\(/);
+  assert.match(adapterSource, /waveshare_v1_sensors_set_period_ms\(/);
 });
 
 test("runtime probe builds each motion event from the snapshot it already read", () => {
@@ -213,13 +269,14 @@ test("runtime probe builds each motion event from the snapshot it already read",
 });
 
 test("runtime probe installs Wi-Fi through the existing board owner queue before app boot", () => {
-  assert.match(mainCmake, /waveshare_v1_wifi/);
+  assert.match(adapterCmake, /waveshare_v1_wifi/);
+  assert.match(adapterSource, /waveshare_v1_wifi_submit\(/);
   assert.match(source, /JS_SetPropertyStr\(context, native, "board", board\)/);
   assert.doesNotMatch(source, /JS_SetPropertyStr\(context, native, "wifi"/);
   assert.match(source, /emit_wifi_events\(probe\);/);
   assert.match(source, /"instanceId", JS_NewString\(context, "wifi\.station"\)/);
   assert.match(source, /"correlationId"/);
-  assert.ok(appMain.indexOf("runtime_probe_start_connectivity(probe)") < appMain.indexOf("runtime_probe_boot(probe)"));
+  assert.ok(source.indexOf("runtime_probe_start_connectivity(probe)") < source.indexOf("runtime_probe_boot(probe)"));
 });
 
 test("Wi-Fi provider keeps build-local credentials redacted and joins its worker before teardown", () => {

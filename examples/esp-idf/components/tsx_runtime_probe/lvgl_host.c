@@ -35,6 +35,15 @@ struct lvgl_host {
  * recover the host without heap-allocating a `{host, handle}` pair per
  * clickable widget.
  */
+static void clear_entry(lvgl_host_entry_t *entry)
+{
+    entry->used = false;
+    entry->object = NULL;
+    entry->label = NULL;
+    entry->parent_id = 0;
+    entry->clickable = false;
+}
+
 static lvgl_host_t *s_active_host;
 
 static lvgl_host_entry_t *entry_at(lvgl_host_t *host, int id)
@@ -82,11 +91,7 @@ void lvgl_host_destroy(lvgl_host_t *host)
         if (entry->used && entry->object != NULL && lv_obj_get_parent(entry->object) == NULL && root_count < LVGL_HOST_MAX_HANDLES) {
             roots[root_count++] = entry->object;
         }
-        entry->used = false;
-        entry->object = NULL;
-        entry->label = NULL;
-        entry->parent_id = 0;
-        entry->clickable = false;
+        clear_entry(entry);
     }
     for (uint32_t index = 0; index < root_count; index++) lv_obj_delete(roots[index]);
     if (host->blank_screen != NULL) {
@@ -115,11 +120,7 @@ static void invalidate_descendants(lvgl_host_t *host, int parent_id)
         if (!descendant->used || descendant->parent_id != parent_id) continue;
         const int child_id = (int)index + 1;
         invalidate_descendants(host, child_id);
-        descendant->used = false;
-        descendant->object = NULL;
-        descendant->label = NULL;
-        descendant->parent_id = 0;
-        descendant->clickable = false;
+        clear_entry(descendant);
     }
 }
 
@@ -252,11 +253,7 @@ void lvgl_host_dispose(lvgl_host_t *host, int id)
     lvgl_host_entry_t *entry = entry_at(host, id);
     if (entry == NULL) return;
     if (entry->object != NULL) lv_obj_delete(entry->object);
-    entry->used = false;
-    entry->object = NULL;
-    entry->label = NULL;
-    entry->parent_id = 0;
-    entry->clickable = false;
+    clear_entry(entry);
 
     /* The runtime normally disposes descendants first, but the native ABI is
      * recursive by contract. Invalidate any still-tracked descendants so a

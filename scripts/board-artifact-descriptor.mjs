@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
+  PARTITION_ENTRY_SIZE,
   PARTITION_TABLE_SIZE,
   parseEspPartitionTable,
 } from "./esp-partition-table.mjs";
@@ -39,6 +40,17 @@ function compactJson(value) {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** ESP-IDF emits the used partition-table records without sector padding. */
+function normalizeGeneratedPartitionTable(bytes) {
+  if (bytes.byteLength === PARTITION_TABLE_SIZE) return bytes;
+  if (bytes.byteLength === 0 || bytes.byteLength > PARTITION_TABLE_SIZE || bytes.byteLength % PARTITION_ENTRY_SIZE !== 0) {
+    fail(`built partition table must be a complete sector or a record-aligned prefix`, "PARTITION_TABLE_INVALID");
+  }
+  const padded = Buffer.alloc(PARTITION_TABLE_SIZE, 0xff);
+  bytes.copy(padded);
+  return padded;
 }
 
 function assertInteger(value, label, { positive = false } = {}) {
@@ -427,7 +439,9 @@ export async function createArtifactDescriptor({
       flashSize: table.flashSize,
     }),
   ]);
-  const parsedTable = parseEspPartitionTable(partitionTableBytes, { flashSize: table.flashSize });
+  const parsedTable = parseEspPartitionTable(normalizeGeneratedPartitionTable(partitionTableBytes), {
+    flashSize: table.flashSize,
+  });
   if (table.readSize !== PARTITION_TABLE_SIZE) fail("board profile has unsupported partition-table geometry");
   const applicationPartition = parsedTable.entries.find((entry) => entry.label === table.applicationPartition.label);
   if (!applicationPartition) {

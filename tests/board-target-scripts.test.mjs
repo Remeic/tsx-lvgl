@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { parseCli as parseBoardBuildCli } from "../scripts/board-build.mjs";
@@ -6,6 +9,7 @@ import { parseCli as parseBoardInstallCli } from "../scripts/board-install.mjs";
 import { parseCli as parseBoardReloadCli } from "../scripts/board-reload.mjs";
 import { parseCli as parseBundleCli } from "../scripts/bundle-app.mjs";
 import { parseCli as parseEmbedCli } from "../scripts/embed-runtime-app.mjs";
+import { generateBoardTargetIdHeader } from "../scripts/generate-board-target-id.mjs";
 
 const TARGET = "waveshare-touch-amoled-1.8-v1";
 const BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
@@ -31,4 +35,17 @@ test("board target selection has no profile environment fallback", () => {
   assert.throws(() => parseBoardInstallCli(["--profile", "runtime-probe"]), /unknown option/);
   assert.throws(() => parseBoardReloadCli(["--profile", "runtime-probe"]), /unknown option/);
   assert.throws(() => parseEmbedCli(["--profile", "runtime-probe"]), /unknown option/);
+});
+
+test("selected target generates the canonical C identity and rejects invalid IDs", async (t) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "tsx-lvgl-target-id-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const targetIdHeaderPath = resolve(directory, "generated/tsx_board_target_id.h");
+  await generateBoardTargetIdHeader({ boardId: BOARD_ID, targetIdHeaderPath });
+  const generated = await readFile(targetIdHeaderPath, "utf8");
+  assert.match(generated, /#define TSX_BOARD_TARGET_ID "waveshare\.esp32s3\.touch-amoled-1\.8\.v1"/);
+  await assert.rejects(
+    generateBoardTargetIdHeader({ boardId: "bad id", targetIdHeaderPath }),
+    /board target ID must contain only ASCII/,
+  );
 });

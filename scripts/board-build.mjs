@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { createArtifactDescriptor } from "./board-artifact-descriptor.mjs";
 import { resolveBoardProfile } from "./board-profile.mjs";
+import { generateBoardTargetIdHeader } from "./generate-board-target-id.mjs";
 import { readFlagValue } from "./lib/cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,6 +36,7 @@ export async function run(argv = process.argv.slice(2), runner = spawnSync) {
     return 0;
   }
   const profile = resolveBoardProfile(parsed.target, repoRoot);
+  await generateBoardTargetIdHeader(profile);
   const projectPath = relative(repoRoot, profile.projectDirectory);
   if (!projectPath || projectPath.startsWith("..")) throw new Error("board target project must be inside this repository");
   const result = runner("./tools/dev", ["qemu", `cd ${projectPath} && idf.py build`], {

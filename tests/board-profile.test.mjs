@@ -26,12 +26,12 @@ test("V1 target selects the one build project, artifact and board ID", () => {
   assert.equal(profile.boardId, V1_TARGET.boardId);
   assert.equal(profile.boardId, boardCatalog.boards.find((board) => board.id === V1_TARGET.boardId).id);
   assert.equal(existsSync(profile.projectDirectory), true);
-  assert.match(profile.artifact, /runtime_port_probe\/build\/tsx_lvgl_runtime_port_probe\.bin$/);
-  assert.match(profile.descriptorPath, /runtime_port_probe\/build\/tsx_lvgl_runtime_port_probe\.descriptor\.json$/);
-  assert.match(profile.buildMetadataPath, /runtime_port_probe\/build\/flasher_args\.json$/);
+  assert.match(profile.artifact, /targets\/waveshare_touch_amoled_1_8_v1\/build\/tsx_lvgl_waveshare_v1\.bin$/);
+  assert.match(profile.descriptorPath, /targets\/waveshare_touch_amoled_1_8_v1\/build\/tsx_lvgl_waveshare_v1\.descriptor\.json$/);
+  assert.match(profile.buildMetadataPath, /targets\/waveshare_touch_amoled_1_8_v1\/build\/flasher_args\.json$/);
   assert.equal(profile.partitionTable.flashOffset, undefined);
-  assert.match(profile.embeddedAppCodePath, /runtime_port_probe\/main\/app\.g1\.js$/);
-  assert.match(profile.embeddedAppManifestPath, /runtime_port_probe\/main\/app\.g1\.manifest\.json$/);
+  assert.match(profile.embeddedAppCodePath, /targets\/waveshare_touch_amoled_1_8_v1\/main\/app\.g1\.js$/);
+  assert.match(profile.embeddedAppManifestPath, /targets\/waveshare_touch_amoled_1_8_v1\/main\/app\.g1\.manifest\.json$/);
   assert.equal(Object.isFrozen(profile), true);
 });
 
@@ -64,7 +64,7 @@ function buildMetadataFixture({
   return JSON.stringify({
     flash_files: {
       [partitionTableOffset]: partitionTablePath,
-      [artifactOffset]: "tsx_lvgl_runtime_port_probe.bin",
+      [artifactOffset]: "tsx_lvgl_waveshare_v1.bin",
     },
   });
 }
@@ -73,7 +73,7 @@ test("descriptor generation binds target, artifact and built partition semantics
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "tsx-lvgl-board-profile-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const profile = resolveBoardProfile(V1_TARGET.targetKey, temporaryRoot);
-  await mkdir(resolve(temporaryRoot, "examples/esp-idf/runtime_port_probe/build/partition_table"), { recursive: true });
+  await mkdir(resolve(temporaryRoot, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/partition_table"), { recursive: true });
   await writeFile(profile.artifact, Buffer.from("generated firmware artifact"));
   await writeFile(profile.partitionTableBinary, v1Table);
   await writeFile(profile.buildMetadataPath, buildMetadataFixture());
@@ -100,8 +100,21 @@ test("descriptor generation binds target, artifact and built partition semantics
     flashSize: profile.partitionTable.flashSize,
   });
   assert.equal(generatedMetadata.artifact.offset, descriptor.applicationPartition.offset);
-  assert.equal(descriptor.partitionTable.binaryPath, "examples/esp-idf/runtime_port_probe/build/partition_table/partition-table.bin");
-  assert.equal(descriptor.partitionTable.buildMetadataPath, "examples/esp-idf/runtime_port_probe/build/flasher_args.json");
+  assert.equal(descriptor.partitionTable.binaryPath, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/partition_table/partition-table.bin");
+  assert.equal(descriptor.partitionTable.buildMetadataPath, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/flasher_args.json");
+
+  // ESP-IDF writes only the used 0xc00 bytes; descriptor parsing restores the
+  // erased-sector padding before applying the strict partition-table contract.
+  await writeFile(profile.partitionTableBinary, partitionTableFixture(V1_PARTITION_TABLE_ENTRIES).subarray(0, 0xc00));
+  const normalizedDescriptor = await createArtifactDescriptor({
+    repositoryRoot: temporaryRoot,
+    profile,
+    sourceSha,
+    artifactPath: profile.artifact,
+    partitionTablePath: profile.partitionTableBinary,
+    outputPath: profile.descriptorPath,
+  });
+  assert.equal(normalizedDescriptor.partitionTable.semanticSha256, descriptor.partitionTable.semanticSha256);
   assert.doesNotThrow(() => validateArtifactDescriptor({
     descriptor: loaded,
     profile,
@@ -141,19 +154,19 @@ test("descriptor generation fails closed when generated partition metadata is ab
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "tsx-lvgl-board-metadata-"));
   t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
   const profile = resolveBoardProfile(V1_TARGET.targetKey, temporaryRoot);
-  await mkdir(resolve(temporaryRoot, "examples/esp-idf/runtime_port_probe/build/partition_table"), { recursive: true });
+  await mkdir(resolve(temporaryRoot, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/build/partition_table"), { recursive: true });
   await writeFile(profile.artifact, Buffer.from("generated firmware artifact"));
   await writeFile(profile.partitionTableBinary, v1Table);
   const sourceSha = "a".repeat(40);
   const cases = [
-    ["missing offset", JSON.stringify({ flash_files: { "0x10000": "tsx_lvgl_runtime_port_probe.bin" } })],
-    ["malformed offset", JSON.stringify({ flash_files: { invalid: "partition_table/partition-table.bin", "0x10000": "tsx_lvgl_runtime_port_probe.bin" } })],
+    ["missing offset", JSON.stringify({ flash_files: { "0x10000": "tsx_lvgl_waveshare_v1.bin" } })],
+    ["malformed offset", JSON.stringify({ flash_files: { invalid: "partition_table/partition-table.bin", "0x10000": "tsx_lvgl_waveshare_v1.bin" } })],
     ["inconsistent binary path", buildMetadataFixture({ partitionTablePath: "partition_table/other.bin" })],
     ["mismatched application artifact offset", buildMetadataFixture({ artifactOffset: "0x110000" })],
     ["inconsistent offset", JSON.stringify({ flash_files: {
       "0x9000": "partition_table/partition-table.bin",
       "0xa000": "partition_table/partition-table.bin",
-      "0x10000": "tsx_lvgl_runtime_port_probe.bin",
+      "0x10000": "tsx_lvgl_waveshare_v1.bin",
     } })],
   ];
   for (const [label, metadata] of cases) {

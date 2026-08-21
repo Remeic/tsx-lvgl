@@ -159,7 +159,7 @@ static esp_err_t start_touch(lv_display_t *display)
     return last_result;
 }
 
-esp_err_t waveshare_v1_display_start(void)
+esp_err_t tsx_board_adapter_v1_display_start(void)
 {
     if (s_display_started) return ESP_OK;
 

@@ -3,7 +3,7 @@
 /**
  * Native mirror of the `NativeLvgl` ABI (packages/device/src/native.ts).
  * Every function here is one binding `__native.lvgl` exposes into QuickJS.
- * All calls must run on the LVGL owner task, under `bsp_display_lock`: the
+ * All calls must run on the LVGL owner task, under the board display lock: the
  * host never re-locks internally and never calls back into JS.
  */
 
@@ -25,6 +25,7 @@ typedef struct lvgl_host lvgl_host_t;
 typedef void (*lvgl_host_click_cb_t)(void *user_data, int handle);
 
 lvgl_host_t *lvgl_host_create(lvgl_host_click_cb_t click_cb, void *click_user_data);
+/** Destroys native objects; caller must be the owner task and hold the display lock. */
 void lvgl_host_destroy(lvgl_host_t *host);
 
 /** kind: 0=screen, 1=view, 2=text, 3=button. Mirrors NativeWidgetKind order below. */

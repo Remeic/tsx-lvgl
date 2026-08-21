@@ -11,6 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Placeholder link fields reported when no station state is observed. */
+#define WIFI_LINK_UNAVAILABLE_RSSI_DBM (-127)
+#define WIFI_LINK_UNAVAILABLE_CHANNEL 1U
+#define WIFI_LINK_UNAVAILABLE_AUTH_KIND 5U
+
 #define WIFI_COMMAND_QUEUE_DEPTH 4U
 #define WIFI_EVENT_QUEUE_DEPTH 8U
 #define WIFI_OVERFLOW_QUEUE_DEPTH 1U
@@ -132,9 +137,9 @@ static bool send_event(waveshare_v1_wifi_t *wifi, waveshare_v1_wifi_event_kind_t
         .command = command,
         .correlation_id = correlation_id,
         .sequence = ++wifi->sequence,
-        .rssi_dbm = -127,
-        .channel = 1,
-        .auth_kind = 5,
+        .rssi_dbm = WIFI_LINK_UNAVAILABLE_RSSI_DBM,
+        .channel = WIFI_LINK_UNAVAILABLE_CHANNEL,
+        .auth_kind = WIFI_LINK_UNAVAILABLE_AUTH_KIND,
         .diagnostic_id = diagnostic_id,
     };
     if (xQueueSend(wifi->events, &event, 0) == pdTRUE) return true;
@@ -347,8 +352,8 @@ waveshare_v1_wifi_event_t waveshare_v1_wifi_state(waveshare_v1_wifi_t *wifi)
         .phase = wifi == NULL ? WAVESHARE_V1_WIFI_DISABLED : wifi->phase,
         .command = WAVESHARE_V1_WIFI_SCAN,
         .sequence = wifi == NULL ? 0U : wifi->sequence,
-        .rssi_dbm = -127,
-        .channel = 1,
-        .auth_kind = 5,
+        .rssi_dbm = WIFI_LINK_UNAVAILABLE_RSSI_DBM,
+        .channel = WIFI_LINK_UNAVAILABLE_CHANNEL,
+        .auth_kind = WIFI_LINK_UNAVAILABLE_AUTH_KIND,
     };
 }

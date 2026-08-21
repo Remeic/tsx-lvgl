@@ -28,7 +28,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
 const shakeFaceSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-a.tsx"), "utf8");
 const shakeFaceBSource = readFileSync(join(repoRoot, "tests/fixtures/shakeface-b.tsx"), "utf8");
-const embeddedShakeFaceDirectory = join(repoRoot, "examples/esp-idf/runtime_port_probe/main");
+const embeddedShakeFaceDirectory = join(repoRoot, "examples/esp-idf/targets/waveshare_touch_amoled_1_8_v1/main");
 
 const shakeMotion = { accelerationMps2: [30, 0, 0] as const, angularVelocityDps: [0, 0, 0] as const };
 
