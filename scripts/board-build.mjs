@@ -7,6 +7,7 @@ import { resolveBoardProfile } from "./board-profile.mjs";
 import { readFlagValue } from "./lib/cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SOURCE_SHA_PATTERN = /^[a-f0-9]{40,64}$/;
 
 function usage() {
   return "Usage:\n  npm run board:build -- --target <target-key>\n\nA successful build also writes the target-bound artifact descriptor.\n";
@@ -47,8 +48,8 @@ export async function run(argv = process.argv.slice(2), runner = spawnSync) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const sourceSha = (process.env.TSX_LVGL_VALIDATION_GIT_SHA ?? sourceShaResult.stdout ?? "").trim();
-  if (sourceShaResult.status !== 0 && !process.env.TSX_LVGL_VALIDATION_GIT_SHA) {
+  const sourceSha = (sourceShaResult.stdout ?? "").trim();
+  if (sourceShaResult.status !== 0 || !SOURCE_SHA_PATTERN.test(sourceSha)) {
     throw new Error(`cannot resolve source SHA: ${(sourceShaResult.stderr ?? "").trim() || "git failed"}`);
   }
   await createArtifactDescriptor({

@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   compareLivePartitionTable,
+  parseGeneratedBuildMetadata,
   readArtifactDescriptor,
   validateArtifactDescriptor,
 } from "./board-artifact-descriptor.mjs";
@@ -296,7 +297,7 @@ async function appendLog(logPath, text) {
   await appendFile(logPath, text, { mode: 0o600 });
 }
 
-async function createOperationLog(options, plan, info, context, profile, descriptor, capture, root, onCreated = null) {
+async function createOperationLog({ options, plan, info, context, profile, descriptor, capture, root, onCreated = null }) {
   const timestamp = new Date().toISOString().replaceAll(/[-:.]/g, "");
   const nonce = randomBytes(3).toString("hex");
   const logPath = join(context.recoveryDir, `operation-app-install-${timestamp}-${nonce}.md`);
@@ -427,6 +428,26 @@ async function readLiveTable(path, expectedSize) {
   return bytes;
 }
 
+/**
+ * Re-derive the descriptor's partition-table flash offset from the generated
+ * build metadata when it is still present. No offset is ever inferred from a
+ * default; a missing generated build directory simply skips this cross-check.
+ */
+async function generatedPartitionTableFlashOffset(profile) {
+  let text;
+  try {
+    text = await readFile(profile.buildMetadataPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  const metadata = parseGeneratedBuildMetadata(JSON.parse(text), {
+    metadataPath: profile.buildMetadataPath,
+    partitionTablePath: profile.partitionTableBinary,
+    flashSize: profile.partitionTable.flashSize,
+  });
+  return metadata.partitionTable.offset;
+}
+
 async function appendLiveLayoutEvidence(logPath, layout) {
   await appendLog(
     logPath,
@@ -487,6 +508,7 @@ export async function runReload(options, {
     if (isExternalVolumePath(options.descriptor)) throw new Error("descriptor must be on the local disk; /Volumes paths are forbidden");
     const info = await artifactInfoReader(options.artifact);
     const descriptor = await descriptorReader(options.descriptor);
+    const headCapture = await capture(["git", "rev-parse", "HEAD"]);
     validateArtifactDescriptor({
       descriptor,
       profile,
@@ -494,6 +516,8 @@ export async function runReload(options, {
       artifactInfo: { byteLength: info.byteLength ?? info.size, sha256: info.sha256 },
       repositoryRoot: root,
       descriptorPath: options.descriptor,
+      sourceSha: headCapture.code === 0 ? headCapture.output.trim() : "",
+      expectedPartitionTableFlashOffset: await generatedPartitionTableFlashOffset(profile),
     });
     const context = await recoveryContextLoader(options.recoveryDir);
     const trackTemporary = (resource) => {
@@ -513,17 +537,17 @@ export async function runReload(options, {
       partitionTableReadSize: descriptor.partitionTable.readSize,
       livePartitionTablePath: temporary.path,
     });
-    const createdLogPath = await operationLogFactory(
+    const createdLogPath = await operationLogFactory({
       options,
-      preflightPlan,
+      plan: preflightPlan,
       info,
       context,
       profile,
       descriptor,
       capture,
       root,
-      (createdPath) => { logPath = createdPath; },
-    );
+      onCreated: (createdPath) => { logPath = createdPath; },
+    });
     if (typeof createdLogPath === "string") logPath = createdLogPath;
     if (!logPath) throw new Error("operation log was not created");
     console.log(`Recovery log created before hardware access: ${logPath}`);

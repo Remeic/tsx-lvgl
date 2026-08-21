@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { partitionTableFixture, V1_PARTITION_TABLE_ENTRIES } from "./helpers/partition-table-fixture.mjs";
 import { compareLivePartitionTable, createArtifactDescriptor, readArtifactDescriptor } from "../scripts/board-artifact-descriptor.mjs";
 import { resolveBoardProfile } from "../scripts/board-profile.mjs";
 import { buildReloadMutationPlan } from "../scripts/board-reload-plan.mjs";
@@ -13,28 +14,8 @@ const TARGET = "waveshare-touch-amoled-1.8-v1";
 const MAC = "1c:db:d4:7a:06:60";
 const UNIQUE_ID = "35 04 64 13 aa f6 0e 7e 7f 9c b2 57 97 1d 95 12";
 
-function partitionTable(entries) {
-  const table = Buffer.alloc(0x1000, 0xff);
-  entries.forEach((entry, index) => {
-    const offset = index * 32;
-    table[offset] = 0xaa;
-    table[offset + 1] = 0x50;
-    table[offset + 2] = entry.type;
-    table[offset + 3] = entry.subtype;
-    table.writeUInt32LE(entry.offset, offset + 4);
-    table.writeUInt32LE(entry.size, offset + 8);
-    table.fill(0, offset + 12, offset + 28);
-    table.write(entry.label, offset + 12);
-  });
-  return table;
-}
-
-const v1Table = partitionTable([
-  { label: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 0x6000 },
-  { label: "phy_init", type: 1, subtype: 1, offset: 0xf000, size: 0x1000 },
-  { label: "factory", type: 0, subtype: 0, offset: 0x10000, size: 0x800000 },
-]);
-const issueTable = partitionTable([
+const v1Table = partitionTableFixture(V1_PARTITION_TABLE_ENTRIES);
+const issueTable = partitionTableFixture([
   { label: "nvs", type: 1, subtype: 2, offset: 0x9000, size: 0x6000 },
   { label: "otadata", type: 1, subtype: 0, offset: 0xf000, size: 0x2000 },
   { label: "ota_0", type: 0, subtype: 0x10, offset: 0x110000, size: 0x300000 },
@@ -93,6 +74,30 @@ async function fixture(t) {
   };
   return { root, profile, recoveryDir, context, artifactSize: artifactBytes.length };
 }
+
+test("reload re-checks descriptor source SHA against repository HEAD", async (t) => {
+  const testFixture = await fixture(t);
+  const raw = JSON.parse(await readFile(testFixture.profile.descriptorPath, "utf8"));
+  raw.sourceSha = "b".repeat(40);
+  await writeFile(testFixture.profile.descriptorPath, JSON.stringify(raw));
+  await assert.rejects(runReload(physicalOptions(testFixture), {
+    root: testFixture.root,
+    capture: async (command) => ({ code: 0, output: command[0] === "git" ? "a".repeat(40) : "" }),
+    recoveryContextLoader: async () => testFixture.context,
+  }), /source SHA mismatch/);
+});
+
+test("reload rejects a descriptor flash offset that contradicts generated build metadata", async (t) => {
+  const testFixture = await fixture(t);
+  const raw = JSON.parse(await readFile(testFixture.profile.descriptorPath, "utf8"));
+  raw.partitionTable.flashOffset = 0x5000;
+  await writeFile(testFixture.profile.descriptorPath, JSON.stringify(raw));
+  await assert.rejects(runReload(physicalOptions(testFixture), {
+    root: testFixture.root,
+    capture: async (command) => fakeOutput(command, testFixture.artifactSize),
+    recoveryContextLoader: async () => testFixture.context,
+  }), /partition-table flash offset mismatch/);
+});
 
 test("preflight-only validates the live table and never constructs mutation commands", async (t) => {
   const testFixture = await fixture(t);
@@ -239,7 +244,7 @@ test("setup failure removes partial secure temporary resources before any comman
     recoveryContextLoader: async () => testFixture.context,
     temporaryFileFactory: partialTemporaryResource,
   }), /reset mode/);
-  assert.deepEqual(commands, []);
+  assert.deepEqual(commands.filter((command) => command[0] !== "git"), []);
   assert.equal((await readdir(testFixture.recoveryDir)).some((name) => name.startsWith(".tsx-lvgl-live-partition-")), false);
   assert.equal((await readdir(testFixture.recoveryDir)).some((name) => name.startsWith("operation-app-install-")), false);
 });
@@ -251,7 +256,7 @@ test("operation-log setup failure logs terminal failure and removes its temporar
     commands.push([...command]);
     return fakeOutput(command, testFixture.artifactSize);
   };
-  const operationLogFactory = async (options, plan, info, context, profile, descriptor, captureDependency, root, onCreated) => {
+  const operationLogFactory = async ({ context, onCreated }) => {
     const logPath = join(context.recoveryDir, "operation-app-install-injected.md");
     await writeFile(logPath, "# partial setup\n", { mode: 0o600 });
     onCreated(logPath);
@@ -265,7 +270,7 @@ test("operation-log setup failure logs terminal failure and removes its temporar
     temporaryFileFactory: partialTemporaryResource,
     operationLogFactory,
   }), /injected operation-log setup failure/);
-  assert.deepEqual(commands, []);
+  assert.deepEqual(commands.filter((command) => command[0] !== "git"), []);
   assert.equal((await readdir(testFixture.recoveryDir)).some((name) => name.startsWith(".tsx-lvgl-live-partition-")), false);
   const log = await readFile(join(testFixture.recoveryDir, "operation-app-install-injected.md"), "utf8");
   assert.match(log, /FAIL\/UNKNOWN — injected operation-log setup failure/);

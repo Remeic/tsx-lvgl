@@ -20,16 +20,7 @@ export function formatFlashAddress(value) {
   return `0x${value.toString(16)}`;
 }
 
-function validateConfig({
-  esptoolPython,
-  port,
-  artifact,
-  baud,
-  resetMode,
-  partitionTableOffset,
-  partitionTableReadSize,
-  livePartitionTablePath,
-}) {
+function validateBaseConfig({ esptoolPython, port, artifact, baud, resetMode }) {
   if (!isAbsolute(esptoolPython)) {
     throw new Error("esptool Python path must be absolute");
   }
@@ -45,6 +36,9 @@ function validateConfig({
   if (!ALLOWED_RESET_MODES.has(resetMode)) {
     throw new Error(`unsupported reset mode: ${resetMode}`);
   }
+}
+
+function validateLiveReadConfig({ partitionTableOffset, partitionTableReadSize, livePartitionTablePath }) {
   if (!Number.isSafeInteger(partitionTableOffset) || partitionTableOffset < 0) {
     throw new Error("partition-table flash offset must be a non-negative safe integer");
   }
@@ -153,7 +147,8 @@ export function buildReloadPreflightPlan(config) {
     partitionTableReadSize: config.partitionTableReadSize ?? config.readSize,
     livePartitionTablePath: config.livePartitionTablePath ?? config.liveTablePath ?? config.tablePath,
   };
-  validateConfig(normalizedConfig);
+  validateBaseConfig(normalizedConfig);
+  validateLiveReadConfig(normalizedConfig);
   return Object.freeze({
     mutationScope: "application-only after validated live partition layout",
     liveLayoutGate: Object.freeze({
@@ -174,12 +169,7 @@ export function buildReloadPreflightPlan(config) {
  * private brand check in assertValidatedLiveLayout().
  */
 export function buildReloadMutationPlan(config, validatedLayout) {
-  validateConfig({
-    ...config,
-    partitionTableOffset: config.partitionTableOffset ?? 0,
-    partitionTableReadSize: config.partitionTableReadSize ?? 0x1000,
-    livePartitionTablePath: config.livePartitionTablePath ?? "/tmp/tsx-lvgl-live-partition-table.bin",
-  });
+  validateBaseConfig(config);
   assertValidatedLiveLayout(validatedLayout);
   if (config.artifactByteLength !== undefined && config.artifactByteLength !== validatedLayout.artifactByteLength) {
     throw new Error("artifact byte length differs from the validated live-layout result");

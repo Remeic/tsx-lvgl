@@ -33,7 +33,7 @@ function fail(message, code = "ARTIFACT_DESCRIPTOR_INVALID") {
   throw new ArtifactDescriptorError(message, code);
 }
 
-function stableJson(value) {
+function compactJson(value) {
   return JSON.stringify(value);
 }
 
@@ -313,6 +313,7 @@ export function validateArtifactDescriptor({
   repositoryRoot = process.cwd(),
   sourceSha,
   expectedPartitionTableSemanticSha256,
+  expectedPartitionTableFlashOffset,
   descriptorPath,
 }) {
   const normalized = normalizeDescriptor(descriptor);
@@ -332,6 +333,14 @@ export function validateArtifactDescriptor({
     );
     assertEqual(table.readSize, normalized.partitionTable.readSize, "partition-table read size");
     assertEqual(table.flashSize, normalized.partitionTable.flashSize, "target flash size");
+    if (expectedPartitionTableFlashOffset !== undefined) {
+      assertEqual(
+        normalized.partitionTable.flashOffset,
+        expectedPartitionTableFlashOffset,
+        "partition-table flash offset",
+        "PARTITION_TABLE_DESCRIPTOR_MISMATCH",
+      );
+    }
     const expectedPartition = table.applicationPartition;
     for (const field of ["label", "type", "subtype", "offset", "size"]) {
       assertEqual(expectedPartition[field], normalized.applicationPartition[field], `application partition ${field}`);
@@ -340,7 +349,7 @@ export function validateArtifactDescriptor({
   if (artifactPath) {
     if (!artifactPathCandidates(repositoryRoot, artifactPath, descriptorPath).includes(normalized.artifact.path)) {
       throw new ArtifactDescriptorError(
-        `artifact path mismatch: expected one of ${stableJson(artifactPathCandidates(repositoryRoot, artifactPath, descriptorPath))}, observed ${normalized.artifact.path}`,
+        `artifact path mismatch: expected one of ${compactJson(artifactPathCandidates(repositoryRoot, artifactPath, descriptorPath))}, observed ${normalized.artifact.path}`,
         "ARTIFACT_PATH_MISMATCH",
       );
     }
@@ -462,7 +471,7 @@ export async function createArtifactDescriptor({
 
 export async function writeArtifactDescriptor(outputPath, descriptor) {
   const normalized = normalizeDescriptor(descriptor);
-  await writeFile(outputPath, `${stableJson(normalized)}\n`, { mode: 0o600 });
+  await writeFile(outputPath, `${compactJson(normalized)}\n`, { mode: 0o600 });
   return normalized;
 }
 
@@ -478,7 +487,7 @@ function partitionMetadata(entry) {
 
 function mismatch(expected, observed, reason) {
   const error = new LiveLayoutValidationError(
-    `LIVE_LAYOUT_MISMATCH: ${reason}; expected=${stableJson(expected)} observed=${stableJson(observed)}`,
+    `LIVE_LAYOUT_MISMATCH: ${reason}; expected=${compactJson(expected)} observed=${compactJson(observed)}`,
   );
   error.expected = Object.freeze(expected);
   error.observed = Object.freeze(observed);
@@ -489,14 +498,7 @@ function mismatch(expected, observed, reason) {
  * Compare one read-only live sector with the immutable descriptor. Success
  * returns the opaque value accepted by buildReloadMutationPlan().
  */
-export function compareLivePartitionTable(input, positionalTableBytes, positionalArtifactByteLength) {
-  const { descriptor, tableBytes, artifactByteLength } = input && input.descriptor
-    ? input
-    : {
-      descriptor: input,
-      tableBytes: positionalTableBytes,
-      artifactByteLength: positionalArtifactByteLength,
-    };
+export function compareLivePartitionTable({ descriptor, tableBytes, artifactByteLength }) {
   const normalized = normalizeDescriptor(descriptor);
   assertInteger(artifactByteLength, "artifactByteLength", { positive: true });
   let parsed;
@@ -563,7 +565,3 @@ export function assertValidatedLiveLayout(value) {
   }
   return value;
 }
-
-// Names used by callers that prefer the shorter artifact terminology.
-export const loadArtifactDescriptor = readArtifactDescriptor;
-export const createBoardArtifactDescriptor = createArtifactDescriptor;

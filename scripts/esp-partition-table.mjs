@@ -229,8 +229,3 @@ export function parseEspPartitionTable(input, { flashSize } = {}) {
     semanticSha256: semanticPartitionTableDigest(normalizedEntries),
   });
 }
-
-// Short aliases make the pure parser convenient for scripts and tests while
-// keeping the explicit ESP-IDF name as the primary API.
-export const parsePartitionTable = parseEspPartitionTable;
-export const partitionTableSemanticDigest = semanticPartitionTableDigest;

@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { partitionTableFixture, V1_PARTITION_TABLE_ENTRIES } from "./helpers/partition-table-fixture.mjs";
 import boardCatalog from "../packages/sdk/src/board-catalog.json" with { type: "json" };
 import {
   createArtifactDescriptor,
@@ -17,6 +18,7 @@ import {
 import { resolveBoardProfile, resolveCatalogBoard, V1_TARGET } from "../scripts/board-profile.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const v1Table = partitionTableFixture(V1_PARTITION_TABLE_ENTRIES);
 
 test("V1 target selects the one build project, artifact and board ID", () => {
   const profile = resolveBoardProfile("waveshare-touch-amoled-1.8-v1", root);
@@ -52,26 +54,7 @@ test("unknown profiles cannot redirect build or artifact selection and list vali
   assert.throws(() => resolveBoardProfile(undefined, root), /--target is required/);
 });
 
-function partitionTableFixture() {
-  const bytes = Buffer.alloc(0x1000, 0xff);
-  const entries = [
-    [1, 2, 0x9000, 0x6000, "nvs"],
-    [1, 1, 0xf000, 0x1000, "phy_init"],
-    [0, 0, 0x10000, 0x800000, "factory"],
-  ];
-  entries.forEach(([type, subtype, offset, size, label], index) => {
-    const at = index * 32;
-    bytes[at] = 0xaa;
-    bytes[at + 1] = 0x50;
-    bytes[at + 2] = type;
-    bytes[at + 3] = subtype;
-    bytes.writeUInt32LE(offset, at + 4);
-    bytes.writeUInt32LE(size, at + 8);
-    bytes.fill(0, at + 12, at + 28);
-    bytes.write(label, at + 12);
-  });
-  return bytes;
-}
+
 
 function buildMetadataFixture({
   partitionTablePath = "partition_table/partition-table.bin",
@@ -92,7 +75,7 @@ test("descriptor generation binds target, artifact and built partition semantics
   const profile = resolveBoardProfile(V1_TARGET.targetKey, temporaryRoot);
   await mkdir(resolve(temporaryRoot, "examples/esp-idf/runtime_port_probe/build/partition_table"), { recursive: true });
   await writeFile(profile.artifact, Buffer.from("generated firmware artifact"));
-  await writeFile(profile.partitionTableBinary, partitionTableFixture());
+  await writeFile(profile.partitionTableBinary, v1Table);
   await writeFile(profile.buildMetadataPath, buildMetadataFixture());
   const sourceSha = "a".repeat(40);
   const descriptor = await createArtifactDescriptor({
@@ -160,7 +143,7 @@ test("descriptor generation fails closed when generated partition metadata is ab
   const profile = resolveBoardProfile(V1_TARGET.targetKey, temporaryRoot);
   await mkdir(resolve(temporaryRoot, "examples/esp-idf/runtime_port_probe/build/partition_table"), { recursive: true });
   await writeFile(profile.artifact, Buffer.from("generated firmware artifact"));
-  await writeFile(profile.partitionTableBinary, partitionTableFixture());
+  await writeFile(profile.partitionTableBinary, v1Table);
   const sourceSha = "a".repeat(40);
   const cases = [
     ["missing offset", JSON.stringify({ flash_files: { "0x10000": "tsx_lvgl_runtime_port_probe.bin" } })],
