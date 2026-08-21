@@ -165,6 +165,15 @@ test("rejected transport startup retries and resets instead of sleeping silently
   assert.match(runtimeBoot, /remain_in_rejected_diagnostic_mode\(\)/);
 });
 
+test("reject-mode reset limit parks in diagnostic mode and can never fall through to boot", () => {
+  const start = runtimeBoot.indexOf("static void enter_rejected_diagnostic_mode");
+  assert.ok(start >= 0, "enter_rejected_diagnostic_mode not found");
+  const body = runtimeBoot.slice(start, runtimeBoot.indexOf("\n}\n", start) + 3);
+  assert.match(body, /REJECT_RESET_LIMIT/);
+  assert.match(body, /esp_restart\(\)/);
+  assert.match(body, /action=halt[\s\S]*remain_in_rejected_diagnostic_mode\(\)/);
+});
+
 test("display startup failure enters rejected recovery instead of returning with partial resources", () => {
   assert.match(runtimeBoot, /PROBE checkpoint=board_start status=fail action=reject reason=hardware-startup-failure/);
   assert.match(runtimeBoot, /if \(tsx_board_adapter_display_start\(board\) != ESP_OK\) \{[\s\S]*enter_rejected_diagnostic_mode\("hardware-startup-failure"\)/);

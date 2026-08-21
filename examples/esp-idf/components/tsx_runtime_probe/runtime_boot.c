@@ -65,15 +65,16 @@ static void enter_rejected_diagnostic_mode(const char *reason)
     if (!run_rejected_diagnostic_transport(reason)) {
         /* The bounded retry did not establish the recovery channel. A
          * controlled reset gives the board a deterministic next attempt;
-         * the RTC counter bounds the loop and halts instead of resetting
-         * forever on a dead board. */
+         * the RTC counter bounds the loop. At the limit the board parks in
+         * diagnostic mode forever; it must never fall through to display or
+         * runtime boot on unverified hardware. */
         s_reject_reset_count += 1U;
         if (s_reject_reset_count >= REJECT_RESET_LIMIT) {
             ESP_LOGE(TAG, "PROBE checkpoint=bundle_transport_start status=terminal mode=reject reason=%s action=halt resets=%u",
                      reason, (unsigned)s_reject_reset_count);
-        } else {
-            esp_restart();
+            remain_in_rejected_diagnostic_mode();
         }
+        esp_restart();
         return;
     }
     remain_in_rejected_diagnostic_mode();
