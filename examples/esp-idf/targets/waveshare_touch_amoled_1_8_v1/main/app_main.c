@@ -39,6 +39,8 @@ static void runtime_probe_owner_task(void *arg)
     const tsx_board_adapter_t *board = arg;
     esp_err_t result;
     do {
+        /* ESP_ERR_TIMEOUT = retained-cleanup retry signal from
+         * runtime_probe_run; see the contract in runtime_probe.h. */
         result = runtime_probe_run(board, &RUNTIME_ASSETS);
         if (result == ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(20));
     } while (result == ESP_ERR_TIMEOUT);

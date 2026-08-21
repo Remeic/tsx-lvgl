@@ -38,6 +38,10 @@ esp_err_t runtime_probe_start(const tsx_board_adapter_t *board,
  * Owns the complete owner-task lifecycle: transport, optional providers,
  * locked boot, owner loop, transport join, provider teardown and locked LVGL
  * destruction. The caller must be the target's single runtime owner task.
+ *
+ * Return contract: `ESP_ERR_TIMEOUT` is a named retry signal meaning
+ * "LVGL-lock cleanup retained; the owner task must call again after a short
+ * delay". Any other value is terminal for the current boot attempt.
  */
 esp_err_t runtime_probe_run(const tsx_board_adapter_t *board,
                             const runtime_probe_assets_t *assets);

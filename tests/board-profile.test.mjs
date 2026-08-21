@@ -105,7 +105,7 @@ test("descriptor generation binds target, artifact and built partition semantics
 
   // ESP-IDF writes only the used 0xc00 bytes; descriptor parsing restores the
   // erased-sector padding before applying the strict partition-table contract.
-  await writeFile(profile.partitionTableBinary, partitionTableFixture().subarray(0, 0xc00));
+  await writeFile(profile.partitionTableBinary, partitionTableFixture(V1_PARTITION_TABLE_ENTRIES).subarray(0, 0xc00));
   const normalizedDescriptor = await createArtifactDescriptor({
     repositoryRoot: temporaryRoot,
     profile,

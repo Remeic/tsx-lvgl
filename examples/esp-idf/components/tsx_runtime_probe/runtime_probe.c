@@ -650,10 +650,11 @@ static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this
     const bool is_motion = instance_id != NULL && strcmp(instance_id, "motion") == 0;
     const bool is_wifi = instance_id != NULL && strcmp(instance_id, "wifi.station") == 0;
     JS_FreeCString(context, instance_id);
-    if (is_wifi && probe->wifi != NULL && probe->board->wifi != NULL && probe->board->wifi->state != NULL) {
-        const tsx_wifi_event_t state = probe->board->wifi->state(
-            probe->board->wifi->context, probe->wifi);
-        return new_wifi_board_event(context, 0, 1U, &state);
+    if (is_wifi && probe->wifi != NULL) {
+        tsx_wifi_event_t state;
+        if (tsx_board_adapter_wifi_state(probe->board, probe->wifi, &state)) {
+            return new_wifi_board_event(context, 0, 1U, &state);
+        }
     }
     if (!is_motion) return JS_UNDEFINED;
     if (probe->sensors == NULL) {
@@ -663,8 +664,7 @@ static JSValue js_native_board_read_cached(JSContext *context, JSValueConst this
     const int32_t handle = probe->board_handle == 0 ? 1 : probe->board_handle;
     const uint32_t epoch = probe->board_reload_epoch == 0 ? 1U : probe->board_reload_epoch;
     tsx_motion_frame_t frame = {0};
-    const bool available = probe->board->motion != NULL && probe->board->motion->read != NULL &&
-                           probe->board->motion->read(probe->board->motion->context, probe->sensors, &frame);
+    const bool available = tsx_board_adapter_motion_read(probe->board, probe->sensors, &frame);
     log_sensor_checkpoint(probe, available);
     return new_board_event(context, probe, handle, epoch, &frame, available);
 }
@@ -681,7 +681,7 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
     JS_FreeCString(context, kind_name);
     JS_FreeValue(context, kind);
     if (is_command) {
-        if (probe->wifi == NULL || probe->board->wifi == NULL || probe->board->wifi->submit == NULL) {
+        if (probe->board == NULL) {
             return JS_ThrowInternalError(context, "board.submit: Wi-Fi command unavailable");
         }
         JSValue instance = JS_GetPropertyStr(context, argv[0], "instanceId");
@@ -712,8 +712,8 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
         wifi_operation_slot_t *slot = NULL;
         for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) if (!probe->wifi_operations[index].active) { slot = &probe->wifi_operations[index]; break; }
         if (slot == NULL) return JS_ThrowInternalError(context, "board.submit: wifi-command-queue-full");
-        const esp_err_t submit_result = probe->board->wifi->submit(
-            probe->board->wifi->context, probe->wifi, native_command, (uint32_t)parsed_correlation);
+        const esp_err_t submit_result = tsx_board_adapter_wifi_submit(
+            probe->board, probe->wifi, native_command, (uint32_t)parsed_correlation);
         if (submit_result != ESP_OK) {
             return JS_ThrowInternalError(context, submit_result == ESP_ERR_TIMEOUT
                                          ? "board.submit: wifi-command-queue-full"
@@ -742,9 +742,7 @@ static JSValue js_native_board_submit(JSContext *context, JSValueConst this_valu
     JS_FreeValue(context, period);
     if (!valid) return JS_ThrowTypeError(context, "board.submit: invalid motion observation");
     if (probe->sensors == NULL) return JS_ThrowInternalError(context, "board.submit: motion cadence unavailable");
-    if (probe->board->motion == NULL || probe->board->motion->set_period_ms == NULL ||
-        probe->board->motion->set_period_ms(probe->board->motion->context, probe->sensors,
-                                            (uint32_t)period_ms) != ESP_OK) {
+    if (tsx_board_adapter_motion_set_period_ms(probe->board, probe->sensors, (uint32_t)period_ms) != ESP_OK) {
         return JS_ThrowInternalError(context, "board.submit: motion cadence unavailable");
     }
     probe->board_handle = ++probe->next_board_handle;
@@ -764,9 +762,7 @@ static JSValue js_native_board_cancel(JSContext *context, JSValueConst this_valu
     for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
         wifi_operation_slot_t *slot = &probe->wifi_operations[index];
         if (slot->active && slot->handle == handle) {
-            if (probe->wifi != NULL && probe->board->wifi != NULL && probe->board->wifi->cancel != NULL) {
-                probe->board->wifi->cancel(probe->board->wifi->context, probe->wifi, slot->correlation_id);
-            }
+            tsx_board_adapter_wifi_cancel(probe->board, probe->wifi, slot->correlation_id);
             slot->active = false;
         }
     }
@@ -793,10 +789,8 @@ static JSValue js_native_board_dispose(JSContext *context, JSValueConst this_val
         probe->board_active = false;
         for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
             if (probe->wifi != NULL && probe->wifi_operations[index].active) {
-                if (probe->board->wifi != NULL && probe->board->wifi->cancel != NULL) {
-                    probe->board->wifi->cancel(probe->board->wifi->context, probe->wifi,
-                                               probe->wifi_operations[index].correlation_id);
-                }
+                tsx_board_adapter_wifi_cancel(probe->board, probe->wifi,
+                                              probe->wifi_operations[index].correlation_id);
             }
             probe->wifi_operations[index].active = false;
         }
@@ -808,8 +802,7 @@ static void emit_board_reading(runtime_probe_t *probe)
 {
     if (probe->sensors == NULL || !probe->board_active || JS_IsUndefined(probe->board_sink)) return;
     tsx_motion_frame_t frame = {0};
-    if (probe->board->motion == NULL || probe->board->motion->read == NULL ||
-        !probe->board->motion->read(probe->board->motion->context, probe->sensors, &frame) ||
+    if (!tsx_board_adapter_motion_read(probe->board, probe->sensors, &frame) ||
         frame.sequence <= probe->board_last_sequence) return;
     JSValue event = new_board_event(probe->context, probe, probe->board_handle, probe->board_reload_epoch, &frame, true);
     JSValue result = JS_Call(probe->context, probe->board_sink, JS_UNDEFINED, 1, &event);
@@ -893,10 +886,9 @@ static JSValue new_wifi_board_event(JSContext *context, int32_t handle, uint32_t
 
 static void emit_wifi_events(runtime_probe_t *probe)
 {
-    if (probe->wifi == NULL || probe->board->wifi == NULL || probe->board->wifi->take_event == NULL ||
-        JS_IsUndefined(probe->board_sink)) return;
+    if (probe->wifi == NULL || JS_IsUndefined(probe->board_sink)) return;
     tsx_wifi_event_t wifi_event;
-    while (probe->board->wifi->take_event(probe->board->wifi->context, probe->wifi, &wifi_event)) {
+    while (tsx_board_adapter_wifi_take_event(probe->board, probe->wifi, &wifi_event)) {
         wifi_operation_slot_t *slot = find_wifi_operation(probe, wifi_event.correlation_id);
         if (wifi_event.kind != TSX_WIFI_EVENT_STATE && slot == NULL) continue;
         const int32_t handle = slot == NULL ? 0 : slot->handle;
@@ -915,28 +907,25 @@ static void emit_wifi_events(runtime_probe_t *probe)
  * identity or credentials. */
 static void expire_wifi_operations(runtime_probe_t *probe)
 {
-    if (probe->wifi == NULL || probe->board->wifi == NULL || probe->board->wifi->state == NULL ||
-        JS_IsUndefined(probe->board_sink)) return;
+    if (probe->wifi == NULL || JS_IsUndefined(probe->board_sink)) return;
     const TickType_t now = xTaskGetTickCount();
     for (uint32_t index = 0; index < WIFI_OPERATION_SLOT_COUNT; index++) {
         wifi_operation_slot_t *slot = &probe->wifi_operations[index];
         if (!slot->active || (int32_t)(now - slot->deadline) < 0) continue;
-        const tsx_wifi_event_t state = probe->board->wifi->state(
-            probe->board->wifi->context, probe->wifi);
+        tsx_wifi_event_t state;
+        if (!tsx_board_adapter_wifi_state(probe->board, probe->wifi, &state)) return;
         const tsx_wifi_event_t timeout = {
             .kind = TSX_WIFI_EVENT_FAILED,
             .phase = state.phase,
             .command = TSX_WIFI_COMMAND_SCAN,
             .correlation_id = slot->correlation_id,
             .sequence = state.sequence + 1U,
-            .rssi_dbm = -127,
-            .channel = 1,
-            .auth_kind = 5,
+            .rssi_dbm = TSX_WIFI_UNAVAILABLE_RSSI_DBM,
+            .channel = TSX_WIFI_UNAVAILABLE_CHANNEL,
+            .auth_kind = TSX_WIFI_UNAVAILABLE_AUTH_KIND,
             .diagnostic_id = "wifi-owner-timeout",
         };
-        if (probe->board->wifi->cancel != NULL) {
-            probe->board->wifi->cancel(probe->board->wifi->context, probe->wifi, slot->correlation_id);
-        }
+        tsx_board_adapter_wifi_cancel(probe->board, probe->wifi, slot->correlation_id);
         JSValue event = new_wifi_board_event(probe->context, slot->handle, slot->reload_epoch, &timeout);
         JSValue result = JS_Call(probe->context, probe->board_sink, JS_UNDEFINED, 1, &event);
         JS_FreeValue(probe->context, event);
@@ -967,8 +956,7 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     JSValue sample = JS_NewObject(context);
     if (JS_IsException(sample)) return sample;
     tsx_motion_frame_t frame = {0};
-    if (probe->sensors == NULL || probe->board->motion == NULL || probe->board->motion->read == NULL ||
-        !probe->board->motion->read(probe->board->motion->context, probe->sensors, &frame)) {
+    if (!tsx_board_adapter_motion_read(probe->board, probe->sensors, &frame)) {
         JS_SetPropertyStr(context, sample, "status", JS_NewString(context, "unavailable"));
         JS_SetPropertyStr(context, sample, "sampledAtMs", JS_NewInt64(context, esp_timer_get_time() / 1000));
         log_sensor_checkpoint(probe, false);

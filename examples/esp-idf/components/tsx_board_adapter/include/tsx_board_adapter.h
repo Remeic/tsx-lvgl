@@ -109,6 +109,11 @@ typedef struct tsx_board_adapter {
     const tsx_wifi_port_t *wifi;
 } tsx_board_adapter_t;
 
+/* Placeholder link fields reported when no station state is observed. */
+#define TSX_WIFI_UNAVAILABLE_RSSI_DBM (-127)
+#define TSX_WIFI_UNAVAILABLE_CHANNEL 1U
+#define TSX_WIFI_UNAVAILABLE_AUTH_KIND 5U
+
 static inline const char *tsx_board_adapter_target_id(const tsx_board_adapter_t *adapter)
 {
     return adapter != NULL && adapter->boot != NULL && adapter->boot->target_id != NULL
@@ -145,4 +150,63 @@ static inline esp_err_t tsx_board_adapter_probe_identity(const tsx_board_adapter
         return ESP_ERR_NOT_SUPPORTED;
     }
     return adapter->boot->probe_identity(adapter->boot->context, out_result);
+}
+
+static inline bool tsx_board_adapter_motion_read(const tsx_board_adapter_t *adapter,
+                                                 tsx_motion_provider_t *provider,
+                                                 tsx_motion_frame_t *out_frame)
+{
+    return adapter != NULL && adapter->motion != NULL && adapter->motion->read != NULL && provider != NULL
+               ? adapter->motion->read(adapter->motion->context, provider, out_frame)
+               : false;
+}
+
+static inline esp_err_t tsx_board_adapter_motion_set_period_ms(const tsx_board_adapter_t *adapter,
+                                                               tsx_motion_provider_t *provider,
+                                                               uint32_t period_ms)
+{
+    if (adapter == NULL || adapter->motion == NULL || adapter->motion->set_period_ms == NULL || provider == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return adapter->motion->set_period_ms(adapter->motion->context, provider, period_ms);
+}
+
+static inline esp_err_t tsx_board_adapter_wifi_submit(const tsx_board_adapter_t *adapter,
+                                                     tsx_wifi_provider_t *provider,
+                                                     tsx_wifi_command_t command,
+                                                     uint32_t correlation_id)
+{
+    if (adapter == NULL || adapter->wifi == NULL || adapter->wifi->submit == NULL || provider == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return adapter->wifi->submit(adapter->wifi->context, provider, command, correlation_id);
+}
+
+static inline void tsx_board_adapter_wifi_cancel(const tsx_board_adapter_t *adapter,
+                                                 tsx_wifi_provider_t *provider,
+                                                 uint32_t correlation_id)
+{
+    if (adapter != NULL && adapter->wifi != NULL && adapter->wifi->cancel != NULL && provider != NULL) {
+        adapter->wifi->cancel(adapter->wifi->context, provider, correlation_id);
+    }
+}
+
+static inline bool tsx_board_adapter_wifi_take_event(const tsx_board_adapter_t *adapter,
+                                                     tsx_wifi_provider_t *provider,
+                                                     tsx_wifi_event_t *out_event)
+{
+    return adapter != NULL && adapter->wifi != NULL && adapter->wifi->take_event != NULL && provider != NULL
+               ? adapter->wifi->take_event(adapter->wifi->context, provider, out_event)
+               : false;
+}
+
+static inline bool tsx_board_adapter_wifi_state(const tsx_board_adapter_t *adapter,
+                                                tsx_wifi_provider_t *provider,
+                                                tsx_wifi_event_t *out_event)
+{
+    if (adapter == NULL || adapter->wifi == NULL || adapter->wifi->state == NULL || provider == NULL) {
+        return false;
+    }
+    *out_event = adapter->wifi->state(adapter->wifi->context, provider);
+    return true;
 }

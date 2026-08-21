@@ -210,7 +210,7 @@ static tsx_wifi_event_t v1_wifi_state(void *context, tsx_wifi_provider_t *provid
     (void)context;
     if (provider == NULL || provider->impl == NULL) {
         return (tsx_wifi_event_t) {.kind = TSX_WIFI_EVENT_STATE, .phase = TSX_WIFI_PHASE_DISABLED,
-                                   .command = TSX_WIFI_COMMAND_SCAN, .rssi_dbm = -127, .channel = 1, .auth_kind = 5};
+                                   .command = TSX_WIFI_COMMAND_SCAN, .rssi_dbm = TSX_WIFI_UNAVAILABLE_RSSI_DBM, .channel = TSX_WIFI_UNAVAILABLE_CHANNEL, .auth_kind = TSX_WIFI_UNAVAILABLE_AUTH_KIND};
     }
     return to_tsx_wifi_event(waveshare_v1_wifi_state(provider->impl));
 }
