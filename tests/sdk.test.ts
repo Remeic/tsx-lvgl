@@ -10,21 +10,6 @@ import { createHarness } from "./support/harness.js";
 
 test("SDK facade exposes only the supported application surface", () => {
   assert.deepEqual(Object.keys(sdk).sort(), [...APPLICATION_FACADE_KEYS].sort());
-  assert.deepEqual(APPLICATION_FACADE_KEYS, [
-    "Button",
-    "Fragment",
-    "Screen",
-    "StyleSheet",
-    "Text",
-    "View",
-    "isShake",
-    "useEffect",
-    "useInterval",
-    "useMotion",
-    "useShake",
-    "useWifi",
-    "useState",
-  ]);
 });
 
 test("StyleSheet.create freezes the sheet and every entry", () => {

@@ -35,13 +35,16 @@ static const char *TAG = "tsx_runtime_probe";
 
 typedef enum {
     RUNTIME_PROBE_EVENT_INTERVAL,
-    RUNTIME_PROBE_EVENT_TOUCH,
+    RUNTIME_PROBE_EVENT_LVGL,
 } runtime_probe_event_kind_t;
 
 typedef struct {
     runtime_probe_event_kind_t kind;
-    /** Timer slot index for INTERVAL, LVGL widget handle for TOUCH. */
+    /** Timer slot index for INTERVAL. LVGL event fields for LVGL. */
     int arg;
+    int event_code;
+    bool has_value;
+    int32_t value;
 } runtime_probe_event_t;
 
 typedef struct {
@@ -73,8 +76,8 @@ struct runtime_probe {
     JSContext *context;
     lvgl_host_t *lvgl_host;
 
-    /** Dup'd once via __native.onClick(dispatch); JS_UNDEFINED until then. */
-    JSValue click_dispatch;
+    /** Dup'd once via __native.onEvent(dispatch); JS_UNDEFINED until then. */
+    JSValue event_dispatch;
     timer_slot_t timer_slots[TIMER_SLOT_COUNT];
 
     /** Cached boot-glue globals (kernel.js), resolved once after boot. */
@@ -310,21 +313,27 @@ static void process_pending_jobs(runtime_probe_t *probe)
     if (result < 0 && job_context != NULL) dump_exception(job_context, "pending_job");
 }
 
-static void queue_probe_event(runtime_probe_t *probe, runtime_probe_event_kind_t kind, int arg)
+static void enqueue_probe_event(runtime_probe_t *probe, const runtime_probe_event_t *event)
 {
     if (probe == NULL || !probe->active || probe->event_queue == NULL) return;
-    const runtime_probe_event_t event = {.kind = kind, .arg = arg};
-    if (xQueueSend(probe->event_queue, &event, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "PROBE event_queue full kind=%d arg=%d", (int)kind, arg);
+    if (xQueueSend(probe->event_queue, event, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "PROBE event_queue full kind=%d arg=%d", (int)event->kind, event->arg);
     }
 }
 
-/* --- __native.lvgl: click delivery (LVGL event context, owner task, under the display lock) --- */
+/* --- __native.lvgl: event delivery (LVGL event context, owner task, under the display lock) --- */
 
-static void probe_click_from_lvgl(void *user_data, int handle)
+static void probe_event_from_lvgl(void *user_data, int handle, int event, bool has_value, int32_t value)
 {
     runtime_probe_t *probe = user_data;
-    queue_probe_event(probe, RUNTIME_PROBE_EVENT_TOUCH, handle);
+    const runtime_probe_event_t queued = {
+        .kind = RUNTIME_PROBE_EVENT_LVGL,
+        .arg = handle,
+        .event_code = event,
+        .has_value = has_value,
+        .value = value,
+    };
+    enqueue_probe_event(probe, &queued);
 }
 
 /* --- __native.timers: esp_timer fires on the esp_timer task, never the owner task --- */
@@ -333,7 +342,11 @@ static void native_timer_fired(void *arg)
 {
     runtime_probe_t *probe = s_active_probe;
     if (probe == NULL) return;
-    queue_probe_event(probe, RUNTIME_PROBE_EVENT_INTERVAL, (int)(intptr_t)arg);
+    const runtime_probe_event_t event = {
+        .kind = RUNTIME_PROBE_EVENT_INTERVAL,
+        .arg = (int)(intptr_t)arg,
+    };
+    enqueue_probe_event(probe, &event);
 }
 
 /* --- __native binding surface (packages/device/src/native.ts is the normative contract) --- */
@@ -422,18 +435,21 @@ static JSValue js_native_lvgl_set_text(JSContext *context, JSValueConst this_val
     return JS_UNDEFINED;
 }
 
-static JSValue js_native_lvgl_set_clickable(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+static JSValue js_native_lvgl_set_listening(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
     (void)this_value;
     runtime_probe_t *probe = probe_from_context(context);
-    if (probe == NULL || argc < 2) {
-        return JS_ThrowTypeError(context, "lvgl.setClickable(id, clickable) requires 2 arguments");
+    if (probe == NULL || argc < 3) {
+        return JS_ThrowTypeError(context, "lvgl.setListening(id, event, listening) requires 3 arguments");
     }
     int32_t id = 0;
     if (JS_ToInt32(context, &id, argv[0])) return JS_EXCEPTION;
-    const int clickable = JS_ToBool(context, argv[1]);
-    if (clickable < 0) return JS_EXCEPTION;
-    lvgl_host_set_clickable(probe->lvgl_host, id, clickable != 0);
+    int32_t event = 0;
+    if (JS_ToInt32(context, &event, argv[1])) return JS_EXCEPTION;
+    if (event < 0 || event >= LVGL_HOST_EVENT_COUNT) return JS_ThrowTypeError(context, "lvgl.setListening: unknown event code");
+    const int listening = JS_ToBool(context, argv[2]);
+    if (listening < 0) return JS_EXCEPTION;
+    lvgl_host_set_listening(probe->lvgl_host, id, event, listening != 0);
     return JS_UNDEFINED;
 }
 
@@ -952,15 +968,15 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     return sample;
 }
 
-static JSValue js_native_on_click(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
+static JSValue js_native_on_event(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
     (void)this_value;
     runtime_probe_t *probe = probe_from_context(context);
     if (probe == NULL || argc < 1 || !JS_IsFunction(context, argv[0])) {
-        return JS_ThrowTypeError(context, "onClick(dispatch) requires a function");
+        return JS_ThrowTypeError(context, "onEvent(dispatch) requires a function");
     }
-    if (!JS_IsUndefined(probe->click_dispatch)) JS_FreeValue(context, probe->click_dispatch);
-    probe->click_dispatch = JS_DupValue(context, argv[0]);
+    if (!JS_IsUndefined(probe->event_dispatch)) JS_FreeValue(context, probe->event_dispatch);
+    probe->event_dispatch = JS_DupValue(context, argv[0]);
     return JS_UNDEFINED;
 }
 
@@ -985,8 +1001,8 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     JS_SetPropertyStr(context, lvgl, "create", JS_NewCFunction(context, js_native_lvgl_create, "create", 1));
     JS_SetPropertyStr(context, lvgl, "insert", JS_NewCFunction(context, js_native_lvgl_insert, "insert", 3));
     JS_SetPropertyStr(context, lvgl, "setText", JS_NewCFunction(context, js_native_lvgl_set_text, "setText", 2));
-    JS_SetPropertyStr(context, lvgl, "setClickable",
-                      JS_NewCFunction(context, js_native_lvgl_set_clickable, "setClickable", 2));
+    JS_SetPropertyStr(context, lvgl, "setListening",
+                      JS_NewCFunction(context, js_native_lvgl_set_listening, "setListening", 3));
     JS_SetPropertyStr(context, lvgl, "remove", JS_NewCFunction(context, js_native_lvgl_remove, "remove", 2));
     JS_SetPropertyStr(context, lvgl, "dispose", JS_NewCFunction(context, js_native_lvgl_dispose, "dispose", 1));
     JS_SetPropertyStr(context, lvgl, "loadScreen",
@@ -1016,7 +1032,7 @@ static esp_err_t install_native_bindings(runtime_probe_t *probe)
     JS_SetPropertyStr(context, board, "dispose", JS_NewCFunction(context, js_native_board_dispose, "dispose", 0));
     JS_SetPropertyStr(context, native, "board", board);
 
-    JS_SetPropertyStr(context, native, "onClick", JS_NewCFunction(context, js_native_on_click, "onClick", 1));
+    JS_SetPropertyStr(context, native, "onEvent", JS_NewCFunction(context, js_native_on_event, "onEvent", 1));
     JS_SetPropertyStr(context, native, "log", JS_NewCFunction(context, js_native_log, "log", 1));
 
     JS_SetPropertyStr(context, global, "__native", native);
@@ -1093,11 +1109,16 @@ esp_err_t runtime_probe_boot(runtime_probe_t *probe)
 
 static void process_probe_event(runtime_probe_t *probe, const runtime_probe_event_t *event)
 {
-    if (event->kind == RUNTIME_PROBE_EVENT_TOUCH) {
-        if (JS_IsUndefined(probe->click_dispatch)) return;
-        JSValue handle_value = JS_NewInt32(probe->context, event->arg);
-        JSValue result = JS_Call(probe->context, probe->click_dispatch, JS_UNDEFINED, 1, &handle_value);
-        JS_FreeValue(probe->context, handle_value);
+    if (event->kind == RUNTIME_PROBE_EVENT_LVGL) {
+        if (JS_IsUndefined(probe->event_dispatch)) return;
+        JSValue argv[3];
+        argv[0] = JS_NewInt32(probe->context, event->arg);
+        argv[1] = JS_NewInt32(probe->context, event->event_code);
+        argv[2] = event->has_value ? JS_NewInt32(probe->context, event->value) : JS_UNDEFINED;
+        JSValue result = JS_Call(probe->context, probe->event_dispatch, JS_UNDEFINED, 3, argv);
+        JS_FreeValue(probe->context, argv[0]);
+        JS_FreeValue(probe->context, argv[1]);
+        JS_FreeValue(probe->context, argv[2]);
         if (JS_IsException(result)) {
             JS_FreeValue(probe->context, result);
             dump_exception(probe->context, "touch_callback");
@@ -1364,7 +1385,7 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
 
     runtime_probe_t *probe = calloc(1, sizeof(*probe));
     if (probe == NULL) return ESP_ERR_NO_MEM;
-    probe->click_dispatch = JS_UNDEFINED;
+    probe->event_dispatch = JS_UNDEFINED;
     probe->pump_fn = JS_UNDEFINED;
     probe->reload_fn = JS_UNDEFINED;
     probe->lastgen_fn = JS_UNDEFINED;
@@ -1394,7 +1415,7 @@ esp_err_t runtime_probe_start(runtime_probe_t **out_probe)
     }
     JS_SetContextOpaque(probe->context, probe);
 
-    probe->lvgl_host = lvgl_host_create(probe_click_from_lvgl, probe);
+    probe->lvgl_host = lvgl_host_create(probe_event_from_lvgl, probe);
     if (probe->lvgl_host == NULL) {
         runtime_probe_destroy(probe);
         return ESP_ERR_NO_MEM;
@@ -1504,7 +1525,7 @@ void runtime_probe_destroy(runtime_probe_t *probe)
     }
 
     if (probe->context != NULL) {
-        if (!JS_IsUndefined(probe->click_dispatch)) JS_FreeValue(probe->context, probe->click_dispatch);
+        if (!JS_IsUndefined(probe->event_dispatch)) JS_FreeValue(probe->context, probe->event_dispatch);
         if (!JS_IsUndefined(probe->pump_fn)) JS_FreeValue(probe->context, probe->pump_fn);
         if (!JS_IsUndefined(probe->reload_fn)) JS_FreeValue(probe->context, probe->reload_fn);
         if (!JS_IsUndefined(probe->lastgen_fn)) JS_FreeValue(probe->context, probe->lastgen_fn);
