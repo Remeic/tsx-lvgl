@@ -8,15 +8,36 @@
 
 export type NativeWidgetKind = "screen" | "view" | "text" | "button";
 
+/**
+ * Mirrors `lvgl_host_event_t` in lvgl_host.h. Append-only; never renumber.
+ * Both codes currently dispatch `value === undefined`: CLICKED never carries
+ * one, VALUE_CHANGED will once a W1+ widget kind exposes numeric extraction.
+ */
+export const NATIVE_EVENT_CODE = Object.freeze({
+  clicked: 0,
+  valueChanged: 1,
+} as const);
+
 export interface NativeLvgl {
-  /** Creates a widget of `kind` with no parent yet. Returns an integer handle > 0. */
+  /**
+   * Creates a widget of `kind` with no parent yet. Returns an integer handle > 0,
+   * or `0` on failure (unknown kind / table full / allocation failure). The
+   * contract for `0` is "inert instance": every other method no-ops on it
+   * (the native side resolves nothing), so callers never need a failure branch.
+   * Exception: `loadScreen(0)` deliberately loads a blank screen.
+   */
   create(kind: NativeWidgetKind): number;
   /** Inserts `child` under `parent` at `index`, reordering existing children as needed. */
   insert(parent: number, child: number, index: number): void;
   /** Sets label text: the `Text` body or the `Button` label. */
   setText(id: number, text: string): void;
-  /** Toggles whether a widget accepts click input and reports it through `onClick`. */
-  setClickable(id: number, clickable: boolean): void;
+  /**
+   * Toggles whether the widget reports `event` through `onEvent`. For
+   * `NATIVE_EVENT_CODE.clicked` this also toggles touch acceptance
+   * (LV_OBJ_FLAG_CLICKABLE) together with the callback, exactly as the
+   * historical `setClickable` did.
+   */
+  setListening(id: number, event: number, listening: boolean): void;
   /** Detaches `child` from `parent` without destroying it. */
   remove(parent: number, child: number): void;
   /** Recursively deletes `id` and all of its descendants, freeing native memory. */
@@ -82,8 +103,8 @@ export interface NativeBindings {
   readonly sensors: NativeSensors;
   /** Capability transport is optional while the legacy sensor seam remains supported. */
   readonly board?: BoardPlatformAdapter;
-  /** Registers the single click dispatcher. Called exactly once per kernel. */
-  onClick(dispatch: (id: number) => void): void;
+  /** Registers the single event dispatcher. Called exactly once per kernel. */
+  onEvent(dispatch: (id: number, event: number, value: number | undefined) => void): void;
   /** Board-side diagnostic log sink (single-line messages). */
   log(message: string): void;
 }

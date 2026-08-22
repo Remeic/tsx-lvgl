@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import { BOARD_ID, compileTsxBundle } from "@tsx-lvgl/bundler";
-import { MemoryBoardAdapter, createDefaultBoardDescriptors, createKernel, encodeBoardPayload } from "@tsx-lvgl/device";
+import { MemoryBoardAdapter, NATIVE_EVENT_CODE, createDefaultBoardDescriptors, createKernel, encodeBoardPayload } from "@tsx-lvgl/device";
 
 const STEP_PERIOD_MS = 80;
 const STEP_COUNT = 5;
@@ -79,7 +79,7 @@ function createConsoleNative() {
   const nodes = new Map();
   let nextId = 1;
   let loadedScreen = 0;
-  const clickableIds = new Set();
+  const listeningByEvent = new Map();
 
   const lvgl = {
     create(kind) {
@@ -98,9 +98,17 @@ function createConsoleNative() {
     setText(id, text) {
       nodes.get(id).text = text;
     },
-    setClickable(id, clickable) {
-      if (clickable) clickableIds.add(id);
-      else clickableIds.delete(id);
+    setListening(id, event, listening) {
+      let events = listeningByEvent.get(id);
+      if (events === undefined) {
+        events = new Set();
+        listeningByEvent.set(id, events);
+      }
+      if (listening) events.add(event);
+      else {
+        events.delete(event);
+        if (events.size === 0) listeningByEvent.delete(id);
+      }
     },
     setStyle(id, prop, value) {
       const node = nodes.get(id);
@@ -171,15 +179,15 @@ function createConsoleNative() {
 
   const board = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
 
-  let clickDispatch;
+  let eventDispatch;
   const native = {
     boardId: BOARD_ID,
     lvgl,
     timers: timerNative,
     sensors,
     board,
-    onClick(dispatch) {
-      clickDispatch = dispatch;
+    onEvent(dispatch) {
+      eventDispatch = dispatch;
     },
     log(message) {
       console.log(`device: ${message}`);
@@ -192,10 +200,13 @@ function createConsoleNative() {
     sensors,
     board,
     dispatchClick(id) {
-      clickDispatch?.(id);
+      eventDispatch?.(id, NATIVE_EVENT_CODE.clicked, undefined);
     },
     firstButtonId() {
-      return [...clickableIds].find((id) => nodes.get(id)?.kind === "button");
+      for (const [id] of listeningByEvent) {
+        if (nodes.get(id)?.kind === "button") return id;
+      }
+      return undefined;
     },
     emitMotion(reading) {
       const request = board.submitted.at(-1);

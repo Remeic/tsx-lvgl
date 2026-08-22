@@ -9,6 +9,7 @@ import type {
   NativeTimers,
   NativeWidgetKind,
 } from "@tsx-lvgl/device";
+import { NATIVE_EVENT_CODE } from "@tsx-lvgl/device";
 import { MemoryBoardAdapter, createDefaultBoardDescriptors, encodeBoardPayload } from "@tsx-lvgl/device";
 import type { SensorStatus } from "@tsx-lvgl/sensors";
 
@@ -18,7 +19,8 @@ interface FakeLvglNode {
   readonly id: number;
   readonly kind: NativeWidgetKind;
   text: string | undefined;
-  clickable: boolean;
+  /** Event codes the widget currently reports. */
+  readonly listening: Set<number>;
   parent: number | null;
   readonly children: number[];
   disposed: boolean;
@@ -33,7 +35,7 @@ export class FakeNativeLvgl implements NativeLvgl {
   private nextId = 1;
   private readonly nodes = new Map<number, FakeLvglNode>();
   readonly setTextCalls: Array<{ readonly id: number; readonly text: string }> = [];
-  readonly setClickableCalls: Array<{ readonly id: number; readonly clickable: boolean }> = [];
+  readonly setListeningCalls: Array<{ readonly id: number; readonly event: number; readonly listening: boolean }> = [];
   readonly insertCalls: Array<{ readonly parent: number; readonly child: number; readonly index: number }> = [];
   readonly removeCalls: Array<{ readonly parent: number; readonly child: number }> = [];
   readonly disposeCalls: number[] = [];
@@ -47,7 +49,7 @@ export class FakeNativeLvgl implements NativeLvgl {
 
   create(kind: NativeWidgetKind): number {
     const id = this.nextId++;
-    this.nodes.set(id, { id, kind, text: undefined, clickable: false, parent: null, children: [], disposed: false });
+    this.nodes.set(id, { id, kind, text: undefined, listening: new Set(), parent: null, children: [], disposed: false });
     return id;
   }
 
@@ -66,9 +68,13 @@ export class FakeNativeLvgl implements NativeLvgl {
     this.node(id).text = text;
   }
 
-  setClickable(id: number, clickable: boolean): void {
-    this.setClickableCalls.push({ id, clickable });
-    this.node(id).clickable = clickable;
+  setListening(id: number, event: number, listening: boolean): void {
+    this.setListeningCalls.push({ id, event, listening });
+    if (listening) {
+      this.node(id).listening.add(event);
+    } else {
+      this.node(id).listening.delete(event);
+    }
   }
 
   remove(parent: number, child: number): void {
@@ -118,8 +124,8 @@ export class FakeNativeLvgl implements NativeLvgl {
     return this.node(id).text;
   }
 
-  isClickable(id: number): boolean {
-    return this.node(id).clickable;
+  isListening(id: number, event: number): boolean {
+    return this.node(id).listening.has(event);
   }
 
   isAlive(id: number): boolean {
@@ -223,6 +229,7 @@ export interface FakeNative {
   readonly logs: string[];
   emitMotion(reading: ScriptedSensorReading): void;
   dispatchClick(id: number): void;
+  dispatchEvent(id: number, event: number, value?: number): void;
 }
 
 /** The one place a full `NativeBindings` fake is assembled for kernel tests. */
@@ -232,7 +239,7 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
   const sensors = new FakeNativeSensors();
   const board = new MemoryBoardAdapter({ descriptors: createDefaultBoardDescriptors() });
   const logs: string[] = [];
-  let dispatch: ((id: number) => void) | undefined;
+  let dispatch: ((id: number, event: number, value: number | undefined) => void) | undefined;
 
   const native: NativeBindings = {
     boardId,
@@ -240,7 +247,7 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
     timers,
     sensors,
     board,
-    onClick(next: (id: number) => void): void {
+    onEvent(next: (id: number, event: number, value: number | undefined) => void): void {
       dispatch = next;
     },
     log(message: string): void {
@@ -275,7 +282,10 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
       });
     },
     dispatchClick(id: number): void {
-      dispatch?.(id);
+      this.dispatchEvent(id, NATIVE_EVENT_CODE.clicked);
+    },
+    dispatchEvent(id: number, event: number, value?: number): void {
+      dispatch?.(id, event, value);
     },
   };
 }

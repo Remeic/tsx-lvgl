@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileTsxBundle } from "../packages/bundler/dist/index.js";
+import { NATIVE_EVENT_CODE } from "../packages/device/dist/native.js";
 import { createHeadlessNative, runHeadless } from "../packages/sdk/dist/headless.js";
 
 test("headless SDK host renders a portable application bundle", async () => {
@@ -35,12 +36,12 @@ test("headless native exercises lifecycle, hierarchy, sensors, timers and edge c
   host.native.lvgl.loadScreen(screen);
   assert.deepEqual(host.activeTexts(), ["first", "second"]);
   assert.throws(() => host.native.lvgl.setText(999, "missing"), /unknown node 999/);
-  host.native.lvgl.setClickable(first, true);
+  host.native.lvgl.setListening(first, NATIVE_EVENT_CODE.clicked, true);
   const timer = host.native.timers.setInterval(() => undefined, 10);
   host.native.timers.clearInterval(timer);
   assert.deepEqual(host.native.sensors.read("other"), { status: "unavailable", sampledAtMs: 0 });
   assert.equal(host.native.sensors.read("board.qmi8658.motion").status, "ok");
-  host.native.onClick(() => undefined);
+  host.native.onEvent(() => undefined);
   host.native.log("log");
   assert.deepEqual(host.logs, ["log"]);
   host.native.lvgl.setStyle(first, 0, 0xff0000);

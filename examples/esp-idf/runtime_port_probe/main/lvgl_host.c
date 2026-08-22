@@ -11,13 +11,14 @@ typedef struct {
     lv_obj_t *label;
     /** Tracked host parent handle; 0 means the object is a native root. */
     int parent_id;
-    bool clickable;
+    /** Per-event-code listening state; indexed by lvgl_host_event_t. */
+    bool listening[LVGL_HOST_EVENT_COUNT];
 } lvgl_host_entry_t;
 
 struct lvgl_host {
     lvgl_host_entry_t entries[LVGL_HOST_MAX_HANDLES];
-    lvgl_host_click_cb_t click_cb;
-    void *click_user_data;
+    lvgl_host_event_cb_t event_cb;
+    void *event_user_data;
     /**
      * Hidden off-screen staging parent: widgets are created here so they are
      * never LVGL screens, then reparented by `insert`; never loaded, never
@@ -33,7 +34,7 @@ struct lvgl_host {
  * module-level pointer lets the LVGL click callback — which LVGL invokes
  * with only the `lv_event_t*` and whatever `user_data` was registered —
  * recover the host without heap-allocating a `{host, handle}` pair per
- * clickable widget.
+ * listening widget.
  */
 static lvgl_host_t *s_active_host;
 
@@ -44,21 +45,32 @@ static lvgl_host_entry_t *entry_at(lvgl_host_t *host, int id)
     return entry->used ? entry : NULL;
 }
 
-static void host_click_event_cb(lv_event_t *event)
+static void host_clicked_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     lvgl_host_t *host = s_active_host;
-    if (host == NULL || host->click_cb == NULL) return;
+    if (host == NULL || host->event_cb == NULL) return;
     const int handle = (int)(intptr_t)lv_event_get_user_data(event);
-    host->click_cb(host->click_user_data, handle);
+    host->event_cb(host->event_user_data, handle, LVGL_HOST_EVENT_CLICKED, false, 0);
 }
 
-lvgl_host_t *lvgl_host_create(lvgl_host_click_cb_t click_cb, void *click_user_data)
+static void host_value_changed_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
+    lvgl_host_t *host = s_active_host;
+    if (host == NULL || host->event_cb == NULL) return;
+    const int handle = (int)(intptr_t)lv_event_get_user_data(event);
+    /* No current widget kind exposes a numeric event value; W1+ widgets add
+     * per-kind extraction here. The ABI already carries the slot. */
+    host->event_cb(host->event_user_data, handle, LVGL_HOST_EVENT_VALUE_CHANGED, false, 0);
+}
+
+lvgl_host_t *lvgl_host_create(lvgl_host_event_cb_t event_cb, void *event_user_data)
 {
     lvgl_host_t *host = calloc(1, sizeof(*host));
     if (host == NULL) return NULL;
-    host->click_cb = click_cb;
-    host->click_user_data = click_user_data;
+    host->event_cb = event_cb;
+    host->event_user_data = event_user_data;
     s_active_host = host;
     return host;
 }
@@ -86,7 +98,8 @@ void lvgl_host_destroy(lvgl_host_t *host)
         entry->object = NULL;
         entry->label = NULL;
         entry->parent_id = 0;
-        entry->clickable = false;
+        entry->listening[LVGL_HOST_EVENT_CLICKED] = false;
+        entry->listening[LVGL_HOST_EVENT_VALUE_CHANGED] = false;
     }
     for (uint32_t index = 0; index < root_count; index++) lv_obj_delete(roots[index]);
     if (host->blank_screen != NULL) {
@@ -119,7 +132,8 @@ static void invalidate_descendants(lvgl_host_t *host, int parent_id)
         descendant->object = NULL;
         descendant->label = NULL;
         descendant->parent_id = 0;
-        descendant->clickable = false;
+        descendant->listening[LVGL_HOST_EVENT_CLICKED] = false;
+        descendant->listening[LVGL_HOST_EVENT_VALUE_CHANGED] = false;
     }
 }
 
@@ -204,7 +218,8 @@ int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind)
     entry->object = object;
     entry->label = label;
     entry->parent_id = 0;
-    entry->clickable = false;
+    entry->listening[LVGL_HOST_EVENT_CLICKED] = false;
+    entry->listening[LVGL_HOST_EVENT_VALUE_CHANGED] = false;
     return slot + 1;
 }
 
@@ -225,18 +240,32 @@ void lvgl_host_set_text(lvgl_host_t *host, int id, const char *text)
     lv_label_set_text(entry->label, text);
 }
 
-void lvgl_host_set_clickable(lvgl_host_t *host, int id, bool clickable)
+void lvgl_host_set_listening(lvgl_host_t *host, int id, int event, bool listening)
 {
     lvgl_host_entry_t *entry = entry_at(host, id);
-    if (entry == NULL || entry->object == NULL || entry->clickable == clickable) return;
-    if (clickable) {
-        lv_obj_add_flag(entry->object, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(entry->object, host_click_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)id);
-    } else {
-        lv_obj_remove_event_cb(entry->object, host_click_event_cb);
-        lv_obj_remove_flag(entry->object, LV_OBJ_FLAG_CLICKABLE);
+    if (entry == NULL || entry->object == NULL) return;
+    if (event == LVGL_HOST_EVENT_CLICKED) {
+        if (entry->listening[LVGL_HOST_EVENT_CLICKED] == listening) return;
+        if (listening) {
+            lv_obj_add_flag(entry->object, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(entry->object, host_clicked_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)id);
+        } else {
+            lv_obj_remove_event_cb(entry->object, host_clicked_event_cb);
+            lv_obj_remove_flag(entry->object, LV_OBJ_FLAG_CLICKABLE);
+        }
+        entry->listening[LVGL_HOST_EVENT_CLICKED] = listening;
+        return;
     }
-    entry->clickable = clickable;
+    if (event == LVGL_HOST_EVENT_VALUE_CHANGED) {
+        if (entry->listening[LVGL_HOST_EVENT_VALUE_CHANGED] == listening) return;
+        if (listening) {
+            lv_obj_add_event_cb(entry->object, host_value_changed_event_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)id);
+        } else {
+            lv_obj_remove_event_cb(entry->object, host_value_changed_event_cb);
+        }
+        entry->listening[LVGL_HOST_EVENT_VALUE_CHANGED] = listening;
+        return;
+    }
 }
 
 void lvgl_host_remove(lvgl_host_t *host, int parent, int child)
@@ -256,7 +285,8 @@ void lvgl_host_dispose(lvgl_host_t *host, int id)
     entry->object = NULL;
     entry->label = NULL;
     entry->parent_id = 0;
-    entry->clickable = false;
+    entry->listening[LVGL_HOST_EVENT_CLICKED] = false;
+    entry->listening[LVGL_HOST_EVENT_VALUE_CHANGED] = false;
 
     /* The runtime normally disposes descendants first, but the native ABI is
      * recursive by contract. Invalidate any still-tracked descendants so a
