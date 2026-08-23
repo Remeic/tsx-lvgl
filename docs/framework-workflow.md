@@ -35,7 +35,7 @@ node scripts/bundle-app.mjs \
   --out build/bundles \
   --bundle-id shakeface \
   --generation 2 \
-  --board-id tsx-lvgl.host-test
+  --board-id waveshare.esp32s3.touch-amoled-1.8.v1
 ```
 
 If a development probe is already running and its serial port is available,

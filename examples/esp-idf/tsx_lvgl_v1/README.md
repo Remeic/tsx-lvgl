@@ -21,11 +21,13 @@ after a successful build so later images use the same dependency set.
 From the repository root:
 
 ```bash
-npm run board:build -- --target waveshare-touch-amoled-1.8-v1
+./tools/dev qemu "cd examples/esp-idf/tsx_lvgl_v1 && idf.py build"
 ```
 
-This builds the committed firmware inside the pinned development container.
-It does not regenerate C and does not connect to USB or flash a device.
+This builds the committed legacy firmware inside the pinned development
+container. The repository board target selects the runtime probe, so it is not
+used for this frozen recovery artifact. The command does not regenerate C and
+does not connect to USB or flash a device.
 
 ## Physical flashing gate
 
@@ -43,14 +45,20 @@ only on the RTS reset path:
 ```bash
 export ESPTOOL_PYTHON="/absolute/path/to/esptool-5.3.1-venv/bin/python"
 export TSX_LVGL_RECOVERY_DIR="/absolute/path/to/arrival-backup-YYYYMMDD"
-npm run board:reload -- --target waveshare-touch-amoled-1.8-v1 --port /dev/cu.ACTUAL_DEVICE --execute
+npm run board:reload -- \
+  --target waveshare-touch-amoled-1.8-v1 \
+  --artifact examples/esp-idf/tsx_lvgl_v1/build/tsx_lvgl_esp32_s3_v1.bin \
+  --port /dev/cu.ACTUAL_DEVICE \
+  --execute
 ```
 
-Use `npm run board:reload -- --target waveshare-touch-amoled-1.8-v1 --dry-run` to inspect the command plan without
-touching hardware. The wrapper never authorizes bootloader/partition writes,
-global erase, eFuse operations or paths under `/Volumes`. The watchdog-reset
-mode is a transport candidate and still needs one logged physical validation;
-display and touch remain separate user-visible checks.
+Use the same command with `--dry-run` instead of `--execute` to inspect the
+command plan without touching hardware. Keep the explicit legacy `--artifact`:
+without it, the target selects the runtime-probe image. The wrapper never
+authorizes bootloader/partition writes, global erase, eFuse operations or paths
+under `/Volumes`. The watchdog-reset mode is a transport candidate and still
+needs one logged physical validation; display and touch remain separate
+user-visible checks.
 
 ## Visible hot-reload test
 
