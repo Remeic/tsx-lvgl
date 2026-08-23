@@ -44,6 +44,11 @@
       "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js"
     },
+    "./boards": {
+      "types": "./dist/boards.d.ts",
+      "import": "./dist/boards.js"
+    },
+    "./board-catalog.json": "./dist/board-catalog.json",
     "./package.json": "./package.json",
     "./provenance.json": "./provenance.json"
   },

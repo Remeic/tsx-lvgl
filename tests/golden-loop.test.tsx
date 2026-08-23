@@ -5,7 +5,6 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  BOARD_ID,
   compileTsxBundle,
   createPushSession,
   decodeBase64,
@@ -15,6 +14,9 @@ import { createKernel } from "@tsx-lvgl/device";
 import type { RuntimeBundle } from "@tsx-lvgl/runtime";
 
 import { makeFakeNative } from "./support/fake-native.js";
+
+const TEST_BOARD_ID = "tsx-lvgl.host-test";
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const counterPath = join(repoRoot, "examples/apps/counter.tsx");
@@ -29,7 +31,7 @@ function compileCounter(source: string, generation: number): BundleOutput {
     fileName: "counter.tsx",
     source,
     bundleId: "counter",
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
@@ -40,7 +42,7 @@ function compilePomodoro(source: string, generation: number): BundleOutput {
     fileName: "pomodoro.tsx",
     source,
     bundleId: "pomodoro",
-    boardId: BOARD_ID,
+    boardId: V1_BOARD_ID,
     generation,
     jsxImportSource: "@tsx-lvgl/sdk",
   });
@@ -73,7 +75,7 @@ function pushThroughDeviceTransport(
     let response: string;
     if (frame.startsWith("TSXB BEGIN ")) {
       response = beginManifestJson === canonicalManifestJson
-        ? `TSXB RDY maxBytes=262144 protocol=1 board=${BOARD_ID} lastGeneration=${kernel.lastGeneration()}`
+        ? `TSXB RDY maxBytes=262144 protocol=1 board=${TEST_BOARD_ID} lastGeneration=${kernel.lastGeneration()}`
         : "TSXB ERR malformed-manifest";
     } else if (frame.startsWith("TSXB DATA ")) {
       const match = /^TSXB DATA (\d+) (\S+)$/.exec(frame);
@@ -100,7 +102,7 @@ function pushThroughDeviceTransport(
 }
 
 test("the golden Counter mounts, increments through touch, and exposes a motion state", () => {
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toRuntimeBundle(compileCounter(counterSource, 1)));
 
@@ -119,7 +121,7 @@ test("the golden Counter mounts, increments through touch, and exposes a motion 
 });
 
 test("the golden Counter accepts a higher generation and keeps the last root after malformed, corrupt, and throwing candidates", () => {
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toRuntimeBundle(compileCounter(counterSource, 1)));
   fake.emitMotion({ status: "ok", sampledAtMs: 0, value: calmMotion });
@@ -156,7 +158,7 @@ test("the golden Counter accepts a higher generation and keeps the last root aft
 });
 
 test("the device-backed TSXB fixture commits valid input and rejects malformed/evaluation candidates transactionally", () => {
-  const fake = makeFakeNative(BOARD_ID);
+  const fake = makeFakeNative(TEST_BOARD_ID);
   const kernel = createKernel(fake.native);
   kernel.start(toRuntimeBundle(compileCounter(counterSource, 1)));
 

@@ -154,8 +154,20 @@ bundle plus a manifest:
   `@tsx-lvgl/runtime` and mirrored by one C `#define`. Rationale: QuickJS
   heap limit is 1 MiB; the staged copy lives in PSRAM; the MVP app is a few
   KiB, so 256 KiB bounds staging and parse cost with wide headroom.
-- Identity: `boardId = "waveshare.esp32s3.touch-amoled-1.8"`,
-  `protocolVersion = 1`, `engine = "quickjs-ng"`, `format = "js"`.
+- Identity: the supported V1 target uses
+  `boardId = "waveshare.esp32s3.touch-amoled-1.8.v1"`. This is a
+  bundle/firmware compatibility target, not physical identity evidence. Only
+  V1 is supported by this release; adding a catalog record alone does not
+  claim hardware support. `protocolVersion = 1`, `engine = "quickjs-ng"`, and
+  `format = "js"` remain unchanged.
+- Breaking change (board-target selection): existing projects whose committed
+  `tsx-lvgl.json` still carries the legacy `boardId`
+  `"waveshare.esp32s3.touch-amoled-1.8"` fail with `BOARD_TARGET_UNSUPPORTED`
+  on every `dev`/`build`. Migration is manual: replace the value with the
+  canonical `.v1` ID above or rerun `tsx-lvgl create --board
+  waveshare.esp32s3.touch-amoled-1.8.v1`. Legacy IDs are rejected, never
+  silently remapped, so a project cannot drift onto the wrong hardware
+  revision.
 - Dev reload is not authenticated. The sha256 check is integrity only;
   production OTA/signatures remain out of scope and this transport must not
   be presented as secure.

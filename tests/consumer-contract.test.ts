@@ -20,6 +20,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
 
 test("consumer contract works from a self-contained npm-pack artifact outside the workspace", () => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-consumer-contract-"));
@@ -52,10 +53,10 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
 
   const cliPath = join(bootstrapRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js");
   const appRoot = join(sandbox, "tiltballs-like-app");
-  const created = runJson(process.execPath, [cliPath, "create", appRoot, "--artifact", artifactPath, "--json"], sandbox);
+  const created = runJson(process.execPath, [cliPath, "create", appRoot, "--board", V1_BOARD_ID, "--artifact", artifactPath, "--json"], sandbox);
   assert.equal(created.code, "CREATE_OK");
   const selfSeededRoot = join(sandbox, "self-seeded-app");
-  const selfSeeded = runJson(process.execPath, [cliPath, "create", selfSeededRoot, "--json"], sandbox);
+  const selfSeeded = runJson(process.execPath, [cliPath, "create", selfSeededRoot, "--board", V1_BOARD_ID, "--json"], sandbox);
   assert.equal(selfSeeded.code, "CREATE_OK");
 
   const sync = runJson(process.execPath, [join(appRoot, "node_modules/@tsx-lvgl/sdk/dist/cli.js"), "sync", "--", "--json"], appRoot);
@@ -148,7 +149,7 @@ test("consumer contract works from a self-contained npm-pack artifact outside th
   const dirtyArtifact = join(dirtyPackRoot, dirtyPacked[0]!.filename);
   const dirtyCreate = runFailure(
     process.execPath,
-    [cliPath, "create", join(sandbox, "dirty-artifact-app"), "--artifact", dirtyArtifact, "--json"],
+    [cliPath, "create", join(sandbox, "dirty-artifact-app"), "--board", V1_BOARD_ID, "--artifact", dirtyArtifact, "--json"],
     sandbox,
   );
   assert.equal(dirtyCreate.code, "SOURCE_DIRTY");

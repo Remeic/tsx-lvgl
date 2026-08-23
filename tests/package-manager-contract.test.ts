@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
 
 interface PackageManagerCase {
   readonly name: "pnpm" | "yarn" | "bun";
@@ -69,7 +70,7 @@ test(
 
     for (const manager of managerCases) {
       const appRoot = join(sandbox, `${manager.name}-app`);
-      runJson(process.execPath, [cliPath, "create", appRoot, "--artifact", String(metadata.artifactPath), "--json"], sandbox);
+      runJson(process.execPath, [cliPath, "create", appRoot, "--board", V1_BOARD_ID, "--artifact", String(metadata.artifactPath), "--json"], sandbox);
       const result = spawnSync(manager.command, manager.args(appRoot, repoRoot), {
         cwd: appRoot,
         encoding: "utf8",

@@ -3,7 +3,7 @@
   "format": "js",
   "engine": "quickjs-ng",
   "protocolVersion": 1,
-  "boardId": "waveshare.esp32s3.touch-amoled-1.8",
+  "boardId": "waveshare.esp32s3.touch-amoled-1.8.v1",
   "generation": 1,
   "sha256": "f20b2a9e843a0501348a9cf395af8c0f0e5027b88323e0866f93ec094f12d2e6",
   "byteLength": 1587

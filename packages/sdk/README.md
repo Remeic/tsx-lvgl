@@ -24,8 +24,12 @@ For consumers, install the published package and use its CLI:
 
 ```bash
 npm install --global @tsx-lvgl/sdk
-tsx-lvgl create my-app
+tsx-lvgl create my-app --board waveshare.esp32s3.touch-amoled-1.8.v1
 ```
+
+The required `--board` value is a canonical bundle/firmware compatibility
+target. It is not physical identity evidence; this release supports the V1
+target only.
 
 For release commands and the required trusted-publishing setup, see
 [`RELEASING.md`](https://github.com/Remeic/tsx-lvgl/blob/main/RELEASING.md).

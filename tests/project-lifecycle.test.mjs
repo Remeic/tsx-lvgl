@@ -9,7 +9,7 @@ import test from "node:test";
 import {
   buildProject,
   checkProject,
-  createProject,
+  createProject as createProjectOperation,
   devProject,
   doctorProject,
   syncProject,
@@ -17,6 +17,11 @@ import {
 } from "../packages/sdk/dist/project.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const V1_BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+
+function createProject(target, artifact) {
+  return createProjectOperation(target, { boardId: V1_BOARD_ID, ...(artifact === undefined ? {} : { artifact }) });
+}
 
 test("project lifecycle is executable in-process through the public SDK facade", async (t) => {
   const sandbox = mkdtempSync(join(tmpdir(), "tsx-lvgl-project-lifecycle-"));

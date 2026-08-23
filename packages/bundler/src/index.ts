@@ -4,7 +4,6 @@ import ts from "typescript";
 import { PROTOCOL_VERSION, type RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 
 export { PROTOCOL_VERSION };
-export const BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8";
 
 export interface BundleInput {
   /** Diagnostics only, never embedded in output. */

@@ -1,11 +1,12 @@
 import { basename } from "node:path";
 
 import { asCliError, CliError, DIAGNOSTIC_CODES } from "./diagnostics.js";
-import type { BuildResult, CheckResult, DevResult, FrameworkLock, ProjectDeviceWatchOptions } from "./project.js";
+import { resolveCanonicalBoardId } from "./boards.js";
+import type { BuildResult, CheckResult, CreateProjectOptions, DevResult, FrameworkLock, ProjectDeviceWatchOptions } from "./project.js";
 import type { DoctorResult } from "./doctor.js";
 
 export const USAGE = `Usage:
-  tsx-lvgl create <directory> [--artifact <sdk.tgz>]
+  tsx-lvgl create <directory> --board <canonical-id> [--artifact <sdk.tgz>]
   tsx-lvgl sync [--json]
   tsx-lvgl update [--source <framework-checkout>] [--json]
   tsx-lvgl dev [--device --port <serial-port>] [--json]
@@ -21,12 +22,13 @@ export interface ParsedArgs {
   readonly json: boolean;
   readonly device?: true;
   readonly artifact?: string;
+  readonly boardId?: string;
   readonly source?: string;
   readonly port?: string;
 }
 
 export interface CliOperations {
-  readonly createProject: (target: string, artifact?: string) => Promise<{ readonly root: string; readonly lock: FrameworkLock }>;
+  readonly createProject: (target: string, options: CreateProjectOptions) => Promise<{ readonly root: string; readonly lock: FrameworkLock; readonly boardId: string }>;
   readonly syncProject: (root: string) => Promise<{ readonly lock: FrameworkLock }>;
   readonly updateProject: (root: string, source?: string) => Promise<{ readonly lock: FrameworkLock }>;
   readonly checkProject: (root: string) => CheckResult;
@@ -56,6 +58,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let json = false;
   let device = false;
   let artifact: string | undefined;
+  let boardId: string | undefined;
   let source: string | undefined;
   let port: string | undefined;
 
@@ -67,11 +70,17 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       continue;
     }
     if (argument === "--help" || argument === "-h") {
-      return { command: "help", positional: [], json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
+      return { command: "help", positional: [], json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(boardId === undefined ? {} : { boardId }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
     }
     if (argument === "--artifact") {
       artifact = argv[++index];
       if (artifact === undefined || artifact.startsWith("--")) throw usageError("--artifact requires a value");
+      continue;
+    }
+    if (argument === "--board") {
+      if (command !== "create") throw usageError("--board is supported only by create");
+      boardId = argv[++index];
+      if (boardId === undefined || boardId.startsWith("--")) throw usageError("--board requires a value");
       continue;
     }
     if (argument === "--source") {
@@ -92,7 +101,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     positional.push(argument);
   }
 
-  return { command, positional, json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
+  return { command, positional, json, ...(device ? { device: true as const } : {}), ...(artifact === undefined ? {} : { artifact }), ...(boardId === undefined ? {} : { boardId }), ...(source === undefined ? {} : { source }), ...(port === undefined ? {} : { port }) };
 }
 
 /** Runs the command policy against injected project operations and output streams. */
@@ -121,8 +130,12 @@ export async function runCli(
       case "create": {
         const target = parsed.positional[0];
         if (target === undefined) throw usageError("create requires a target directory");
-        const result = await operations.createProject(target, parsed.artifact);
-        emitSuccess(parsed.json, "CREATE_OK", { project: basename(result.root), artifact: result.lock.artifact.file, sourceSha: result.lock.sourceSha }, writer);
+        const options: CreateProjectOptions = {
+          boardId: resolveCanonicalBoardId(parsed.boardId),
+          ...(parsed.artifact === undefined ? {} : { artifact: parsed.artifact }),
+        };
+        const result = await operations.createProject(target, options);
+        emitSuccess(parsed.json, "CREATE_OK", { project: basename(result.root), boardId: result.boardId, artifact: result.lock.artifact.file, sourceSha: result.lock.sourceSha }, writer);
         return 0;
       }
       case "sync": {

@@ -14,7 +14,7 @@ import {
 } from "@tsx-lvgl/bundler";
 import type { RuntimeBundleManifest } from "@tsx-lvgl/runtime";
 
-const BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8";
+const TEST_BOARD_ID = "tsx-lvgl.host-test";
 
 function manifestWith(overrides: Partial<RuntimeBundleManifest> = {}): RuntimeBundleManifest {
   return {
@@ -22,7 +22,7 @@ function manifestWith(overrides: Partial<RuntimeBundleManifest> = {}): RuntimeBu
     format: "js",
     engine: "quickjs-ng",
     protocolVersion: 1,
-    boardId: BOARD_ID,
+    boardId: TEST_BOARD_ID,
     generation: 5,
     sha256: "a".repeat(64),
     byteLength: 5,
@@ -156,8 +156,8 @@ test("buildBundleFrames defaults chunkBase64Limit to DATA_CHUNK_BASE64_LIMIT", (
 
 test("parseDeviceLine parses a golden RDY line", () => {
   assert.deepEqual(
-    parseDeviceLine(`TSXB RDY maxBytes=262144 protocol=1 board=${BOARD_ID} lastGeneration=3`),
-    { kind: "rdy", maxBytes: 262144, protocol: 1, board: BOARD_ID, lastGeneration: 3 },
+    parseDeviceLine(`TSXB RDY maxBytes=262144 protocol=1 board=${TEST_BOARD_ID} lastGeneration=3`),
+    { kind: "rdy", maxBytes: 262144, protocol: 1, board: TEST_BOARD_ID, lastGeneration: 3 },
   );
 });
 
@@ -249,9 +249,9 @@ test("parseDeviceLine trims a trailing carriage return", () => {
 });
 
 test("parseDeviceLine treats a malformed RDY (missing field) as noise", () => {
-  assert.deepEqual(parseDeviceLine(`TSXB RDY maxBytes=10 protocol=1 board=${BOARD_ID}`), {
+  assert.deepEqual(parseDeviceLine(`TSXB RDY maxBytes=10 protocol=1 board=${TEST_BOARD_ID}`), {
     kind: "noise",
-    line: `TSXB RDY maxBytes=10 protocol=1 board=${BOARD_ID}`,
+    line: `TSXB RDY maxBytes=10 protocol=1 board=${TEST_BOARD_ID}`,
   });
 });
 
@@ -303,7 +303,7 @@ test("parseDeviceLine treats an ERR reason containing a space as noise", () => {
 // ---------------------------------------------------------------------------
 
 function rdyLine(overrides: Partial<{ maxBytes: number; protocol: number; board: string; lastGeneration: number }> = {}) {
-  const fields = { maxBytes: 262144, protocol: 1, board: BOARD_ID, lastGeneration: 4, ...overrides };
+  const fields = { maxBytes: 262144, protocol: 1, board: TEST_BOARD_ID, lastGeneration: 4, ...overrides };
   return `TSXB RDY maxBytes=${fields.maxBytes} protocol=${fields.protocol} board=${fields.board} lastGeneration=${fields.lastGeneration}`;
 }
 

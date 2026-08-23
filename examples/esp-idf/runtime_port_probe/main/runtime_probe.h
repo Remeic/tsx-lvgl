@@ -12,12 +12,12 @@ typedef struct runtime_probe runtime_probe_t;
 /**
  * Identity constants the kernel's bundle policy checks against (see
  * `packages/device/src/kernel.ts` `policy()` and
- * `packages/bundler/src/index.ts` `BOARD_ID`/`PROTOCOL_VERSION`). Centralized
+ * `packages/bundler/src/index.ts` `PROTOCOL_VERSION`). Centralized
  * here so `runtime_probe.c` (which installs `__native.boardId`) and
  * `bundle_transport.c` (which reports both in the `TSXB RDY` reply) share one
  * definition.
  */
-#define RUNTIME_PROBE_BOARD_ID "waveshare.esp32s3.touch-amoled-1.8"
+#define RUNTIME_PROBE_BOARD_ID "waveshare.esp32s3.touch-amoled-1.8.v1"
 #define RUNTIME_PROBE_PROTOCOL_VERSION 1
 
 esp_err_t runtime_probe_start(runtime_probe_t **out_probe);

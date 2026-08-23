@@ -22,14 +22,14 @@ From the repository root, after any change to `examples/apps/pomodoro.tsx` or
 the `core`/`sensors`/`runtime`/`device` packages:
 
 ```bash
-node scripts/embed-runtime-app.mjs --app pomodoro
+node scripts/embed-runtime-app.mjs --app pomodoro --target waveshare-touch-amoled-1.8-v1
 node scripts/build-kernel.mjs
 ```
 
 This writes `main/app.g1.js`, `main/app.g1.manifest.json` and `main/kernel.js`
 (all three `EMBED_TXTFILES` in `main/CMakeLists.txt`, so a kernel/app change
 needs a firmware rebuild — only later hot-reloaded bundles skip that). For the
-complete build/install flow use `npm run board:install -- --app pomodoro`.
+complete build/install flow use `npm run board:install -- --app pomodoro --target waveshare-touch-amoled-1.8-v1`.
 
 The embedded kernel budget is 128 KiB (131,072 bytes), enforced by
 `scripts/build-kernel.mjs`. The current generated kernel is 113,070 bytes,
@@ -38,10 +38,11 @@ surfaces to grow that budget.
 
 ## Build without flashing
 
+From the repository root, use the target-aware helper. It selects this V1
+runtime-port project and runs the pinned build toolchain without flashing:
+
 ```bash
-./tools/dev shell
-# inside the container:
-cd examples/esp-idf/runtime_port_probe && idf.py build
+npm run board:build -- --target waveshare-touch-amoled-1.8-v1
 ```
 
 The component manager resolves `espressif/quickjs-ng` 0.14.0, LVGL 9.5 and
@@ -97,7 +98,8 @@ pushed immediately; later saves are coalesced and pushed serially:
 
 ```bash
 npm run dev:board -- --entry examples/apps/pomodoro.tsx \
-  --port /dev/cu.usbmodemXXX --bundle-id pomodoro
+  --port /dev/cu.usbmodemXXX --bundle-id pomodoro \
+  --board-id waveshare.esp32s3.touch-amoled-1.8.v1
 ```
 
 Build a new generation and push it over the probe's USB Serial/JTAG port
@@ -105,7 +107,8 @@ while it's running:
 
 ```bash
 node scripts/bundle-app.mjs --entry examples/apps/counter.tsx \
-  --out /tmp/counter-g2 --bundle-id counter --generation 2
+  --out /tmp/counter-g2 --bundle-id counter --generation 2 \
+  --board-id waveshare.esp32s3.touch-amoled-1.8.v1
 ./tools/push-bundle --port /dev/cu.usbmodemXXX \
   --bundle /tmp/counter-g2/counter.g2.js \
   --manifest /tmp/counter-g2/counter.g2.manifest.json
