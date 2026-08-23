@@ -3,6 +3,7 @@ import { basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compileTsxBundle } from "@tsx-lvgl/bundler";
+import { resolveCanonicalBoardId } from "@tsx-lvgl/sdk/boards";
 
 import { readFlagValue } from "./lib/cli.mjs";
 
@@ -65,6 +66,7 @@ export function parseCli(argv) {
   if (!options.boardId) {
     throw new Error("--board-id is required");
   }
+  options.boardId = resolveCanonicalBoardId(options.boardId);
   if (!options.bundleId) {
     options.bundleId = basename(options.entry, extname(options.entry)).toLowerCase();
   }

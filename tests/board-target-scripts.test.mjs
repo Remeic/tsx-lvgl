@@ -21,12 +21,23 @@ test("firmware commands require the explicit repository target", () => {
   assert.equal(parseBoardInstallCli(["--target", TARGET]).options.target, TARGET);
   assert.equal(parseBoardReloadCli(["--target", TARGET, "--dry-run"]).target, TARGET);
   assert.equal(parseEmbedCli(["--target", TARGET]).options.target, TARGET);
+  for (const parse of [parseBoardInstallCli, parseBoardReloadCli, parseEmbedCli]) {
+    assert.throws(() => parse(["--target", TARGET, "--target", TARGET]), /only once/);
+  }
 });
 
 test("generic bundle producers require an explicit board ID", () => {
   assert.throws(() => parseBundleCli(["--entry", "App.tsx", "--out", "build"]), /--board-id is required/);
   const parsed = parseBundleCli(["--entry", "App.tsx", "--out", "build", "--board-id", BOARD_ID]);
   assert.equal(parsed.options.boardId, BOARD_ID);
+  assert.throws(
+    () => parseBundleCli(["--entry", "App.tsx", "--out", "build", "--board-id", "waveshare.esp32s3.touch-amoled-1.8"]),
+    /legacy board target/,
+  );
+  assert.throws(
+    () => parseBundleCli(["--entry", "App.tsx", "--out", "build", "--board-id", "typo"]),
+    /unsupported board target/,
+  );
 });
 
 test("board target selection has no profile environment fallback", () => {

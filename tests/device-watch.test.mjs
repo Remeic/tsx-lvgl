@@ -4,6 +4,8 @@ import test from "node:test";
 import { runDeviceWatch } from "../packages/sdk/dist/device-watch.js";
 import { parseCli as parseWatchCli } from "../scripts/watch-push.mjs";
 
+const BOARD_ID = "waveshare.esp32s3.touch-amoled-1.8.v1";
+
 const bundle = (generation) => ({
   manifest: {
     protocolVersion: 1,
@@ -32,7 +34,7 @@ const waitFor = async (predicate) => {
 
 test("watch-push CLI requires a TSX entry, local serial port and board ID", () => {
   assert.deepEqual(
-    parseWatchCli(["--entry", "src/App.tsx", "--port", "/dev/cu.usbmodem1101", "--board-id", "tsx-lvgl.host-test"]),
+    parseWatchCli(["--entry", "src/App.tsx", "--port", "/dev/cu.usbmodem1101", "--board-id", BOARD_ID]),
     {
       help: false,
       options: {
@@ -40,12 +42,16 @@ test("watch-push CLI requires a TSX entry, local serial port and board ID", () =
         port: "/dev/cu.usbmodem1101",
         bundleId: "app",
         generation: 1,
-        boardId: "tsx-lvgl.host-test",
+        boardId: BOARD_ID,
       },
     },
   );
   assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "/dev/cu.usbmodem1101"]), /board-id/);
-  assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "remote:1234", "--board-id", "tsx-lvgl.host-test"]), /local/);
+  assert.throws(() => parseWatchCli(["--entry", "app.tsx", "--port", "remote:1234", "--board-id", BOARD_ID]), /local/);
+  assert.throws(
+    () => parseWatchCli(["--entry", "app.tsx", "--port", "/dev/cu.usbmodem1101", "--board-id", "typo"]),
+    /unsupported board target/,
+  );
 });
 
 test("device watch coalesces saves and serializes monotonic pushes", async () => {

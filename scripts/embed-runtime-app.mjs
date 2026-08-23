@@ -38,6 +38,7 @@ export function parseCli(argv) {
     target: "",
   };
   let entrySpecified = false;
+  let targetSpecified = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -61,7 +62,9 @@ export function parseCli(argv) {
         options.bundleId = value;
         break;
       case "--target":
+        if (targetSpecified) throw new Error("--target may be supplied only once");
         options.target = value;
+        targetSpecified = true;
         break;
       default:
         throw new Error(`unknown option: ${argument}`);

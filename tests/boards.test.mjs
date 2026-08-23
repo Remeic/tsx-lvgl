@@ -54,3 +54,17 @@ test("board catalog rejects an invalid format before exposing records", () => {
     /board catalog must declare formatVersion 1 and at least one board/,
   );
 });
+
+test("board catalog rejects duplicate canonical and legacy identifiers", () => {
+  const board = (id, legacyIds = []) => ({ id, displayName: id, legacyIds });
+  for (const boards of [
+    [board("board-a"), board("board-a")],
+    [board("board-a", ["legacy-a"]), board("board-b", ["legacy-a"])],
+    [board("board-a", ["board-b"]), board("board-b")],
+  ]) {
+    assert.throws(
+      () => freezeCatalog({ formatVersion: 1, boards }),
+      /must be globally unique/,
+    );
+  }
+});

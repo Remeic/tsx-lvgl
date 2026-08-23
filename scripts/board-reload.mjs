@@ -46,6 +46,7 @@ function parseCli(argv) {
     baud: 115200,
     resetMode: "watchdog-reset",
   };
+  let targetSpecified = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -84,7 +85,9 @@ function parseCli(argv) {
         options.artifact = resolve(value);
         break;
       case "--target":
+        if (targetSpecified) throw new Error("--target may be supplied only once");
         options.target = value;
+        targetSpecified = true;
         break;
       case "--baud":
         options.baud = Number(value);

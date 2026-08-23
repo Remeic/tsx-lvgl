@@ -4,6 +4,7 @@ import { basename, dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compileTsxBundle } from "@tsx-lvgl/bundler";
+import { resolveCanonicalBoardId } from "@tsx-lvgl/sdk/boards";
 import { runDevicePush } from "../packages/sdk/dist/device-dev.js";
 import { runDeviceWatch } from "../packages/sdk/dist/device-watch.js";
 
@@ -50,6 +51,11 @@ function parseCli(argv) {
   }
   if (!options.entry) throw new UsageError("--entry is required");
   if (!options.boardId) throw new UsageError("--board-id is required");
+  try {
+    options.boardId = resolveCanonicalBoardId(options.boardId);
+  } catch (error) {
+    throw new UsageError(error instanceof Error ? error.message : String(error));
+  }
   if (!SERIAL_PORT_PATTERN.test(options.port)) {
     throw new UsageError("--port must be a local /dev/cu.*, /dev/tty.* or COM<n> serial device");
   }

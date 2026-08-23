@@ -24,13 +24,23 @@ for argument in "$@"; do
       echo "board-reload: --target may be supplied only once" >&2
       exit 2
     fi
-    board_target="${!next_index}"
+    next_value="${!next_index}"
+    if [[ -z "${next_value}" || "${next_value}" == --* ]]; then
+      echo "board-reload: --target requires a value" >&2
+      exit 2
+    fi
+    board_target="${next_value}"
   elif [[ "${argument}" == --target=* ]]; then
     if [[ -n "${board_target}" ]]; then
       echo "board-reload: --target may be supplied only once" >&2
       exit 2
     fi
-    board_target="${argument#--target=}"
+    next_value="${argument#--target=}"
+    if [[ -z "${next_value}" || "${next_value}" == --* ]]; then
+      echo "board-reload: --target requires a value" >&2
+      exit 2
+    fi
+    board_target="${next_value}"
   fi
   argument_index=$((argument_index + 1))
 done

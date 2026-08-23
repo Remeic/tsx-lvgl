@@ -45,6 +45,7 @@ export function parseCli(argv, env = process.env) {
     dryRun: true,
   };
   let entrySpecified = false;
+  let targetSpecified = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -81,7 +82,9 @@ export function parseCli(argv, env = process.env) {
         options.bundleId = value;
         break;
       case "--target":
+        if (targetSpecified) throw new Error("--target may be supplied only once");
         options.target = value;
+        targetSpecified = true;
         break;
       case "--port":
         options.port = value;

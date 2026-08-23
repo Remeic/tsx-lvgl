@@ -43,3 +43,15 @@ test("board-reload forwards the selected target to the execute-mode build", asyn
     `${join(repositoryRoot, "scripts/board-reload.mjs")} --target ${TARGET} --execute\n`,
   );
 });
+
+test("board-reload rejects missing, empty and option-like target values", async () => {
+  for (const args of [["--target"], ["--target="], ["--target", "--execute"], ["--target=--execute"]]) {
+    await assert.rejects(
+      execFile(join(repositoryRoot, "tools/board-reload"), args, { cwd: repositoryRoot }),
+      (error) => {
+        assert.match(error.stderr, /--target requires a value/);
+        return true;
+      },
+    );
+  }
+});

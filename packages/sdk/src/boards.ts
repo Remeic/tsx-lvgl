@@ -67,10 +67,19 @@ export function freezeCatalog(value: BoardCatalog): BoardCatalog {
   if (value.formatVersion !== 1 || !Array.isArray(value.boards) || value.boards.length === 0) {
     throw new Error("board catalog must declare formatVersion 1 and at least one board");
   }
-  const boards = value.boards.map((board) => Object.freeze({
-    id: board.id,
-    displayName: board.displayName,
-    legacyIds: Object.freeze([...board.legacyIds]),
-  }));
+  const identifiers = new Set<string>();
+  const boards = value.boards.map((board) => {
+    for (const identifier of [board.id, ...board.legacyIds]) {
+      if (identifiers.has(identifier)) {
+        throw new Error(`board catalog identifier ${JSON.stringify(identifier)} must be globally unique`);
+      }
+      identifiers.add(identifier);
+    }
+    return Object.freeze({
+      id: board.id,
+      displayName: board.displayName,
+      legacyIds: Object.freeze([...board.legacyIds]),
+    });
+  });
   return Object.freeze({ formatVersion: 1, boards: Object.freeze(boards) });
 }
