@@ -313,6 +313,7 @@ static void process_pending_jobs(runtime_probe_t *probe)
     if (result < 0 && job_context != NULL) dump_exception(job_context, "pending_job");
 }
 
+/** Single owner-queue entry point; drops with a warning when full or inactive. */
 static void enqueue_probe_event(runtime_probe_t *probe, const runtime_probe_event_t *event)
 {
     if (probe == NULL || !probe->active || probe->event_queue == NULL) return;
@@ -323,6 +324,7 @@ static void enqueue_probe_event(runtime_probe_t *probe, const runtime_probe_even
 
 /* --- __native.lvgl: event delivery (LVGL event context, owner task, under the display lock) --- */
 
+/** lvgl_host event callback: packages one LVGL event for the owner queue. */
 static void probe_event_from_lvgl(void *user_data, int handle, int event, bool has_value, int32_t value)
 {
     runtime_probe_t *probe = user_data;
@@ -338,6 +340,7 @@ static void probe_event_from_lvgl(void *user_data, int handle, int event, bool h
 
 /* --- __native.timers: esp_timer fires on the esp_timer task, never the owner task --- */
 
+/** esp_timer task context: repackages the timer slot for the owner queue. */
 static void native_timer_fired(void *arg)
 {
     runtime_probe_t *probe = s_active_probe;
@@ -435,6 +438,7 @@ static JSValue js_native_lvgl_set_text(JSContext *context, JSValueConst this_val
     return JS_UNDEFINED;
 }
 
+/** __native.lvgl.setListening(id, event, listening): validates the code, delegates to the host. */
 static JSValue js_native_lvgl_set_listening(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
     (void)this_value;
@@ -968,6 +972,7 @@ static JSValue js_native_sensor_read(JSContext *context, JSValueConst this_value
     return sample;
 }
 
+/** __native.onEvent(dispatch): registers the single (id, event, value) dispatcher. */
 static JSValue js_native_on_event(JSContext *context, JSValueConst this_value, int argc, JSValueConst *argv)
 {
     (void)this_value;

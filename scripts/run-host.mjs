@@ -98,6 +98,7 @@ function createConsoleNative() {
     setText(id, text) {
       nodes.get(id).text = text;
     },
+    /** Tracks per-node event listening so firstButtonId can find clickable buttons. */
     setListening(id, event, listening) {
       let events = listeningByEvent.get(id);
       if (events === undefined) {
@@ -131,6 +132,7 @@ function createConsoleNative() {
       if (node === undefined) return;
       for (const child of [...node.children]) lvgl.dispose(child);
       nodes.delete(id);
+      listeningByEvent.delete(id);
     },
     loadScreen(id) {
       loadedScreen = id;
@@ -199,9 +201,11 @@ function createConsoleNative() {
     timers: timerNative,
     sensors,
     board,
+    /** Delivers a CLICKED event for `id` through the kernel dispatch. */
     dispatchClick(id) {
       eventDispatch?.(id, NATIVE_EVENT_CODE.clicked, undefined);
     },
+    /** First tracked button id, or undefined when none is listening. */
     firstButtonId() {
       for (const [id] of listeningByEvent) {
         if (nodes.get(id)?.kind === "button") return id;

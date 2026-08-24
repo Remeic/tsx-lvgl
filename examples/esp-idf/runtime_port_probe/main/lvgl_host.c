@@ -45,6 +45,7 @@ static lvgl_host_entry_t *entry_at(lvgl_host_t *host, int id)
     return entry->used ? entry : NULL;
 }
 
+/** LVGL -> host bridge for CLICKED: forwards the handle with no value. */
 static void host_clicked_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -54,6 +55,7 @@ static void host_clicked_event_cb(lv_event_t *event)
     host->event_cb(host->event_user_data, handle, LVGL_HOST_EVENT_CLICKED, false, 0);
 }
 
+/** LVGL -> host bridge for VALUE_CHANGED; value extraction arrives with W1 widgets. */
 static void host_value_changed_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;

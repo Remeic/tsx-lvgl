@@ -68,6 +68,7 @@ export class FakeNativeLvgl implements NativeLvgl {
     this.node(id).text = text;
   }
 
+  /** Mirrors the ABI: adds/removes `event` from the node listening set. */
   setListening(id: number, event: number, listening: boolean): void {
     this.setListeningCalls.push({ id, event, listening });
     if (listening) {
@@ -124,6 +125,7 @@ export class FakeNativeLvgl implements NativeLvgl {
     return this.node(id).text;
   }
 
+  /** True when the node currently reports `event`. */
   isListening(id: number, event: number): boolean {
     return this.node(id).listening.has(event);
   }
@@ -228,7 +230,9 @@ export interface FakeNative {
   readonly board: MemoryBoardAdapter;
   readonly logs: string[];
   emitMotion(reading: ScriptedSensorReading): void;
+  /** Convenience: dispatches a CLICKED event for `id`. */
   dispatchClick(id: number): void;
+  /** Delivers (id, event, value) through the registered onEvent dispatcher. */
   dispatchEvent(id: number, event: number, value?: number): void;
 }
 
@@ -281,9 +285,11 @@ export function makeFakeNative(boardId: string = "esp32s3-waveshare-v1"): FakeNa
         }),
       });
     },
+    /** See FakeNative.dispatchEvent. */
     dispatchClick(id: number): void {
       this.dispatchEvent(id, NATIVE_EVENT_CODE.clicked);
     },
+    /** See FakeNative.dispatchEvent. */
     dispatchEvent(id: number, event: number, value?: number): void {
       dispatch?.(id, event, value);
     },

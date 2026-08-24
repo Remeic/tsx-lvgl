@@ -20,9 +20,11 @@ export interface EventRegistry {
   dispatch(id: number, event: number, value: number | undefined): void;
 }
 
+/** Creates an empty handler map; one instance per kernel. */
 export function createEventRegistry(): EventRegistry {
   const handlers = new Map<number, Map<number, EventHandler>>();
   return {
+    /** Registers (replacing) the handler for one widget event. */
     set(id: number, event: number, handler: EventHandler): void {
       let byEvent = handlers.get(id);
       if (byEvent === undefined) {
@@ -31,15 +33,18 @@ export function createEventRegistry(): EventRegistry {
       }
       byEvent.set(event, handler);
     },
+    /** Removes one handler; prunes the per-id map when it empties. */
     delete(id: number, event: number): void {
       const byEvent = handlers.get(id);
       if (byEvent === undefined) return;
       byEvent.delete(event);
       if (byEvent.size === 0) handlers.delete(id);
     },
+    /** Drops every handler for `id`; used on dispose. */
     deleteId(id: number): void {
       handlers.delete(id);
     },
+    /** Fires the (id, event) handler when registered; no-op otherwise. */
     dispatch(id: number, event: number, value: number | undefined): void {
       handlers.get(id)?.get(event)?.(value);
     },
@@ -85,6 +90,7 @@ function asDevice(instance: RuntimeHostInstance): DeviceInstance {
  */
 export function createLvglHost(native: NativeLvgl, events: EventRegistry): RuntimeHost {
   return {
+    /** Creates the native widget and applies text/clickability/style from props. */
     createInstance(type: ElementType, props: Readonly<Record<string, unknown>>): RuntimeHostInstance {
       const id = native.create(widgetKindByType[type]);
       if (type === "Text") {
@@ -103,6 +109,7 @@ export function createLvglHost(native: NativeLvgl, events: EventRegistry): Runti
       return instance;
     },
 
+    /** Reparents `child` under `parent` at `index` via native.insert. */
     insertChild(parent: RuntimeHostInstance | null, child: RuntimeHostInstance, index: number): void {
       if (parent === null) return;
       native.insert(asDevice(parent).id, asDevice(child).id, index);
@@ -114,6 +121,7 @@ export function createLvglHost(native: NativeLvgl, events: EventRegistry): Runti
       previousProps: Readonly<Record<string, unknown>>,
       nextProps: Readonly<Record<string, unknown>>,
     ): void {
+      // Diffs style first, then type-specific props; see updateInstance call sites.
       const device = asDevice(instance);
       const id = device.id;
 
@@ -142,17 +150,20 @@ export function createLvglHost(native: NativeLvgl, events: EventRegistry): Runti
       }
     },
 
+    /** Detaches `child` from `parent`; no-op when `parent` is null. */
     removeChild(parent: RuntimeHostInstance | null, child: RuntimeHostInstance): void {
       if (parent === null) return;
       native.remove(asDevice(parent).id, asDevice(child).id);
     },
 
+    /** Clears event handlers, then recursively deletes the native widget. */
     dispose(instance: RuntimeHostInstance): void {
       const id = asDevice(instance).id;
       events.deleteId(id);
       native.dispose(id);
     },
 
+    /** Loads `next` as the active screen; null loads a blank screen. */
     replaceRoot(next: RuntimeHostInstance | null, _previous: RuntimeHostInstance | null): void {
       native.loadScreen(next === null ? 0 : asDevice(next).id);
     },

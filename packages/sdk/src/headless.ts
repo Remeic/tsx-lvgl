@@ -65,6 +65,7 @@ export function createHeadlessNative(boardId: string): {
       requireNode(nodes, id).text = text;
     },
 
+    /** No-op capture: the headless check never synthesizes native input. */
     setListening(_id: number, _event: number, _listening: boolean): void {
       // Event dispatch is part of the kernel contract; the one-shot dev check
       // intentionally renders the initial state without synthesizing input.
@@ -131,6 +132,7 @@ export function createHeadlessNative(boardId: string): {
         };
       },
     },
+    /** Stores the single event dispatcher, mirroring the on-device binding. */
     onEvent(dispatch): void {
       eventDispatch = dispatch;
     },
