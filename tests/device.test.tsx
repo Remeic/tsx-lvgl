@@ -2,9 +2,10 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { ElementType } from "@tsx-lvgl/core";
 import {
+  NATIVE_EVENT_CODE,
   NATIVE_STYLE_PROP,
-  createClickRegistry,
   createDeviceScheduler,
+  createEventRegistry,
   createKernel,
   createLvglHost,
   createNativeMotionSensor,
@@ -25,7 +26,7 @@ function instanceId(instance: unknown): number {
 
 test("createLvglHost maps every ElementType to its native widget kind", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const cases: ReadonlyArray<readonly [ElementType, Record<string, unknown>, string]> = [
     ["Screen", {}, "screen"],
     ["View", {}, "view"],
@@ -40,7 +41,7 @@ test("createLvglHost maps every ElementType to its native widget kind", () => {
 
 test("createInstance never calls setText for Screen or View", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const before = lvgl.setTextCalls.length;
   host.createInstance("Screen", {});
   host.createInstance("View", {});
@@ -49,7 +50,7 @@ test("createInstance never calls setText for Screen or View", () => {
 
 test("Text sets its initial text and coerces a numeric value to a string", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const stringInstance = host.createInstance("Text", { text: "hello" });
   assert.equal(lvgl.textOf(instanceId(stringInstance)), "hello");
   const numberInstance = host.createInstance("Text", { text: 42 });
@@ -58,7 +59,7 @@ test("Text sets its initial text and coerces a numeric value to a string", () =>
 
 test("updateInstance issues setText only when the coerced Text value actually changes", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("Text", { text: "same" });
   const before = lvgl.setTextCalls.length;
   host.updateInstance(instance, "Text", { text: "same" }, { text: "same" });
@@ -70,28 +71,28 @@ test("updateInstance issues setText only when the coerced Text value actually ch
 
 test("updateInstance is a no-op for View and Screen instances", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const view = host.createInstance("View", {});
   const beforeText = lvgl.setTextCalls.length;
-  const beforeClickable = lvgl.setClickableCalls.length;
+  const beforeListening = lvgl.setListeningCalls.length;
   host.updateInstance(view, "View", {}, {});
   assert.equal(lvgl.setTextCalls.length, beforeText);
-  assert.equal(lvgl.setClickableCalls.length, beforeClickable);
+  assert.equal(lvgl.setListeningCalls.length, beforeListening);
 });
 
 test("updateInstance never treats a non-Button type as a Button, even with label/onClick-shaped props", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const view = host.createInstance("View", {});
   const beforeText = lvgl.setTextCalls.length;
   host.updateInstance(view, "View", { label: "a" }, { label: "b", onClick: () => undefined });
   assert.equal(lvgl.setTextCalls.length, beforeText, "View must never receive a Button-style setText call");
-  assert.equal(lvgl.setClickableCalls.length, 0, "View must never become clickable");
+  assert.equal(lvgl.setListeningCalls.length, 0, "View must never become clickable");
 });
 
 test("updateInstance issues setText for a Button only when its label actually changes", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("Button", { label: "go" });
   const before = lvgl.setTextCalls.length;
   host.updateInstance(instance, "Button", { label: "go" }, { label: "go" });
@@ -100,86 +101,99 @@ test("updateInstance issues setText for a Button only when its label actually ch
 
 test("Button onClick replacement swaps the handler and never fires the stale closure", () => {
   const lvgl = new FakeNativeLvgl();
-  const clicks = createClickRegistry();
-  const host = createLvglHost(lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(lvgl, events);
   let firstCalls = 0;
   let secondCalls = 0;
   const instance = host.createInstance("Button", { label: "go", onClick: () => { firstCalls += 1; } });
   const id = instanceId(instance);
-  assert.equal(lvgl.isClickable(id), true);
-  clicks.dispatch(id);
+  assert.equal(lvgl.isListening(id, NATIVE_EVENT_CODE.clicked), true);
+  events.dispatch(id, NATIVE_EVENT_CODE.clicked, undefined);
   assert.equal(firstCalls, 1);
 
-  const clickableCallsAfterMount = lvgl.setClickableCalls.length;
+  const listeningCallsAfterMount = lvgl.setListeningCalls.length;
   host.updateInstance(
     instance,
     "Button",
     { label: "go", onClick: () => undefined },
     { label: "go", onClick: () => { secondCalls += 1; } },
   );
-  assert.equal(lvgl.setClickableCalls.length, clickableCallsAfterMount, "replacing a live handler must not re-toggle clickability");
-  clicks.dispatch(id);
+  assert.equal(lvgl.setListeningCalls.length, listeningCallsAfterMount, "replacing a live handler must not re-toggle clickability");
+  events.dispatch(id, NATIVE_EVENT_CODE.clicked, undefined);
   assert.equal(firstCalls, 1, "the old handler must not fire after replacement");
   assert.equal(secondCalls, 1);
 });
 
 test("Button onClick removal clears the registry entry and turns off clickability", () => {
   const lvgl = new FakeNativeLvgl();
-  const clicks = createClickRegistry();
-  const host = createLvglHost(lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(lvgl, events);
   let calls = 0;
   const instance = host.createInstance("Button", { label: "go", onClick: () => { calls += 1; } });
   const id = instanceId(instance);
 
   host.updateInstance(instance, "Button", { label: "go", onClick: () => undefined }, { label: "go" });
-  assert.equal(lvgl.isClickable(id), false);
-  clicks.dispatch(id);
+  assert.equal(lvgl.isListening(id, NATIVE_EVENT_CODE.clicked), false);
+  events.dispatch(id, NATIVE_EVENT_CODE.clicked, undefined);
   assert.equal(calls, 0, "dispatch after removal must be a no-op");
 });
 
 test("Button onClick addition after mount turns clickability on", () => {
   const lvgl = new FakeNativeLvgl();
-  const clicks = createClickRegistry();
-  const host = createLvglHost(lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(lvgl, events);
   const instance = host.createInstance("Button", { label: "go" });
   const id = instanceId(instance);
-  assert.equal(lvgl.isClickable(id), false);
+  assert.equal(lvgl.isListening(id, NATIVE_EVENT_CODE.clicked), false);
 
   let calls = 0;
   host.updateInstance(instance, "Button", { label: "go" }, { label: "go", onClick: () => { calls += 1; } });
-  assert.equal(lvgl.isClickable(id), true);
-  clicks.dispatch(id);
+  assert.equal(lvgl.isListening(id, NATIVE_EVENT_CODE.clicked), true);
+  events.dispatch(id, NATIVE_EVENT_CODE.clicked, undefined);
   assert.equal(calls, 1);
 });
 
 test("updateInstance leaves click state untouched when neither side defines onClick", () => {
   const lvgl = new FakeNativeLvgl();
-  const clicks = createClickRegistry();
-  const host = createLvglHost(lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(lvgl, events);
   const instance = host.createInstance("Button", { label: "go" });
-  const before = lvgl.setClickableCalls.length;
+  const before = lvgl.setListeningCalls.length;
   host.updateInstance(instance, "Button", { label: "go" }, { label: "still" });
-  assert.equal(lvgl.setClickableCalls.length, before);
+  assert.equal(lvgl.setListeningCalls.length, before);
   assert.equal(lvgl.textOf(instanceId(instance)), "still");
 });
 
 test("dispose clears the click registry entry and calls native dispose", () => {
   const lvgl = new FakeNativeLvgl();
-  const clicks = createClickRegistry();
-  const host = createLvglHost(lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(lvgl, events);
   let calls = 0;
   const instance = host.createInstance("Button", { label: "go", onClick: () => { calls += 1; } });
   const id = instanceId(instance);
 
   host.dispose(instance);
   assert.equal(lvgl.isAlive(id), false);
-  clicks.dispatch(id);
+  events.dispatch(id, NATIVE_EVENT_CODE.clicked, undefined);
   assert.equal(calls, 0, "dispatch after dispose must be a no-op");
+});
+
+test("event registry deletes are no-ops for unknown ids and prune emptied entries", () => {
+  const events = createEventRegistry();
+  events.delete(42, NATIVE_EVENT_CODE.clicked);
+  events.deleteId(42);
+  let calls = 0;
+  events.set(7, NATIVE_EVENT_CODE.clicked, () => { calls += 1; });
+  events.set(7, NATIVE_EVENT_CODE.valueChanged, () => undefined);
+  events.delete(7, NATIVE_EVENT_CODE.valueChanged);
+  events.delete(7, NATIVE_EVENT_CODE.valueChanged);
+  events.dispatch(7, NATIVE_EVENT_CODE.clicked, undefined);
+  assert.equal(calls, 1, "the surviving handler must still fire after its sibling was deleted");
 });
 
 test("insertChild passes parent, child, and index straight through to native.insert", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const parent = host.createInstance("Screen", {});
   const childA = host.createInstance("Text", { text: "a" });
   const childB = host.createInstance("Text", { text: "b" });
@@ -190,7 +204,7 @@ test("insertChild passes parent, child, and index straight through to native.ins
 
 test("insertChild and removeChild with a null parent are no-ops on the native binding", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const child = host.createInstance("Text", { text: "root" });
   const insertsBefore = lvgl.insertCalls.length;
   const removesBefore = lvgl.removeCalls.length;
@@ -202,7 +216,7 @@ test("insertChild and removeChild with a null parent are no-ops on the native bi
 
 test("removeChild with a real parent delegates to native.remove", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const parent = host.createInstance("Screen", {});
   const child = host.createInstance("Text", { text: "a" });
   host.insertChild(parent, child, 0);
@@ -212,7 +226,7 @@ test("removeChild with a real parent delegates to native.remove", () => {
 
 test("replaceRoot loads the next screen, or a blank screen (0) when next is null", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const screen = host.createInstance("Screen", {});
   host.replaceRoot(screen, null);
   assert.equal(lvgl.loadedScreen, instanceId(screen));
@@ -233,7 +247,7 @@ test("createInstance applies a style for every widget type, including Screen and
   ];
   for (const [type, props] of cases) {
     const lvgl = new FakeNativeLvgl();
-    const host = createLvglHost(lvgl, createClickRegistry());
+    const host = createLvglHost(lvgl, createEventRegistry());
     const instance = host.createInstance(type, props);
     assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.backgroundColor), 0xff0000, type);
   }
@@ -241,7 +255,7 @@ test("createInstance applies a style for every widget type, including Screen and
 
 test("createInstance with no style makes no style calls", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   host.createInstance("View", {});
   assert.deepEqual(lvgl.setStyleCalls, []);
   assert.deepEqual(lvgl.resetStyleCalls, []);
@@ -249,7 +263,7 @@ test("createInstance with no style makes no style calls", () => {
 
 test("updateInstance emits setStyle only for the style key that actually changed", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { backgroundColor: "red", borderWidth: 1 } });
   const before = lvgl.setStyleCalls.length;
   host.updateInstance(
@@ -264,7 +278,7 @@ test("updateInstance emits setStyle only for the style key that actually changed
 
 test("updateInstance emits resetStyle when a style key is removed on the next render", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { borderWidth: 1 } });
   host.updateInstance(instance, "View", { style: { borderWidth: 1 } }, { style: {} });
   assert.deepEqual(lvgl.resetStyleCalls, [{ id: instanceId(instance), prop: NATIVE_STYLE_PROP.borderWidth }]);
@@ -272,7 +286,7 @@ test("updateInstance emits resetStyle when a style key is removed on the next re
 
 test("updateInstance with a re-normalized identical style makes zero native calls", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { backgroundColor: "red", padding: 4 } });
   const setBefore = lvgl.setStyleCalls.length;
   const resetBefore = lvgl.resetStyleCalls.length;
@@ -291,7 +305,7 @@ test("updateInstance with a re-normalized identical style makes zero native call
 
 test("createInstance and updateInstance apply S2 width/left/display through the host contract", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { width: 120, left: -4, display: "none" } });
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.width), 120);
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.left), -4);
@@ -313,7 +327,7 @@ test("createInstance and updateInstance apply S2 width/left/display through the 
 
 test("createInstance and updateInstance apply S3 flexDirection/gap through the host contract", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { flexDirection: "row", gap: 4 } });
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.flexDirection), 0);
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.gap), 4);
@@ -331,7 +345,7 @@ test("createInstance and updateInstance apply S3 flexDirection/gap through the h
 
 test("createInstance and updateInstance apply S4 opacity/rotate through the host contract, and removing rotate resets it", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("View", { style: { opacity: 0.5, rotate: 45 } });
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.opacity), 128);
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.rotate), 450);
@@ -345,7 +359,7 @@ test("createInstance and updateInstance apply S4 opacity/rotate through the host
 
 test("createInstance and updateInstance apply fontSize through the host contract, and removing it resets it", () => {
   const lvgl = new FakeNativeLvgl();
-  const host = createLvglHost(lvgl, createClickRegistry());
+  const host = createLvglHost(lvgl, createEventRegistry());
   const instance = host.createInstance("Button", { label: "x", style: { fontSize: 24.4 } });
   assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), 24);
 
@@ -364,7 +378,7 @@ test("createInstance and updateInstance apply fontSize through the host contract
 test("createInstance and updateInstance ignore text-only fontSize on View and Screen", () => {
   for (const type of ["View", "Screen"] as const) {
     const lvgl = new FakeNativeLvgl();
-    const host = createLvglHost(lvgl, createClickRegistry());
+    const host = createLvglHost(lvgl, createEventRegistry());
     const instance = host.createInstance(type, { style: { fontSize: 48 } });
 
     assert.equal(lvgl.styleOf(instanceId(instance), NATIVE_STYLE_PROP.fontSize), undefined, type);
@@ -617,13 +631,13 @@ test("kernel without a board transport skips board expire/dispose safely", () =>
   const lvgl = new FakeNativeLvgl();
   const timers = new FakeNativeTimers();
   const sensors = new FakeNativeSensors();
-  let dispatch: ((id: number) => void) | undefined;
+  let dispatch: ((id: number, event: number, value: number | undefined) => void) | undefined;
   const native: NativeBindings = {
     boardId: "esp32s3-waveshare-v1",
     lvgl,
     timers,
     sensors,
-    onClick(next: (id: number) => void): void {
+    onEvent(next: (id: number, event: number, value: number | undefined) => void): void {
       dispatch = next;
     },
     log(): void {},
@@ -757,7 +771,7 @@ test("a post-commit re-render that throws reaches native.log through Runtime.onE
   assert.deepEqual(fake.lvgl.liveTexts(), ["T:0"], "the failed re-render must leave the previous tree in place");
 });
 
-test("a Button's onClick reaches the bundle through native.onClick dispatch", () => {
+test("a Button's onClick reaches the bundle through native.onEvent dispatch", () => {
   const sourceWithButton = `
     const lib = require("@tsx-lvgl/core");
     const rt = require("@tsx-lvgl/runtime");

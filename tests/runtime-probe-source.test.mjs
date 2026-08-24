@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { NATIVE_STYLE_PROP } from "../packages/device/dist/style.js";
+import { NATIVE_EVENT_CODE } from "../packages/device/dist/native.js";
+import { widgetKindByType } from "../packages/device/dist/lvgl-host.js";
 
 const source = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/runtime_probe.c", import.meta.url), "utf8");
 const transport = readFileSync(new URL("../examples/esp-idf/runtime_port_probe/main/bundle_transport.c", import.meta.url), "utf8");
@@ -295,4 +297,28 @@ test("C-parity gate: lvgl_host_style_prop_t codes exactly match NATIVE_STYLE_PRO
   const fromHeader = {};
   for (const [, name, value] of matches) fromHeader[toCamelCase(name)] = Number(value);
   assert.deepEqual(fromHeader, NATIVE_STYLE_PROP);
+});
+
+test("C-parity gate: lvgl_host_widget_kind_t order exactly matches the TS kind map", () => {
+  const matches = [...lvglHostHeader.matchAll(/LVGL_HOST_WIDGET_(\w+) = (\d+)/g)];
+  assert.ok(matches.length > 0, "expected at least one widget kind in lvgl_host.h");
+  const fromHeader = {};
+  for (const [, name, value] of matches) fromHeader[toCamelCase(name)] = Number(value);
+  const expected = {};
+  for (const [index, kind] of Object.values(widgetKindByType).entries()) expected[kind] = index;
+  assert.deepEqual(fromHeader, expected);
+});
+
+test("C-parity gate: lvgl_host_event_t codes exactly match NATIVE_EVENT_CODE", () => {
+  const matches = [...lvglHostHeader.matchAll(/LVGL_HOST_EVENT_(\w+) = (\d+)/g)];
+  assert.ok(matches.length > 0, "expected at least one event code in lvgl_host.h");
+  const fromHeader = {};
+  for (const [, name, value] of matches) fromHeader[toCamelCase(name)] = Number(value);
+  assert.deepEqual(fromHeader, NATIVE_EVENT_CODE);
+});
+
+test("runtime probe registers setListening/onEvent bindings and rejects unknown event codes", () => {
+  assert.match(source, /JS_SetPropertyStr\(context, lvgl, "setListening",\s*\n\s*JS_NewCFunction\(context, js_native_lvgl_set_listening, "setListening", 3\)\)/);
+  assert.match(source, /JS_SetPropertyStr\(context, native, "onEvent", JS_NewCFunction\(context, js_native_on_event, "onEvent", 1\)\)/);
+  assert.match(source, /event < 0 \|\| event >= LVGL_HOST_EVENT_COUNT\) return JS_ThrowTypeError\(context, "lvgl\.setListening: unknown event code"\)/);
 });

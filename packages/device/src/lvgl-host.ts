@@ -1,30 +1,52 @@
 import type { ElementType } from "@tsx-lvgl/core";
 import type { RuntimeHost, RuntimeHostInstance } from "@tsx-lvgl/runtime";
 import type { NativeLvgl, NativeWidgetKind } from "./native.js";
+import { NATIVE_EVENT_CODE } from "./native.js";
 import { applyStyleDiff, normalizeStyle, type NormalizedStyle, type StyleTarget } from "./style.js";
 
+/** A dispatched event handler. `value` is absent for value-less events (clicks). */
+export type EventHandler = (value: number | undefined) => void;
+
 /**
- * Owns the id -> click handler map. A plain `Map` wrapper rather than a
- * class so `dispatch` can be handed to `native.onClick` as a bound function
+ * Owns the (id, event) -> handler map. A plain `Map` wrapper rather than a
+ * class so `dispatch` can be handed to `native.onEvent` as a bound function
  * reference with no extra allocation.
  */
-export interface ClickRegistry {
-  set(id: number, handler: () => void): void;
-  delete(id: number): void;
-  dispatch(id: number): void;
+export interface EventRegistry {
+  set(id: number, event: number, handler: EventHandler): void;
+  delete(id: number, event: number): void;
+  /** Drops every handler for `id`; used on dispose. */
+  deleteId(id: number): void;
+  dispatch(id: number, event: number, value: number | undefined): void;
 }
 
-export function createClickRegistry(): ClickRegistry {
-  const handlers = new Map<number, () => void>();
+/** Creates an empty handler map; one instance per kernel. */
+export function createEventRegistry(): EventRegistry {
+  const handlers = new Map<number, Map<number, EventHandler>>();
   return {
-    set(id: number, handler: () => void): void {
-      handlers.set(id, handler);
+    /** Registers (replacing) the handler for one widget event. */
+    set(id: number, event: number, handler: EventHandler): void {
+      let byEvent = handlers.get(id);
+      if (byEvent === undefined) {
+        byEvent = new Map();
+        handlers.set(id, byEvent);
+      }
+      byEvent.set(event, handler);
     },
-    delete(id: number): void {
+    /** Removes one handler; prunes the per-id map when it empties. */
+    delete(id: number, event: number): void {
+      const byEvent = handlers.get(id);
+      if (byEvent === undefined) return;
+      byEvent.delete(event);
+      if (byEvent.size === 0) handlers.delete(id);
+    },
+    /** Drops every handler for `id`; used on dispose. */
+    deleteId(id: number): void {
       handlers.delete(id);
     },
-    dispatch(id: number): void {
-      handlers.get(id)?.();
+    /** Fires the (id, event) handler when registered; no-op otherwise. */
+    dispatch(id: number, event: number, value: number | undefined): void {
+      handlers.get(id)?.get(event)?.(value);
     },
   };
 }
@@ -37,7 +59,8 @@ interface DeviceInstance extends RuntimeHostInstance {
 
 const EMPTY_STYLE: NormalizedStyle = new Map();
 
-const widgetKindByType: Readonly<Record<ElementType, NativeWidgetKind>> = {
+/** Exported for the C-parity gate (tests/runtime-probe-source.test.mjs). */
+export const widgetKindByType: Readonly<Record<ElementType, NativeWidgetKind>> = {
   Screen: "screen",
   View: "view",
   Text: "text",
@@ -63,10 +86,11 @@ function asDevice(instance: RuntimeHostInstance): DeviceInstance {
 /**
  * The LVGL-facing `RuntimeHost` implementation: translates the reconciler's
  * ordered operations into calls on the native ABI (`native.ts`) and keeps
- * `clicks` in sync with each Button's current `onClick` handler.
+ * `events` in sync with each widget's current event handlers.
  */
-export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): RuntimeHost {
+export function createLvglHost(native: NativeLvgl, events: EventRegistry): RuntimeHost {
   return {
+    /** Creates the native widget and applies text/clickability/style from props. */
     createInstance(type: ElementType, props: Readonly<Record<string, unknown>>): RuntimeHostInstance {
       const id = native.create(widgetKindByType[type]);
       if (type === "Text") {
@@ -75,8 +99,8 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
         native.setText(id, labelOf(props));
         const onClick = props.onClick;
         if (typeof onClick === "function") {
-          clicks.set(id, onClick as () => void);
-          native.setClickable(id, true);
+          events.set(id, NATIVE_EVENT_CODE.clicked, onClick as EventHandler);
+          native.setListening(id, NATIVE_EVENT_CODE.clicked, true);
         }
       }
       const style = normalizeStyle(props.style, styleTargetForElement(type));
@@ -85,6 +109,7 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       return instance;
     },
 
+    /** Reparents `child` under `parent` at `index` via native.insert. */
     insertChild(parent: RuntimeHostInstance | null, child: RuntimeHostInstance, index: number): void {
       if (parent === null) return;
       native.insert(asDevice(parent).id, asDevice(child).id, index);
@@ -96,6 +121,7 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       previousProps: Readonly<Record<string, unknown>>,
       nextProps: Readonly<Record<string, unknown>>,
     ): void {
+      // Diffs style first, then type-specific props; see updateInstance call sites.
       const device = asDevice(instance);
       const id = device.id;
 
@@ -116,25 +142,28 @@ export function createLvglHost(native: NativeLvgl, clicks: ClickRegistry): Runti
       const previousOnClick = previousProps.onClick;
       const nextOnClick = nextProps.onClick;
       if (typeof nextOnClick === "function") {
-        clicks.set(id, nextOnClick as () => void);
-        if (typeof previousOnClick !== "function") native.setClickable(id, true);
+        events.set(id, NATIVE_EVENT_CODE.clicked, nextOnClick as EventHandler);
+        if (typeof previousOnClick !== "function") native.setListening(id, NATIVE_EVENT_CODE.clicked, true);
       } else if (typeof previousOnClick === "function") {
-        clicks.delete(id);
-        native.setClickable(id, false);
+        events.delete(id, NATIVE_EVENT_CODE.clicked);
+        native.setListening(id, NATIVE_EVENT_CODE.clicked, false);
       }
     },
 
+    /** Detaches `child` from `parent`; no-op when `parent` is null. */
     removeChild(parent: RuntimeHostInstance | null, child: RuntimeHostInstance): void {
       if (parent === null) return;
       native.remove(asDevice(parent).id, asDevice(child).id);
     },
 
+    /** Clears event handlers, then recursively deletes the native widget. */
     dispose(instance: RuntimeHostInstance): void {
       const id = asDevice(instance).id;
-      clicks.delete(id);
+      events.deleteId(id);
       native.dispose(id);
     },
 
+    /** Loads `next` as the active screen; null loads a blank screen. */
     replaceRoot(next: RuntimeHostInstance | null, _previous: RuntimeHostInstance | null): void {
       native.loadScreen(next === null ? 0 : asDevice(next).id);
     },

@@ -9,8 +9,9 @@ export type {
   NativeTimers,
   NativeWidgetKind,
 } from "./native.js";
+export { NATIVE_EVENT_CODE } from "./native.js";
 
-export { createLvglHost, createClickRegistry, type ClickRegistry } from "./lvgl-host.js";
+export { createLvglHost, createEventRegistry, type EventRegistry, type EventHandler } from "./lvgl-host.js";
 export {
   NATIVE_STYLE_PROP,
   normalizeStyle,

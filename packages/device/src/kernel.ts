@@ -35,7 +35,7 @@ import { isShake } from "@tsx-lvgl/sensors";
 import * as capabilitiesModule from "@tsx-lvgl/capabilities";
 import * as connectivityModule from "@tsx-lvgl/connectivity";
 import { BoardRuntime } from "./board-runtime.js";
-import { createClickRegistry, createLvglHost } from "./lvgl-host.js";
+import { createEventRegistry, createLvglHost } from "./lvgl-host.js";
 import { createDeviceScheduler } from "./scheduler.js";
 import { createNativeMotionSensor } from "./sensors.js";
 import type { NativeBindings } from "./native.js";
@@ -124,8 +124,8 @@ export function encodeAsciiSource(text: string): Uint8Array | null {
  * calls once per tick to drain queued re-renders and timer callbacks.
  */
 export function createKernel(native: NativeBindings): DeviceKernel {
-  const clicks = createClickRegistry();
-  const host = createLvglHost(native.lvgl, clicks);
+  const events = createEventRegistry();
+  const host = createLvglHost(native.lvgl, events);
   const scheduler = createDeviceScheduler(native.timers);
   const capabilities: DeviceCapabilities = {
     sensors: createSensorRegistry([createNativeMotionSensor(native.sensors, native.timers)]),
@@ -139,7 +139,7 @@ export function createKernel(native: NativeBindings): DeviceKernel {
     ...(board === undefined ? {} : { wifi: board.wifi }),
     onError: (error: unknown) => native.log(`kernel: error ${String(error)}`),
   });
-  native.onClick(clicks.dispatch);
+  native.onEvent(events.dispatch);
 
   const resolve: ModuleResolver = resolveModule;
   const engine = createProgramEngine("quickjs-ng", resolve);

@@ -2014,10 +2014,12 @@ function isNewerWifiEvent(event, sequence, observedAtMs) {
 __tsxDefine("@tsx-lvgl/device/index.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.encodeAsciiSource = exports.createKernel = exports.encodeBoardPayload = exports.decodeBoardPayload = exports.MemoryBoardAdapter = exports.DEFAULT_BOARD_SCHEMA_REGISTRY = exports.createBoardSchemaRegistry = exports.NativeBoardWifiService = exports.createDefaultBoardDescriptors = exports.BoardRuntime = exports.createNativeMotionSensor = exports.createDeviceScheduler = exports.applyStyleDiff = exports.normalizeStyle = exports.NATIVE_STYLE_PROP = exports.createClickRegistry = exports.createLvglHost = void 0;
+exports.encodeAsciiSource = exports.createKernel = exports.encodeBoardPayload = exports.decodeBoardPayload = exports.MemoryBoardAdapter = exports.DEFAULT_BOARD_SCHEMA_REGISTRY = exports.createBoardSchemaRegistry = exports.NativeBoardWifiService = exports.createDefaultBoardDescriptors = exports.BoardRuntime = exports.createNativeMotionSensor = exports.createDeviceScheduler = exports.applyStyleDiff = exports.normalizeStyle = exports.NATIVE_STYLE_PROP = exports.createEventRegistry = exports.createLvglHost = exports.NATIVE_EVENT_CODE = void 0;
+var native_js_1 = require("@tsx-lvgl/device/native.js");
+Object.defineProperty(exports, "NATIVE_EVENT_CODE", { enumerable: true, get: function () { return native_js_1.NATIVE_EVENT_CODE; } });
 var lvgl_host_js_1 = require("@tsx-lvgl/device/lvgl-host.js");
 Object.defineProperty(exports, "createLvglHost", { enumerable: true, get: function () { return lvgl_host_js_1.createLvglHost; } });
-Object.defineProperty(exports, "createClickRegistry", { enumerable: true, get: function () { return lvgl_host_js_1.createClickRegistry; } });
+Object.defineProperty(exports, "createEventRegistry", { enumerable: true, get: function () { return lvgl_host_js_1.createEventRegistry; } });
 var style_js_1 = require("@tsx-lvgl/device/style.js");
 Object.defineProperty(exports, "NATIVE_STYLE_PROP", { enumerable: true, get: function () { return style_js_1.NATIVE_STYLE_PROP; } });
 Object.defineProperty(exports, "normalizeStyle", { enumerable: true, get: function () { return style_js_1.normalizeStyle; } });
@@ -2120,8 +2122,8 @@ function encodeAsciiSource(text) {
     return Uint8Array.from(codes);
 }
 function createKernel(native) {
-    const clicks = (0, lvgl_host_js_1.createClickRegistry)();
-    const host = (0, lvgl_host_js_1.createLvglHost)(native.lvgl, clicks);
+    const events = (0, lvgl_host_js_1.createEventRegistry)();
+    const host = (0, lvgl_host_js_1.createLvglHost)(native.lvgl, events);
     const scheduler = (0, scheduler_js_1.createDeviceScheduler)(native.timers);
     const capabilities = {
         sensors: (0, sensors_1.createSensorRegistry)([(0, sensors_js_1.createNativeMotionSensor)(native.sensors, native.timers)]),
@@ -2135,7 +2137,7 @@ function createKernel(native) {
         ...(board === undefined ? {} : { wifi: board.wifi }),
         onError: (error) => native.log(`kernel: error ${String(error)}`),
     });
-    native.onClick(clicks.dispatch);
+    native.onEvent(events.dispatch);
     const resolve = resolveModule;
     const engine = (0, runtime_1.createProgramEngine)("quickjs-ng", resolve);
     let lastGeneration = 0;
@@ -2204,25 +2206,40 @@ function createKernel(native) {
 __tsxDefine("@tsx-lvgl/device/lvgl-host.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createClickRegistry = createClickRegistry;
+exports.widgetKindByType = void 0;
+exports.createEventRegistry = createEventRegistry;
 exports.createLvglHost = createLvglHost;
+const native_js_1 = require("@tsx-lvgl/device/native.js");
 const style_js_1 = require("@tsx-lvgl/device/style.js");
-function createClickRegistry() {
+function createEventRegistry() {
     const handlers = new Map();
     return {
-        set(id, handler) {
-            handlers.set(id, handler);
+        set(id, event, handler) {
+            let byEvent = handlers.get(id);
+            if (byEvent === undefined) {
+                byEvent = new Map();
+                handlers.set(id, byEvent);
+            }
+            byEvent.set(event, handler);
         },
-        delete(id) {
+        delete(id, event) {
+            const byEvent = handlers.get(id);
+            if (byEvent === undefined)
+                return;
+            byEvent.delete(event);
+            if (byEvent.size === 0)
+                handlers.delete(id);
+        },
+        deleteId(id) {
             handlers.delete(id);
         },
-        dispatch(id) {
-            handlers.get(id)?.();
+        dispatch(id, event, value) {
+            handlers.get(id)?.get(event)?.(value);
         },
     };
 }
 const EMPTY_STYLE = new Map();
-const widgetKindByType = {
+exports.widgetKindByType = {
     Screen: "screen",
     View: "view",
     Text: "text",
@@ -2240,10 +2257,10 @@ function styleTargetForElement(type) {
 function asDevice(instance) {
     return instance;
 }
-function createLvglHost(native, clicks) {
+function createLvglHost(native, events) {
     return {
         createInstance(type, props) {
-            const id = native.create(widgetKindByType[type]);
+            const id = native.create(exports.widgetKindByType[type]);
             if (type === "Text") {
                 native.setText(id, textOf(props));
             }
@@ -2251,8 +2268,8 @@ function createLvglHost(native, clicks) {
                 native.setText(id, labelOf(props));
                 const onClick = props.onClick;
                 if (typeof onClick === "function") {
-                    clicks.set(id, onClick);
-                    native.setClickable(id, true);
+                    events.set(id, native_js_1.NATIVE_EVENT_CODE.clicked, onClick);
+                    native.setListening(id, native_js_1.NATIVE_EVENT_CODE.clicked, true);
                 }
             }
             const style = (0, style_js_1.normalizeStyle)(props.style, styleTargetForElement(type));
@@ -2285,13 +2302,13 @@ function createLvglHost(native, clicks) {
             const previousOnClick = previousProps.onClick;
             const nextOnClick = nextProps.onClick;
             if (typeof nextOnClick === "function") {
-                clicks.set(id, nextOnClick);
+                events.set(id, native_js_1.NATIVE_EVENT_CODE.clicked, nextOnClick);
                 if (typeof previousOnClick !== "function")
-                    native.setClickable(id, true);
+                    native.setListening(id, native_js_1.NATIVE_EVENT_CODE.clicked, true);
             }
             else if (typeof previousOnClick === "function") {
-                clicks.delete(id);
-                native.setClickable(id, false);
+                events.delete(id, native_js_1.NATIVE_EVENT_CODE.clicked);
+                native.setListening(id, native_js_1.NATIVE_EVENT_CODE.clicked, false);
             }
         },
         removeChild(parent, child) {
@@ -2301,7 +2318,7 @@ function createLvglHost(native, clicks) {
         },
         dispose(instance) {
             const id = asDevice(instance).id;
-            clicks.delete(id);
+            events.deleteId(id);
             native.dispose(id);
         },
         replaceRoot(next, _previous) {
@@ -2314,6 +2331,11 @@ function createLvglHost(native, clicks) {
 __tsxDefine("@tsx-lvgl/device/native.js", function (require, module, exports) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.NATIVE_EVENT_CODE = void 0;
+exports.NATIVE_EVENT_CODE = Object.freeze({
+    clicked: 0,
+    valueChanged: 1,
+});
 
 });
 __tsxDefine("@tsx-lvgl/device/scheduler.js", function (require, module, exports) {

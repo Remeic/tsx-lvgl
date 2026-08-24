@@ -43,7 +43,7 @@ export function createHeadlessNative(boardId: string): {
   const logs: string[] = [];
   let nextNodeId = 1;
   let activeScreen = 0;
-  let clickDispatch: ((id: number) => void) | undefined;
+  let eventDispatch: ((id: number, event: number, value: number | undefined) => void) | undefined;
 
   const lvgl = {
     create(kind: NativeWidgetKind): number {
@@ -65,8 +65,9 @@ export function createHeadlessNative(boardId: string): {
       requireNode(nodes, id).text = text;
     },
 
-    setClickable(_id: number, _clickable: boolean): void {
-      // Click dispatch is part of the kernel contract; the one-shot dev check
+    /** No-op capture: the headless check never synthesizes native input. */
+    setListening(_id: number, _event: number, _listening: boolean): void {
+      // Event dispatch is part of the kernel contract; the one-shot dev check
       // intentionally renders the initial state without synthesizing input.
     },
 
@@ -131,8 +132,9 @@ export function createHeadlessNative(boardId: string): {
         };
       },
     },
-    onClick(dispatch): void {
-      clickDispatch = dispatch;
+    /** Stores the single event dispatcher, mirroring the on-device binding. */
+    onEvent(dispatch): void {
+      eventDispatch = dispatch;
     },
     log(message): void {
       logs.push(message);
@@ -140,8 +142,8 @@ export function createHeadlessNative(boardId: string): {
   };
 
   // Keep the callback variable live so the native ABI shape is exercised even
-  // though the deterministic dev command does not inject a click.
-  void clickDispatch;
+  // though the deterministic dev command does not inject input events.
+  void eventDispatch;
 
   return {
     native,

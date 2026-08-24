@@ -18,13 +18,14 @@
 typedef struct lvgl_host lvgl_host_t;
 
 /**
- * Fired synchronously from the LVGL `LV_EVENT_CLICKED` callback (owner task,
- * inside the display lock). Must only queue work — never touch JS or call
- * back into `lvgl_host_*`.
+ * Fired synchronously from an LVGL event callback the host registered (owner
+ * task, inside the display lock). Must only queue work — never touch JS or
+ * call back into `lvgl_host_*`. `has_value` is false for value-less events
+ * (CLICKED); when true, `value` carries the widget's numeric event value.
  */
-typedef void (*lvgl_host_click_cb_t)(void *user_data, int handle);
+typedef void (*lvgl_host_event_cb_t)(void *user_data, int handle, int event, bool has_value, int32_t value);
 
-lvgl_host_t *lvgl_host_create(lvgl_host_click_cb_t click_cb, void *click_user_data);
+lvgl_host_t *lvgl_host_create(lvgl_host_event_cb_t event_cb, void *event_user_data);
 void lvgl_host_destroy(lvgl_host_t *host);
 
 /** kind: 0=screen, 1=view, 2=text, 3=button. Mirrors NativeWidgetKind order below. */
@@ -35,13 +36,31 @@ typedef enum {
     LVGL_HOST_WIDGET_BUTTON = 3,
 } lvgl_host_widget_kind_t;
 
+/**
+ * Mirrors NATIVE_EVENT_CODE in packages/device/src/native.ts. Append-only; never renumber.
+ * CLICKED carries no value. VALUE_CHANGED carries no value yet either: the
+ * callback reports has_value=false until a W1+ widget kind adds per-kind
+ * numeric extraction in lvgl_host.c — the ABI slot already exists.
+ */
+typedef enum {
+    LVGL_HOST_EVENT_CLICKED = 0,
+    LVGL_HOST_EVENT_VALUE_CHANGED = 1,
+    LVGL_HOST_EVENT_COUNT
+} lvgl_host_event_t;
+
 /** Returns a handle > 0, or 0 on failure (table full / allocation failure). */
 int lvgl_host_create_widget(lvgl_host_t *host, lvgl_host_widget_kind_t kind);
 /** Reparents `child` under `parent` and moves it to `index` among its siblings. */
 void lvgl_host_insert(lvgl_host_t *host, int parent, int child, int32_t index);
 /** `id` must be a Text or Button handle. */
 void lvgl_host_set_text(lvgl_host_t *host, int id, const char *text);
-void lvgl_host_set_clickable(lvgl_host_t *host, int id, bool clickable);
+/**
+ * Toggles whether the widget reports `event` (lvgl_host_event_t) through
+ * `event_cb`. For CLICKED this also toggles LV_OBJ_FLAG_CLICKABLE together
+ * with the callback, so listening implies touch acceptance exactly as the
+ * historical clickable flag did.
+ */
+void lvgl_host_set_listening(lvgl_host_t *host, int id, int event, bool listening);
 /**
  * No-op by design: the reconciler (packages/runtime/src/fiber.ts,
  * `unmountFiber`) always calls `dispose` on a removed child immediately
