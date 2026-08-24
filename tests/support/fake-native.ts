@@ -90,6 +90,7 @@ export class FakeNativeLvgl implements NativeLvgl {
     const node = this.node(id);
     for (const child of [...node.children]) this.dispose(child);
     node.disposed = true;
+    node.listening.clear();
     this.disposeCalls.push(id);
   }
 
